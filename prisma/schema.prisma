@@ -1,0 +1,368 @@
+// TTC HR Portal — data model
+// Design notes:
+// - `Employee.userId` is the Supabase Auth user id (uuid). Auth identity/session/password
+//   handling lives entirely in Supabase Auth — this schema never stores credentials.
+// - Every table an employee should NOT freely read/write also gets a Postgres row-level
+//   security (RLS) policy (see prisma/rls.sql) as a second enforcement layer behind the
+//   application's own server-side authorization checks in src/lib/authorization.ts.
+// - Nothing here stores SSNs, bank details, or payroll credentials — see Section 13 of the
+//   project brief. Payroll math itself is out of scope; this schema only holds APPROVED hours.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Core identity & org structure
+// ---------------------------------------------------------------------------
+
+enum Role {
+  SUPER_ADMIN
+  HR_ADMIN
+  SUPERVISOR
+  EMPLOYEE
+}
+
+enum EmploymentStatus {
+  ACTIVE
+  ON_LEAVE
+  INACTIVE
+  FORMER_EMPLOYEE
+}
+
+model Department {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  employees     Employee[]
+  documents     DocumentAssignment[]
+  announcements AnnouncementAudience[]
+}
+
+model Employee {
+  id               String            @id @default(uuid())
+  // Supabase Auth user id (auth.users.id). Unique — one portal account per employee.
+  userId           String            @unique
+  employeeCode     String            @unique // human-friendly ID, e.g. for payroll export
+  firstName        String
+  lastName         String
+  preferredName    String?
+  jobTitle         String
+  role             Role              @default(EMPLOYEE)
+  employmentStatus EmploymentStatus  @default(ACTIVE)
+  hireDate         DateTime
+
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+
+  // Self-referencing: an employee's supervisor is another employee.
+  supervisorId String?
+  supervisor   Employee?  @relation("SupervisorToReports", fields: [supervisorId], references: [id])
+  reports      Employee[] @relation("SupervisorToReports")
+
+  ttcEmail       String  @unique
+  workPhone      String?
+  personalPhone  String?
+  personalEmail  String?
+
+  emergencyContactName  String?
+  emergencyContactPhone String?
+  emergencyContactRelation String?
+
+  deactivatedAt DateTime? // set the instant HR ends access; checked on every request
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  timeEntries          TimeEntry[]
+  timeEntryAuditEvents TimeEntryAuditEvent[] @relation("ActorOnTimeEntryAudit")
+  ptoRequestsMade      PtoRequest[]          @relation("PtoRequester")
+  ptoRequestsReviewed  PtoRequest[]          @relation("PtoReviewer")
+  documentAssignments  DocumentAssignment[]
+  acknowledgments      DocumentAcknowledgment[]
+  onboarding           EmployeeOnboarding?
+  announcementsWritten Announcement[]        @relation("AnnouncementAuthor")
+  auditLogEntries      AuditLog[]            @relation("ActorOnAuditLog")
+
+  @@index([supervisorId])
+  @@index([departmentId])
+}
+
+// ---------------------------------------------------------------------------
+// Time & Attendance
+// ---------------------------------------------------------------------------
+
+enum TimeEntryStatus {
+  IN_PROGRESS
+  AWAITING_APPROVAL
+  APPROVED
+  RETURNED
+  MISSING_ENTRY
+}
+
+model TimeEntry {
+  id         String   @id @default(uuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  workDate     DateTime // date only, stored at midnight UTC for the employee's work day
+  clockIn      DateTime?
+  lunchStart   DateTime?
+  lunchEnd     DateTime?
+  clockOut     DateTime?
+
+  // Computed on write (see src/lib/time.ts): (clockOut - clockIn) - (lunchEnd - lunchStart)
+  totalMinutes Int?
+
+  status TimeEntryStatus @default(IN_PROGRESS)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  auditEvents TimeEntryAuditEvent[]
+
+  @@unique([employeeId, workDate]) // one entry per employee per day
+  @@index([employeeId, workDate])
+}
+
+enum TimeAuditAction {
+  ENTRY_CREATED
+  CLOCK_IN
+  LUNCH_STARTED
+  LUNCH_ENDED
+  CLOCK_OUT
+  EMPLOYEE_CORRECTION_REQUESTED
+  SUPERVISOR_CORRECTION
+  HR_CORRECTION
+  TIMESHEET_APPROVED
+  TIMESHEET_RETURNED
+}
+
+// Immutable log — a TimeEntry is never silently overwritten. Every change appends a row here.
+model TimeEntryAuditEvent {
+  id          String           @id @default(uuid())
+  timeEntryId String
+  timeEntry   TimeEntry        @relation(fields: [timeEntryId], references: [id])
+
+  action      TimeAuditAction
+  actorId     String
+  actor       Employee         @relation("ActorOnTimeEntryAudit", fields: [actorId], references: [id])
+
+  fieldName   String?          // e.g. "clockOut" — which field changed, when applicable
+  oldValue    String?
+  newValue    String?
+  comment     String?
+
+  createdAt   DateTime         @default(now())
+
+  @@index([timeEntryId])
+}
+
+// ---------------------------------------------------------------------------
+// PTO
+// ---------------------------------------------------------------------------
+
+enum PtoType {
+  VACATION
+  SICK
+  PERSONAL
+  OTHER_APPROVED_LEAVE
+}
+
+enum PtoStatus {
+  PENDING
+  APPROVED
+  DENIED
+  CANCELLED
+}
+
+model PtoRequest {
+  id         String   @id @default(uuid())
+  employeeId String
+  employee   Employee @relation("PtoRequester", fields: [employeeId], references: [id])
+
+  type      PtoType
+  startDate DateTime
+  endDate   DateTime
+  hours     Float
+  reason    String?
+
+  status     PtoStatus @default(PENDING)
+  reviewedById String?
+  reviewedBy   Employee? @relation("PtoReviewer", fields: [reviewedById], references: [id])
+  reviewedAt   DateTime?
+  reviewComment String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Documents & acknowledgments
+// ---------------------------------------------------------------------------
+
+enum DocumentCategory {
+  EMPLOYEE_HANDBOOK
+  HR_POLICY
+  JOB_DESCRIPTION
+  OFFER_LETTER
+  PERFORMANCE_REVIEW
+  TRAINING
+  EMPLOYEE_FORM
+  CONFIDENTIAL_EMPLOYEE_DOCUMENT
+  OTHER
+}
+
+enum DocumentVisibility {
+  GLOBAL
+  DEPARTMENT
+  INDIVIDUAL
+  CONFIDENTIAL_HR // restricted to HR_ADMIN / SUPER_ADMIN only, regardless of assignment
+}
+
+model Document {
+  id          String             @id @default(uuid())
+  title       String
+  category    DocumentCategory
+  visibility  DocumentVisibility
+  version     Int                @default(1)
+  // Path/key into private object storage (never a public bucket). Resolved to a
+  // short-lived signed URL server-side after an authorization check — see
+  // src/lib/documents.ts (to be implemented alongside the Document Center module).
+  storageKey  String
+  requiresAcknowledgment Boolean @default(false)
+  archivedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assignments     DocumentAssignment[]
+  acknowledgments DocumentAcknowledgment[]
+}
+
+model DocumentAssignment {
+  id           String   @id @default(uuid())
+  documentId   String
+  document     Document @relation(fields: [documentId], references: [id])
+
+  // Exactly one of employeeId / departmentId is set, matching Document.visibility.
+  employeeId   String?
+  employee     Employee?   @relation(fields: [employeeId], references: [id])
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([documentId])
+  @@index([employeeId])
+  @@index([departmentId])
+}
+
+model DocumentAcknowledgment {
+  id         String   @id @default(uuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id])
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  documentVersion Int      // version acknowledged, so a later re-upload requires re-ack
+  acknowledgedAt  DateTime @default(now())
+
+  @@unique([documentId, employeeId, documentVersion])
+}
+
+// ---------------------------------------------------------------------------
+// Onboarding
+// ---------------------------------------------------------------------------
+
+enum OnboardingItemStatus {
+  NOT_STARTED
+  COMPLETED
+}
+
+model EmployeeOnboarding {
+  id         String   @id @default(uuid())
+  employeeId String   @unique
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  startedAt   DateTime @default(now())
+  completedAt DateTime?
+
+  items OnboardingItem[]
+}
+
+model OnboardingItem {
+  id           String                @id @default(uuid())
+  onboardingId String
+  onboarding   EmployeeOnboarding    @relation(fields: [onboardingId], references: [id])
+
+  label        String                // e.g. "Employee Handbook Acknowledged"
+  status       OnboardingItemStatus  @default(NOT_STARTED)
+  dueDate      DateTime?
+  completedAt  DateTime?
+  completedBy  String?               // employee.id of self-completion, or an admin marking it done
+  sortOrder    Int                   @default(0)
+
+  @@index([onboardingId])
+}
+
+// ---------------------------------------------------------------------------
+// Announcements
+// ---------------------------------------------------------------------------
+
+model Announcement {
+  id             String    @id @default(uuid())
+  title          String
+  message        String
+  authorId       String
+  author         Employee  @relation("AnnouncementAuthor", fields: [authorId], references: [id])
+  publishDate    DateTime  @default(now())
+  expirationDate DateTime?
+
+  audiences AnnouncementAudience[]
+
+  @@index([publishDate])
+}
+
+// Audience "Everyone" = no rows in this table for the announcement.
+model AnnouncementAudience {
+  id             String        @id @default(uuid())
+  announcementId String
+  announcement   Announcement  @relation(fields: [announcementId], references: [id])
+  departmentId   String?
+  department     Department?   @relation(fields: [departmentId], references: [id])
+  employeeId     String?       // targets a specific employee when set
+
+  @@index([announcementId])
+}
+
+// ---------------------------------------------------------------------------
+// System-wide audit log (admin actions outside the time-entry-specific trail above)
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  actorId   String
+  actor     Employee @relation("ActorOnAuditLog", fields: [actorId], references: [id])
+
+  action    String   // e.g. "EMPLOYEE_UPDATED", "ROLE_CHANGED", "EMPLOYEE_DEACTIVATED"
+  targetType String  // e.g. "Employee", "Document"
+  targetId  String
+  oldValue  String?
+  newValue  String?
+  comment   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([targetType, targetId])
+  @@index([actorId])
+}

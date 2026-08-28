@@ -1,26 +1,48 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f7f8fa;
+  --foreground: #171f2b;
+
+  /*
+   * Placeholder brand tokens pulled from the TTC logo (blue ring / magenta mark) — swap
+   * these for the exact hex values from the Wix Editor's Design panel or TTC's brand
+   * guidelines before this ships. See README.md "Brand tokens".
+   */
+  --ttc-blue: #1a5fc4;
+  --ttc-blue-ink: #0d3f8c;
+  --ttc-pink: #d81b74;
+  --surface: #ffffff;
+  --border: #dfe3ea;
+  --muted: #4c5768;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-surface: var(--surface);
+  --color-border: var(--border);
+  --color-muted: var(--muted);
+  --color-brand: var(--ttc-blue);
+  --color-brand-ink: var(--ttc-blue-ink);
+  --color-accent: var(--ttc-pink);
+  --font-sans: var(--font-sans);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #0e131e;
+    --foreground: #e7ebf3;
+    --surface: #161d2b;
+    --border: #2a3345;
+    --muted: #9aa5b8;
+    --ttc-blue: #6ea3f2;
+    --ttc-blue-ink: #bcd4fb;
+    --ttc-pink: #f16aa8;
   }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
 }
