@@ -36,4 +36,33 @@ export interface TimeEntryDTO {
   clockOut: string | null;
   totalMinutes: number | null;
   status: TimeEntryStatus;
+  /** Set only when status is RETURNED — the supervisor/HR comment explaining the issue. */
+  reviewComment?: string | null;
+}
+
+export interface DirectReportDTO {
+  id: string;
+  firstName: string;
+  lastName: string;
+  preferredName: string | null;
+  jobTitle: string;
+  employmentStatus: EmploymentStatus;
+  awaitingApprovalCount: number;
+  pendingPtoCount: number;
+}
+
+export type PtoType = "VACATION" | "SICK" | "PERSONAL" | "OTHER_APPROVED_LEAVE";
+export type PtoStatus = "PENDING" | "APPROVED" | "DENIED" | "CANCELLED";
+
+export interface PtoRequestDTO {
+  id: string;
+  type: PtoType;
+  startDate: string; // ISO date
+  endDate: string; // ISO date
+  hours: number;
+  reason: string | null;
+  status: PtoStatus;
+  reviewComment: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
 }

@@ -1,4 +1,20 @@
-import type { TimeClockState, TimeEntryDTO } from "@/types";
+import type { PtoType, TimeClockState, TimeEntryDTO } from "@/types";
+
+export const PTO_TYPE_LABEL: Record<PtoType, string> = {
+  VACATION: "Vacation",
+  SICK: "Sick",
+  PERSONAL: "Personal",
+  OTHER_APPROVED_LEAVE: "Other Approved Leave",
+};
+
+export function formatDateRange(startIso: string, endIso: string): string {
+  const s = new Date(`${startIso.slice(0, 10)}T00:00:00`);
+  const e = new Date(`${endIso.slice(0, 10)}T00:00:00`);
+  const startLabel = s.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  if (s.getTime() === e.getTime()) return startLabel;
+  const endLabel = e.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return `${startLabel} – ${endLabel}`;
+}
 
 /** Today's date key in the employee's local sense — one entry per calendar day. */
 export function todayDateKey(): string {
@@ -53,4 +69,19 @@ export function formatMinutes(totalMinutes: number | null): string {
 export function formatClockTime(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+/** For prefilling an <input type="time">, in the browser's own local time. */
+export function toTimeInputValue(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/** Combines a "YYYY-MM-DD" day with an "HH:MM" <input type="time"> value into a local Date. */
+export function combineDateAndTime(dateKey: string, timeValue: string): Date | null {
+  if (!timeValue) return null;
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const [hours, minutes] = timeValue.split(":").map(Number);
+  return new Date(year, month - 1, day, hours, minutes);
 }

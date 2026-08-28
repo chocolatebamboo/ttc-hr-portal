@@ -1,5 +1,10 @@
-import ComingSoon from "@/components/ComingSoon";
+import { redirect } from "next/navigation";
+import { getCurrentEmployee } from "@/lib/auth";
+import TeamListView from "./TeamListView";
 
-export default function TeamPage() {
-  return <ComingSoon title="My Team" note="Supervisor timesheet and PTO review queue — next after employee-side Time & Attendance is solid." />;
+export default async function TeamPage() {
+  const employee = await getCurrentEmployee();
+  if (!employee) redirect("/login");
+
+  return <TeamListView />;
 }

@@ -113,6 +113,155 @@ export async function applyClockAction(actor: CurrentEmployee, action: ClockActi
   });
 }
 
+type ReviewDecision = "APPROVE" | "RETURN";
+
+export class InvalidReviewActionError extends Error {
+  constructor(status: string) {
+    super(`Can't review this entry — its status is "${status}", not Awaiting Approval.`);
+    this.name = "InvalidReviewActionError";
+  }
+}
+
+export class MissingReturnCommentError extends Error {
+  constructor() {
+    super("A comment explaining the issue is required when returning a timesheet.");
+    this.name = "MissingReturnCommentError";
+  }
+}
+
+/**
+ * Approve or return a single day's time entry. Authorization (is this reviewer actually
+ * this employee's supervisor, or HR/Super Admin?) is checked by the caller — see
+ * assertCanReviewTimesheet in src/lib/authorization.ts — and independently enforced again
+ * here by running the update through withRlsContext under the REVIEWER's identity, so the
+ * database's own policy (prisma/rls.sql: time_entry_write_own) has to agree too.
+ */
+export async function reviewTimeEntry(
+  reviewer: CurrentEmployee,
+  entryId: string,
+  decision: ReviewDecision,
+  comment?: string
+) {
+  if (decision === "RETURN" && !comment?.trim()) {
+    throw new MissingReturnCommentError();
+  }
+
+  return withRlsContext({ employeeId: reviewer.id, role: reviewer.role }, async (tx) => {
+    const entry = await tx.timeEntry.findUnique({ where: { id: entryId } });
+    if (!entry || entry.status !== "AWAITING_APPROVAL") {
+      throw new InvalidReviewActionError(entry?.status ?? "not found");
+    }
+
+    const updated = await tx.timeEntry.update({
+      where: { id: entryId },
+      data: { status: decision === "APPROVE" ? "APPROVED" : "RETURNED" },
+    });
+
+    await tx.timeEntryAuditEvent.create({
+      data: {
+        timeEntryId: entryId,
+        action: decision === "APPROVE" ? "TIMESHEET_APPROVED" : "TIMESHEET_RETURNED",
+        actorId: reviewer.id,
+        comment: decision === "RETURN" ? comment!.trim() : undefined,
+      },
+    });
+
+    return updated;
+  });
+}
+
+export class InvalidCorrectionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidCorrectionError";
+  }
+}
+
+export interface CorrectionInput {
+  clockIn: Date | null;
+  lunchStart: Date | null;
+  lunchEnd: Date | null;
+  clockOut: Date | null;
+}
+
+/**
+ * Closes the loop a supervisor's Return opens: the employee edits their own returned day
+ * and resubmits it. Only reachable on the employee's OWN entry, and only while its status
+ * is RETURNED — an approved or in-progress day can't be quietly edited through this path.
+ * Every changed field is logged individually (old → new) so the correction is visible in
+ * the same audit trail as everything else, never a silent overwrite.
+ */
+export async function submitEmployeeCorrection(
+  actor: CurrentEmployee,
+  entryId: string,
+  input: CorrectionInput
+) {
+  if (!input.clockIn || !input.clockOut) {
+    throw new InvalidCorrectionError("Clock in and clock out times are both required.");
+  }
+  if (input.clockOut <= input.clockIn) {
+    throw new InvalidCorrectionError("Clock out must be after clock in.");
+  }
+  if ((input.lunchStart && !input.lunchEnd) || (!input.lunchStart && input.lunchEnd)) {
+    throw new InvalidCorrectionError("Lunch needs both a start and an end time, or neither.");
+  }
+  if (input.lunchStart && input.lunchEnd) {
+    if (input.lunchEnd <= input.lunchStart) {
+      throw new InvalidCorrectionError("Lunch end must be after lunch start.");
+    }
+    if (input.lunchStart < input.clockIn || input.lunchEnd > input.clockOut) {
+      throw new InvalidCorrectionError("Lunch must fall between clock in and clock out.");
+    }
+  }
+
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const entry = await tx.timeEntry.findUnique({ where: { id: entryId } });
+    if (!entry || entry.employeeId !== actor.id) {
+      throw new InvalidCorrectionError("Time entry not found.");
+    }
+    if (entry.status !== "RETURNED") {
+      throw new InvalidCorrectionError('Only a "Returned" day can be corrected.');
+    }
+
+    const totalMinutes = computeTotalMinutes(input);
+
+    const updated = await tx.timeEntry.update({
+      where: { id: entryId },
+      data: {
+        clockIn: input.clockIn,
+        lunchStart: input.lunchStart,
+        lunchEnd: input.lunchEnd,
+        clockOut: input.clockOut,
+        totalMinutes,
+        status: "AWAITING_APPROVAL",
+      },
+    });
+
+    const fields: Array<[string, Date | null, Date | null]> = [
+      ["clockIn", entry.clockIn, input.clockIn],
+      ["lunchStart", entry.lunchStart, input.lunchStart],
+      ["lunchEnd", entry.lunchEnd, input.lunchEnd],
+      ["clockOut", entry.clockOut, input.clockOut],
+    ];
+    for (const [fieldName, oldValue, newValue] of fields) {
+      if (oldValue?.getTime() !== newValue?.getTime()) {
+        await tx.timeEntryAuditEvent.create({
+          data: {
+            timeEntryId: entryId,
+            action: "EMPLOYEE_CORRECTION_REQUESTED",
+            actorId: actor.id,
+            fieldName,
+            oldValue: oldValue?.toISOString() ?? null,
+            newValue: newValue?.toISOString() ?? null,
+          },
+        });
+      }
+    }
+
+    return updated;
+  });
+}
+
 export async function getTodayEntry(actor: CurrentEmployee) {
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const workDate = new Date(`${todayDateKey()}T00:00:00.000Z`);

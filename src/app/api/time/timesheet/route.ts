@@ -24,15 +24,29 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "start and end query params are required." }, { status: 400 });
     }
 
-    const entries = await withRlsContext({ employeeId: employee.id, role: employee.role }, (tx) =>
-      tx.timeEntry.findMany({
+    const entries = await withRlsContext({ employeeId: employee.id, role: employee.role }, async (tx) => {
+      const rows = await tx.timeEntry.findMany({
         where: {
           employeeId: targetEmployeeId,
           workDate: { gte: new Date(`${start}T00:00:00.000Z`), lte: new Date(`${end}T23:59:59.999Z`) },
         },
         orderBy: { workDate: "asc" },
-      })
-    );
+      });
+
+      // Surface the reason a returned entry was returned — pulled from the audit trail
+      // (the single source of truth for review history) rather than duplicated onto
+      // TimeEntry itself.
+      return Promise.all(
+        rows.map(async (row) => {
+          if (row.status !== "RETURNED") return { ...row, reviewComment: null };
+          const lastReturn = await tx.timeEntryAuditEvent.findFirst({
+            where: { timeEntryId: row.id, action: "TIMESHEET_RETURNED" },
+            orderBy: { createdAt: "desc" },
+          });
+          return { ...row, reviewComment: lastReturn?.comment ?? null };
+        })
+      );
+    });
 
     return NextResponse.json({ entries });
   } catch (err) {

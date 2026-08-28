@@ -19,6 +19,19 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   view, and an audit trail that records every clock event. This is the one module built and
   intended to be *solid* before anything else — per the brief, it's what employees touch
   every day.
+- **Supervisor timesheet approval** — a supervisor's "My Team" page lists their direct
+  reports (queried from the actual `supervisorId` relationship, not a client-supplied list)
+  with an awaiting-approval count, drilling into a per-employee weekly timesheet with
+  Approve / Return actions. Returning requires a comment, per the brief. The employee then
+  sees exactly why on their own timesheet, and can edit and resubmit that one day — closing
+  the loop the brief's "Employee correction requested" audit action implies but doesn't
+  fully spell out.
+- **PTO request + approval** — employees submit time-off requests (type, dates, hours,
+  reason) from Time Off, see their own request history, and can cancel a still-Pending one.
+  Supervisors decide (Approve / Deny, with an optional note on denial) from the same
+  employee page as timesheet review — it's the same supervisor relationship, so it lives in
+  the same place rather than a second parallel "team" screen. Denied requests show the
+  reviewer's note to the employee. No payroll math is derived from PTO, per the brief.
 - **Data model** — the full schema for every Phase 1 module (`prisma/schema.prisma`), even
   though only Time & Attendance has UI/API built on top of it yet.
 - **Two independent authorization layers** — every API route checks permissions in code
@@ -28,10 +41,10 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
 
 ## What's NOT built yet
 
-PTO requests, the document center + acknowledgments, onboarding, the directory,
-announcements, supervisor timesheet approval, the HR/admin dashboards, and the payroll hours
-export. Every corresponding nav link in the app currently opens a page that plainly says
-"Not built yet" rather than pretending. See **Roadmap** for the build order.
+The document center + acknowledgments, onboarding, the directory, announcements, the
+HR/admin dashboards, and the payroll hours export. Every corresponding nav link in the app
+currently opens a page that plainly says "Not built yet" rather than pretending. See
+**Roadmap** for the build order.
 
 ## Getting set up
 
@@ -97,8 +110,8 @@ starts:
 2. ~~Data model + RLS~~ ✅
 3. ~~Auth + role-aware shell~~ ✅
 4. ~~Time & Attendance~~ ✅ (clock in/lunch/out, timesheet, audit trail)
-5. Supervisor timesheet approval
-6. PTO request + approval
+5. ~~Supervisor timesheet approval~~ ✅ (My Team, review + approve/return, employee correction + resubmit)
+6. ~~PTO request + approval~~ ✅ (submit, cancel, supervisor approve/deny with a note)
 7. Document center + acknowledgments
 8. Onboarding checklist
 9. Directory + announcements
@@ -107,6 +120,12 @@ starts:
     against every module
 12. Pilot accounts (1 HR/Super Admin, 1 Supervisor, 2–3 Employees) running the complete
     workflows from the brief
+
+**Not yet built, worth flagging now:** an HR-wide attendance view and an HR-wide "upcoming
+PTO across everyone" view (both `/admin/attendance` and `/admin/pto`, still stubs — HR
+today can only see one supervisor's team at a time, same as a supervisor can), and bulk
+"approve the whole week in one click" — right now each day/request is decided individually,
+which is correct but a little slow for a supervisor with a big team.
 
 Admin-facing documentation ("Administrator Instructions" in the brief) will be written once
 there's real UI for HR to follow instructions against — writing it earlier would describe

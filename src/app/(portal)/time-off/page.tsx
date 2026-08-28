@@ -1,5 +1,10 @@
-import ComingSoon from "@/components/ComingSoon";
+import { redirect } from "next/navigation";
+import { getCurrentEmployee } from "@/lib/auth";
+import PtoView from "./PtoView";
 
-export default function TimeOffPage() {
-  return <ComingSoon title="Time Off" note="PTO requests and approval history — next on the build order after Time & Attendance." />;
+export default async function TimeOffPage() {
+  const employee = await getCurrentEmployee();
+  if (!employee) redirect("/login");
+
+  return <PtoView />;
 }
