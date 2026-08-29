@@ -15,8 +15,12 @@
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-serif: "Fraunces Variable", ui-serif, Georgia, "Times New Roman", serif;
 
-  /* Warm off-white, closer to TTC's branded BambooHR instance than a cool gray. */
-  --background: #f7f6f1;
+  /* Plain white page background (CB's call, Aug 2026 — was a warm off-white before this;
+     see globals.css git history for that rationale if it ever needs to come back). Cards
+     (--surface, also white) now separate from the page via the .bg-surface.border-border
+     shadow rule further down instead of a background-tone difference, matching the
+     soft-shadow dashboard references CB shared. */
+  --background: #ffffff;
   --foreground: #201a22;
 
   /*
@@ -73,6 +77,25 @@
 body {
   background: var(--background);
   color: var(--foreground);
+}
+
+/*
+ * Every card, panel, dropdown and pill-shaped input in the app already pairs the
+ * `bg-surface` + `border-border` utility classes (99 call sites — see globals.css git
+ * history/PR notes if that ever needs re-verifying), so this one compound-selector rule is
+ * what gives all of them the soft, floating-card shadow from the dashboard references CB
+ * shared, instead of hand-adding a shadow utility at every call site. Deliberately outside
+ * any @layer, which (per the CSS cascade layers spec) makes it win over Tailwind's own
+ * layered utility classes regardless of specificity — including the couple of surfaces that
+ * already carried their own shadow-sm/shadow-lg (ProfileMenu's dropdown, TimeClockCard, the
+ * forgot-password card): this rule now supersedes those too, so the whole app gets one
+ * consistent card shadow instead of several slightly different ones. Their now-redundant
+ * shadow-* classes are harmless left in place — just inert.
+ */
+.bg-surface.border-border {
+  box-shadow:
+    0 1px 2px rgba(32, 26, 34, 0.04),
+    0 6px 20px rgba(32, 26, 34, 0.05);
 }
 
 /*
