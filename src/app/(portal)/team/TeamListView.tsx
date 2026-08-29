@@ -65,12 +65,12 @@ export default function TeamListView() {
               </div>
               <div className="flex items-center gap-2">
                 {r.awaitingApprovalCount > 0 && (
-                  <span className="inline-flex items-center rounded-full bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300 px-2.5 py-0.5 text-xs font-medium whitespace-nowrap">
+                  <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-800 px-2.5 py-0.5 text-xs font-medium whitespace-nowrap">
                     {r.awaitingApprovalCount} timesheet{r.awaitingApprovalCount === 1 ? "" : "s"}
                   </span>
                 )}
                 {r.pendingPtoCount > 0 && (
-                  <span className="inline-flex items-center rounded-full bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300 px-2.5 py-0.5 text-xs font-medium whitespace-nowrap">
+                  <span className="inline-flex items-center rounded-full bg-blue-100 text-blue-800 px-2.5 py-0.5 text-xs font-medium whitespace-nowrap">
                     {r.pendingPtoCount} PTO
                   </span>
                 )}

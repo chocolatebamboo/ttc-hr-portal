@@ -1,10 +1,15 @@
 import type { PtoStatus } from "@/types";
 
+// Solid, higher-contrast fills (no dark: variants — this app has no dark-mode toggle, and
+// Tailwind's dark: classes were silently triggering off visitors' OS/browser color-scheme
+// setting, which is what made "Pending" wash out against the page's now-permanently-light
+// background). Bumped a shade up from the original 50/700 pairing so each status reads
+// clearly at a glance instead of blending into white.
 const STYLE: Record<PtoStatus, string> = {
-  PENDING: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300",
-  APPROVED: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300",
-  DENIED: "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300",
-  CANCELLED: "bg-black/5 text-muted dark:bg-white/5",
+  PENDING: "bg-amber-100 text-amber-800",
+  APPROVED: "bg-emerald-100 text-emerald-800",
+  DENIED: "bg-rose-100 text-rose-800",
+  CANCELLED: "bg-black/5 text-muted",
 };
 
 const LABEL: Record<PtoStatus, string> = {

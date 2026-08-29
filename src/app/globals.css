@@ -97,48 +97,14 @@ body {
 }
 
 /*
- * One subtle brand-pink glow behind the top of every portal page's main content — applied
- * once, here, to <main> in the shared (portal) layout, rather than per-page, so it's
- * consistent everywhere without every page needing its own decorative markup. Deliberately
- * a single color (the brand pink, not a pink+blue mix) and low-opacity: CB's explicit ask
- * was "not too many colors, maintain the main accent color" — this is meant to be felt more
- * than seen. `overflow-x: clip` (not `hidden`, which would also block sticky/fixed
- * descendants) keeps the oversized glow from ever creating horizontal scroll.
+ * Removed Aug 2026: a decorative brand-pink radial glow behind <main> (.portal-main-glow) and
+ * a paired frosted-glass treatment on the time-clock card (.frost-card). CB's call after
+ * seeing it live: "I don't like that gradient that's on the top right. I don't like that at
+ * all." — a full removal, not a toned-down version. The frosted-glass card was designed
+ * specifically to catch the glow's color behind its blur, so with the glow gone it had no
+ * remaining visual purpose and was reverted to the same plain bg-surface card every other
+ * panel uses. See git history for both rules if a similar effect is ever wanted again.
  */
-.portal-main-glow {
-  position: relative;
-  overflow-x: clip;
-}
-.portal-main-glow::before {
-  content: "";
-  position: absolute;
-  top: -120px;
-  right: -120px;
-  width: 420px;
-  height: 420px;
-  border-radius: 50%;
-  background: radial-gradient(circle, color-mix(in srgb, var(--ttc-pink) 16%, transparent), transparent 70%);
-  pointer-events: none;
-  z-index: 0;
-}
-.portal-main-glow > * {
-  position: relative;
-  z-index: 1;
-}
-
-/*
- * True frosted glass (translucency + backdrop-blur) for the one card CB specifically
- * approved this treatment for — the daily time-clock card, the single most-seen "hero"
- * element in the app. Only meaningful when something with visual variation (the glow above)
- * sits behind it, which is why this is paired with .portal-main-glow on the dashboard rather
- * than applied everywhere; every other card stays plain opaque bg-surface, per "not too many
- * colors/effects everywhere."
- */
-.frost-card {
-  background: color-mix(in srgb, var(--surface) 70%, transparent);
-  backdrop-filter: blur(16px) saturate(160%);
-  -webkit-backdrop-filter: blur(16px) saturate(160%);
-}
 
 /*
  * Reusable entrance animation — a small upward fade, meant for a handful of top-level

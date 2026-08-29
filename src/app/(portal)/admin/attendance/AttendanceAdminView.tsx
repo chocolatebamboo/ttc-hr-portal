@@ -158,7 +158,7 @@ export default function AttendanceAdminView() {
                   <td className="px-4 py-2.5 text-muted">{row.department ?? "—"}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums">
                     {row.awaitingApprovalCount > 0 ? (
-                      <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
+                      <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-800">
                         {row.awaitingApprovalCount}
                       </span>
                     ) : (
@@ -167,7 +167,7 @@ export default function AttendanceAdminView() {
                   </td>
                   <td className="px-4 py-2.5 text-right tabular-nums">
                     {row.missingClockOutCount > 0 ? (
-                      <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300">
+                      <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-rose-100 text-rose-800">
                         {row.missingClockOutCount}
                       </span>
                     ) : (

@@ -152,7 +152,7 @@ export default function ReviewTimesheetView({ employeeId }: { employeeId: string
       </div>
 
       {actionNotice && (
-        <p className="mb-3 text-sm text-emerald-700 dark:text-emerald-300" role="status">
+        <p className="mb-3 text-sm text-emerald-700" role="status">
           {actionNotice}
         </p>
       )}

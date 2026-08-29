@@ -307,7 +307,7 @@ export default function EmployeesAdminView({
                   <p className="text-sm font-medium truncate">
                     {row.preferredName || row.firstName} {row.lastName}
                     {row.deactivatedAt && (
-                      <span className="ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-black/5 text-muted dark:bg-white/5">
+                      <span className="ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-black/5 text-muted">
                         Deactivated
                       </span>
                     )}

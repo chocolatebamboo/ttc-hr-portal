@@ -31,7 +31,7 @@ export default async function PortalLayout({ children }: { children: React.React
           <ProfileMenu displayName={displayName} jobTitle={employee.jobTitle} initials={initials} />
         </header>
 
-        <main className="portal-main-glow flex-1 px-4 md:px-6 py-6 pb-24 md:pb-6">{children}</main>
+        <main className="flex-1 px-4 md:px-6 py-6 pb-24 md:pb-6">{children}</main>
       </div>
 
       <BottomNav />

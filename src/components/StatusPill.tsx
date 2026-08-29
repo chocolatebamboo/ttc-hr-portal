@@ -1,11 +1,14 @@
 import type { TimeEntryStatus } from "@/types";
 
+// See PtoStatusPill for why there's no dark: variant here anymore — this app doesn't switch
+// palettes with the visitor's OS setting, and the dark: classes were making these pills wash
+// out against the light page background regardless of intent.
 const STYLE: Record<TimeEntryStatus, string> = {
-  IN_PROGRESS: "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300",
-  AWAITING_APPROVAL: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300",
-  APPROVED: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300",
-  RETURNED: "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300",
-  MISSING_ENTRY: "bg-black/5 text-muted dark:bg-white/5",
+  IN_PROGRESS: "bg-blue-100 text-blue-800",
+  AWAITING_APPROVAL: "bg-amber-100 text-amber-800",
+  APPROVED: "bg-emerald-100 text-emerald-800",
+  RETURNED: "bg-rose-100 text-rose-800",
+  MISSING_ENTRY: "bg-black/5 text-muted",
 };
 
 const LABEL: Record<TimeEntryStatus, string> = {
