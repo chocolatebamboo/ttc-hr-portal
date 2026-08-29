@@ -213,3 +213,22 @@ export function LogOutIcon({ className = base }: IconProps) {
     </svg>
   );
 }
+
+export function LockIcon({ className = base }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
+      <rect x="5" y="11" width="14" height="9.5" rx="2" />
+      <path d="M8 11V7.5a4 4 0 0 1 8 0V11" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function GraduationCapIcon({ className = base }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
+      <path d="M2.5 9 12 4.5 21.5 9 12 13.5 2.5 9Z" strokeLinejoin="round" />
+      <path d="M6.5 11v4.2c0 1.1 2.5 2.3 5.5 2.3s5.5-1.2 5.5-2.3V11" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M21.5 9v5.5" strokeLinecap="round" />
+    </svg>
+  );
+}

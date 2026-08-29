@@ -70,8 +70,10 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
 - [ ] Open Documents — acknowledge anything that requires it, confirm you can view/download
       anything assigned to you or company-wide, and confirm nothing marked confidential-HR-only
       is visible to you.
-- [ ] Open Onboarding (if HR has started a checklist for you — ask them to) and check off at
-      least one item.
+- [ ] Open Onboarding (if HR has started a checklist for you — ask them to) and complete the
+      one step it shows as current — a plain task completes right away, but a document/training/
+      meeting step submits for approval instead, so confirm it correctly shows "Awaiting
+      Approval" and stays locked on the next step until your supervisor or HR approves it below.
 - [ ] After your supervisor approves your timesheet and decides your PTO request (below),
       come back and confirm the status updated and looks right from your side.
 - [ ] Ask your supervisor to **Return** (not approve) one timesheet entry with a comment, then
@@ -90,6 +92,10 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
 - [ ] Confirm you can NOT see or act on an employee who is not your report (ask HR to point you
       at someone outside your team, or try guessing a URL for someone else's review page — it
       should refuse you, not show their data).
+- [ ] Open Onboarding's Manage tab for one of your reports and **Approve** the step they
+      submitted above; confirm it unlocks their next step immediately. On a different report's
+      step, **Return** it with a reason instead, and confirm they see the reason and can
+      resubmit.
 
 ### HR / Super Admin
 
@@ -98,8 +104,10 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
 - [ ] Upload a Document, assign it (try all three: global, one department, one specific person),
       mark one as requiring acknowledgment, and confirm the right people can see it and the
       wrong people can't.
-- [ ] Start an Onboarding checklist for one of the pilot Employees, including at least one
-      custom item beyond the defaults.
+- [ ] Start an Onboarding checklist for one of the pilot Employees, then add at least one custom
+      step of each type beyond the defaults — a plain Task, a Document (pick one that requires
+      acknowledgment), and a Training or Meeting step — and confirm the employee only ever sees
+      one step "up next" at a time, in order.
 - [ ] Open the Reports page, pick a date range that covers what the Employee testers submitted,
       and download the Payroll Hours CSV. Open it and sanity-check the numbers against what was
       actually clocked and approved. Confirm the "still awaiting approval" warning shows up if

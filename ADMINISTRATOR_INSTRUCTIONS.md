@@ -101,13 +101,35 @@ tab every employee has, since admins have their own documents to read too). From
 
 ## Onboarding (`/onboarding`, Manage tab)
 
-From the Manage tab, start a new hire's checklist — it's seeded with five standard starter
-items automatically, and you can add custom items beyond those (useful for a role-specific
-requirement a standard checklist wouldn't cover). Items can be checked off either by the
-employee themselves or by an admin on their behalf — both go through the same action, so there
-isn't a separate "admin override" concept to think about. A checklist's completion date is set
-the moment every item is checked, and clears again automatically if any item — including one
-added after the fact — goes back to incomplete.
+Onboarding is a guided, one-step-at-a-time flow, not a flat checklist — an employee only ever
+sees one step as "what you need to do right now"; everything after it is locked until that step
+is truly done, and everything before it stays visible as a completed trail. Start a new hire's
+checklist from the Manage tab — it's seeded with five standard starter tasks automatically —
+then add more steps as needed. A supervisor gets this same Manage tab, scoped to their own
+direct reports only, so they can review and approve their team's steps without needing HR/Super
+Admin access.
+
+Every step has a type, chosen when it's added:
+
+- **Task** — a plain checkbox. Completes the instant it's checked, by the employee or by an
+  admin on their behalf — no approval step, and the next item unlocks right away.
+- **Document** — linked to a real document from the Documents module. The employee reviews and
+  acknowledges it (the same acknowledgment this app already tracks elsewhere, not a second
+  honor-system checkbox), which submits the step for approval. Picking an `INDIVIDUAL`-
+  visibility document that isn't yet assigned to this employee automatically assigns it to
+  them, so the step is never blocked by a visibility gap you'd otherwise have to notice and fix
+  by hand. A `CONFIDENTIAL_HR` document can't be chosen at all — that tier is never visible to
+  a non-admin, so it could never be completed as a step.
+- **Training** and **Meeting** — the employee marks it done, which submits it for approval.
+  There's no document behind these; use them for anything you or a supervisor needs to
+  personally confirm happened (a course, a supervisor orientation meeting).
+
+Document/Training/Meeting steps all route through **Awaiting Approval** before the next step
+unlocks — you (or the employee's supervisor) either **Approve** it, which completes the step
+and unlocks the next one, or **Return** it with a required reason, which sends it back to the
+employee to fix and resubmit. A checklist's completion date is set the moment every step is
+COMPLETED, and clears again automatically if any step — including one added after the fact —
+isn't.
 
 ## Directory (`/directory`)
 

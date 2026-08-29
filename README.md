@@ -40,13 +40,19 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   tab (admins only, same page) tracks acknowledgment progress per document and can archive
   one. The acknowledgment is explicitly labeled, in the UI itself, as a read-and-confirm
   record for HR — not a legal electronic signature, per the brief.
-- **Onboarding checklists** — HR starts a new hire's checklist (seeded with five standard
-  starter items) from the Manage tab on the same Onboarding page every employee sees; items
-  check off the same way whether the employee does it themselves or HR does it on their
-  behalf, because that's the same underlying action gated by the same RLS policy, not two
-  separate code paths. HR can add custom items per employee. A checklist's completion date is
-  set automatically the moment every item is checked, and cleared again if an item (including
-  a newly added one) goes back to incomplete.
+- **Guided onboarding** — a step-by-step flow, not a flat checklist: an employee sees exactly
+  one step as "what you need to do right now," everything after it stays locked until that
+  step is truly done (computed live from item order, never a stored flag that could drift), and
+  everything before it is a completed trail. Steps are typed — Task (a plain checkbox, no
+  approval), Document (acknowledges a real linked Document, reusing that module's own
+  acknowledgment tracking rather than a second honor-system copy), Training, and Meeting.
+  Document/Training/Meeting all route through an AWAITING_APPROVAL state that HR or the
+  employee's own supervisor must Approve (unlocks the next step) or Return (with a required
+  reason, sending it back to the employee to redo). HR starts a new hire's checklist (seeded
+  with five standard starter tasks) and adds typed steps beyond those from the Manage tab;
+  supervisors get the same Manage tab scoped to their own direct reports. A checklist's
+  completion date is set automatically the moment every step is COMPLETED, and cleared again
+  if any step (including a newly added one) isn't.
 - **Directory** — every active employee, to every authenticated employee: name, title,
   department, role, work email, work phone — nothing more. This is the one place in the app
   where RLS's row-level grant is deliberately broader than what any single request needs; see
@@ -283,8 +289,9 @@ starts:
 6. ~~PTO request + approval~~ ✅ (submit, cancel, supervisor approve/deny with a note)
 7. ~~Document center + acknowledgments~~ ✅ (upload, per-role visibility via RLS, view via
    signed URL, acknowledge, archive, admin progress tracking, upload a new version)
-8. ~~Onboarding checklist~~ ✅ (HR starts + seeds a checklist, custom items, self- or
-   admin-completion, auto-tracked completion date)
+8. ~~Onboarding checklist~~ ✅ (guided one-step-at-a-time flow — locked/current/awaiting-
+   approval/completed sequencing, typed steps incl. document acknowledgment, HR/supervisor
+   approve-or-return, auto-tracked completion date)
 9. ~~Directory + announcements~~ ✅ (searchable company directory; HR posts company-wide,
    department, or individual announcements with an optional expiration date)
 10. ~~Payroll hours export (CSV)~~ ✅ (approved regular + PTO hours per employee for a chosen

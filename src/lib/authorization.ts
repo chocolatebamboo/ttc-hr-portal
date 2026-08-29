@@ -79,3 +79,15 @@ export async function assertCanReviewTimesheet(
   if (actor.role !== "SUPERVISOR") throw new ForbiddenError();
   await assertCanAccessEmployeeRecords(actor, targetEmployeeId);
 }
+
+/** Same rule as assertCanReviewTimesheet, for onboarding step approvals — kept as its own
+ *  named function (rather than a shared generic) so call sites read as what they're actually
+ *  gating, not a repurposed timesheet check. */
+export async function assertCanReviewOnboarding(
+  actor: CurrentEmployee,
+  targetEmployeeId: string
+): Promise<void> {
+  if (isAdmin(actor)) return;
+  if (actor.role !== "SUPERVISOR") throw new ForbiddenError();
+  await assertCanAccessEmployeeRecords(actor, targetEmployeeId);
+}

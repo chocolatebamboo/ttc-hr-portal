@@ -3,11 +3,17 @@ import { requireEmployee } from "@/lib/auth";
 import { assertIsAdmin } from "@/lib/authorization";
 import { addOnboardingItem, InvalidOnboardingError } from "@/lib/onboarding";
 import { toErrorResponse } from "@/lib/api-errors";
+import type { OnboardingItemType } from "@/types";
+
+const VALID_TYPES: OnboardingItemType[] = ["TASK", "DOCUMENT", "TRAINING", "MEETING"];
 
 /**
  * POST /api/onboarding/manage/[employeeId]/items — HR/Super Admin only. Body:
- * { onboardingId, label, dueDate? }. employeeId in the URL is for routing/consistency with
- * the rest of this resource; the onboarding row itself is looked up by onboardingId.
+ * { onboardingId, label, itemType, description?, documentId?, dueDate? }. employeeId in the
+ * URL is for routing/consistency with the rest of this resource; the onboarding row itself is
+ * looked up by onboardingId. documentId is required when itemType is "DOCUMENT" —
+ * addOnboardingItem is what actually validates and, if needed, grants the target employee
+ * visibility into that document.
  */
 export async function POST(request: Request) {
   try {
@@ -21,13 +27,22 @@ export async function POST(request: Request) {
     if (typeof body.label !== "string" || !body.label.trim()) {
       throw new InvalidOnboardingError("Item description is required.");
     }
+    if (!VALID_TYPES.includes(body.itemType)) {
+      throw new InvalidOnboardingError("Choose a valid step type.");
+    }
 
     const dueDate = typeof body.dueDate === "string" && body.dueDate ? new Date(body.dueDate) : undefined;
     if (dueDate && Number.isNaN(dueDate.getTime())) {
       throw new InvalidOnboardingError("Choose a valid due date.");
     }
 
-    const item = await addOnboardingItem(employee, body.onboardingId, { label: body.label, dueDate });
+    const item = await addOnboardingItem(employee, body.onboardingId, {
+      label: body.label,
+      description: typeof body.description === "string" ? body.description : undefined,
+      itemType: body.itemType,
+      documentId: typeof body.documentId === "string" && body.documentId ? body.documentId : undefined,
+      dueDate,
+    });
     return NextResponse.json({ item }, { status: 201 });
   } catch (err) {
     return toErrorResponse(err);

@@ -74,8 +74,7 @@ export default function AvatarEditor({
       <label className="block text-sm font-medium mb-1.5">Profile photo</label>
       <div className="flex items-center gap-3">
         {avatarUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element -- public storage URL, not an
-          // optimizable local/remote asset worth wiring next/image's remotePatterns for.
+          // eslint-disable-next-line @next/next/no-img-element -- public storage URL, not worth wiring next/image's remotePatterns for
           <img
             src={avatarUrl}
             alt=""

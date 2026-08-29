@@ -12,7 +12,7 @@ import { InvalidEmployeeError } from "@/lib/employees-admin";
 import { InvalidDepartmentError } from "@/lib/departments-admin";
 import { DocumentNotFoundError, InvalidDocumentError } from "@/lib/documents";
 import { DocumentUploadError, AvatarUploadError } from "@/lib/storage";
-import { OnboardingNotFoundError, InvalidOnboardingError } from "@/lib/onboarding";
+import { OnboardingNotFoundError, InvalidOnboardingError, MissingReturnReasonError } from "@/lib/onboarding";
 import { AnnouncementNotFoundError, InvalidAnnouncementError } from "@/lib/announcements";
 import { InvalidPayrollRangeError } from "@/lib/payroll";
 
@@ -36,6 +36,7 @@ export function toErrorResponse(err: unknown) {
   }
   if (
     err instanceof MissingReturnCommentError ||
+    err instanceof MissingReturnReasonError ||
     err instanceof InvalidCorrectionError ||
     err instanceof InvalidPtoRequestError ||
     err instanceof InvalidEmployeeError ||

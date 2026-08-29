@@ -189,14 +189,30 @@ export interface AssignmentOptionsDTO {
   employees: { id: string; name: string }[];
 }
 
-export type OnboardingItemStatus = "NOT_STARTED" | "COMPLETED";
+// NOT_STARTED covers both "locked" and "available" — see OnboardingItemDTO.locked, computed
+// separately from this status by src/lib/onboarding.ts.
+export type OnboardingItemStatus = "NOT_STARTED" | "AWAITING_APPROVAL" | "RETURNED" | "COMPLETED";
+export type OnboardingItemType = "TASK" | "DOCUMENT" | "TRAINING" | "MEETING";
 
 export interface OnboardingItemDTO {
   id: string;
   label: string;
+  description: string | null;
+  itemType: OnboardingItemType;
+  /** TASK completes directly on check; DOCUMENT/TRAINING/MEETING route through
+   *  AWAITING_APPROVAL first. Derived from itemType, sent precomputed so the UI never has to
+   *  duplicate that mapping. */
+  requiresApproval: boolean;
   status: OnboardingItemStatus;
+  /** True when an earlier item (by sortOrder) isn't COMPLETED yet — this item isn't actionable
+   *  regardless of its own `status`. Computed at read time, never stored. */
+  locked: boolean;
   dueDate: string | null;
+  submittedAt: string | null;
   completedAt: string | null;
+  returnReason: string | null;
+  documentId: string | null;
+  documentTitle: string | null;
   sortOrder: number;
 }
 
@@ -204,11 +220,15 @@ export interface EmployeeOnboardingDTO {
   id: string;
   startedAt: string;
   completedAt: string | null;
+  /** The one item the employee should focus on right now — the first item, in sortOrder,
+   *  that isn't COMPLETED. Null once everything is done. */
+  currentItemId: string | null;
   items: OnboardingItemDTO[];
 }
 
-/** Admin's roster view — one row per active employee, whether or not they have a checklist
- *  started yet. */
+/** Admin/supervisor roster view — one row per employee the caller may manage (every active
+ *  employee for an admin, direct reports only for a supervisor), whether or not their
+ *  checklist has been started yet. */
 export interface OnboardingAdminSummaryDTO {
   employeeId: string;
   employeeName: string;
@@ -216,6 +236,9 @@ export interface OnboardingAdminSummaryDTO {
   onboardingId: string | null;
   totalItems: number;
   completedItems: number;
+  /** Items sitting in AWAITING_APPROVAL right now — surfaced separately from totalItems/
+   *  completedItems so "needs your attention" is a glance, not a click into every row. */
+  awaitingApprovalCount: number;
   completedAt: string | null;
 }
 

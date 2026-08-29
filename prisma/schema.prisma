@@ -258,6 +258,7 @@ model Document {
 
   assignments     DocumentAssignment[]
   acknowledgments DocumentAcknowledgment[]
+  onboardingItems OnboardingItem[]
 }
 
 model DocumentAssignment {
@@ -295,9 +296,27 @@ model DocumentAcknowledgment {
 // Onboarding
 // ---------------------------------------------------------------------------
 
+// NOT_STARTED covers both "locked" and "available" — whether a given item is actually
+// actionable yet is a SEQUENCE question (is every earlier item, by sortOrder, COMPLETED?),
+// computed at read time in src/lib/onboarding.ts rather than stored here. That keeps this
+// enum additive-only to migrate (AWAITING_APPROVAL/RETURNED are brand new values, nothing
+// existing needed to change meaning or get backfilled) and means locking never drifts out of
+// sync with the real item order the way a separately-stored LOCKED flag could.
 enum OnboardingItemStatus {
   NOT_STARTED
+  AWAITING_APPROVAL // employee submitted a DOCUMENT/TRAINING/MEETING step; needs sign-off
+  RETURNED          // HR/supervisor sent it back (see returnReason) — employee may resubmit
   COMPLETED
+}
+
+// Drives both what completing a step actually means and whether it needs sign-off (see
+// REQUIRES_APPROVAL_BY_TYPE in src/lib/onboarding.ts — TASK auto-completes on check, the
+// other three go through AWAITING_APPROVAL first).
+enum OnboardingItemType {
+  TASK      // plain checkbox — "Review the Staff Directory"
+  DOCUMENT  // completing it means acknowledging the linked Document (see documentId below)
+  TRAINING  // e.g. a course or video with no document behind it
+  MEETING   // e.g. "Meet with Your Supervisor" — someone confirms it happened
 }
 
 model EmployeeOnboarding {
@@ -317,13 +336,33 @@ model OnboardingItem {
   onboarding   EmployeeOnboarding    @relation(fields: [onboardingId], references: [id])
 
   label        String                // e.g. "Employee Handbook Acknowledged"
+  description  String?               // optional longer "what this involves" copy shown to the employee
+  itemType     OnboardingItemType    @default(TASK)
   status       OnboardingItemStatus  @default(NOT_STARTED)
   dueDate      DateTime?
-  completedAt  DateTime?
-  completedBy  String?               // employee.id of self-completion, or an admin marking it done
   sortOrder    Int                   @default(0)
 
+  // Only set (and only meaningful) when itemType = DOCUMENT — the document the employee must
+  // read and acknowledge to complete this step. Reuses the real Document/DocumentAcknowledgment
+  // flow (src/lib/documents.ts) rather than a second, honor-system copy of "did they read it."
+  documentId String?
+  document   Document? @relation(fields: [documentId], references: [id])
+
+  // Employee-side: when they submitted (moved NOT_STARTED/RETURNED -> AWAITING_APPROVAL).
+  // Null for a plain TASK, which has no separate submission step — it goes straight to
+  // completedAt.
+  submittedAt  DateTime?
+  completedAt  DateTime?
+  completedBy  String?               // employee.id of self-completion (TASK), or an admin marking it done
+
+  // Reviewer-side: who approved/returned this and when. approvedBy is null for a plain TASK,
+  // which has no separate reviewer step.
+  approvedBy   String?
+  approvedAt   DateTime?
+  returnReason String?               // required when status is set to RETURNED
+
   @@index([onboardingId])
+  @@index([documentId])
 }
 
 // ---------------------------------------------------------------------------

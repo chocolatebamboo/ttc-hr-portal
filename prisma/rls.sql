@@ -256,12 +256,43 @@ create policy ack_insert on "DocumentAcknowledgment" for insert with check (
 alter table "EmployeeOnboarding" enable row level security;
 alter table "EmployeeOnboarding" force row level security;
 
+-- Guided onboarding (Aug 2026) added a real approval step: a supervisor now needs to be able
+-- to see AND act on their own direct reports' onboarding, not just HR/admins — the same
+-- "admin, or the row's own owner, or that owner's supervisor" three-way shape TimeEntry/
+-- PtoRequest already use above, just applied to onboarding for the first time here.
 drop policy if exists onboarding_select on "EmployeeOnboarding";
 create policy onboarding_select on "EmployeeOnboarding" for select using (
-  is_admin() or "employeeId" = current_employee_id()
+  is_admin()
+  or "employeeId" = current_employee_id()
+  or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
 );
+-- Split into insert vs. update (rather than one "for all") because they need genuinely
+-- different rules, and a single with-check clause on "for all" would apply to both no matter
+-- what: starting a brand-new checklist stays admin-only, but approving a step is what flips
+-- EmployeeOnboarding.completedAt (recomputeOnboardingCompletion in src/lib/onboarding.ts), and
+-- a supervisor approving their own report's last step needs to be able to make THAT write —
+-- without a separate update policy, an approval by a supervisor (as opposed to an admin) would
+-- succeed on the OnboardingItem row but then silently fail to ever mark the checklist itself
+-- complete.
 drop policy if exists onboarding_write on "EmployeeOnboarding";
-create policy onboarding_write on "EmployeeOnboarding" for all using (is_admin()) with check (is_admin());
+drop policy if exists onboarding_insert on "EmployeeOnboarding";
+create policy onboarding_insert on "EmployeeOnboarding" for insert with check (is_admin());
+-- NOTE: this used to be is_admin()-only (pre-dating the supervisor-approval feature this
+-- policy split was written for) — which meant an EMPLOYEE finishing their own last checklist
+-- item could never actually flip EmployeeOnboarding.completedAt at all: recomputeOnboardingCompletion
+-- (src/lib/onboarding.ts), running under that employee's own identity, would have hit this
+-- policy and failed. Self-completion is included here now, alongside admin and supervisor-of,
+-- to close that gap as well as add the new supervisor case.
+drop policy if exists onboarding_update on "EmployeeOnboarding";
+create policy onboarding_update on "EmployeeOnboarding" for update using (
+  is_admin()
+  or "employeeId" = current_employee_id()
+  or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+) with check (
+  is_admin()
+  or "employeeId" = current_employee_id()
+  or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+);
 
 
 alter table "OnboardingItem" enable row level security;
@@ -271,15 +302,34 @@ drop policy if exists onboarding_item_select on "OnboardingItem";
 create policy onboarding_item_select on "OnboardingItem" for select using (
   is_admin()
   or "onboardingId" in (select id from "EmployeeOnboarding" where "employeeId" = current_employee_id())
+  or "onboardingId" in (
+    select eo.id from "EmployeeOnboarding" eo
+    join "Employee" e on e.id = eo."employeeId"
+    where e."supervisorId" = current_employee_id()
+  )
 );
--- Employees may check off their own items; admins may edit any.
+-- Employees may submit/toggle their own items; a supervisor may approve/return their own
+-- direct reports' items; admins may edit any. Which of those three a given request actually
+-- IS (a plain self-toggle vs. an approval-only action) is enforced at the app layer
+-- (assertCanReviewOnboarding in src/lib/authorization.ts) before this policy is ever reached —
+-- this is still the independent second check, not the only one.
 drop policy if exists onboarding_item_update on "OnboardingItem";
 create policy onboarding_item_update on "OnboardingItem" for update using (
   is_admin()
   or "onboardingId" in (select id from "EmployeeOnboarding" where "employeeId" = current_employee_id())
+  or "onboardingId" in (
+    select eo.id from "EmployeeOnboarding" eo
+    join "Employee" e on e.id = eo."employeeId"
+    where e."supervisorId" = current_employee_id()
+  )
 ) with check (
   is_admin()
   or "onboardingId" in (select id from "EmployeeOnboarding" where "employeeId" = current_employee_id())
+  or "onboardingId" in (
+    select eo.id from "EmployeeOnboarding" eo
+    join "Employee" e on e.id = eo."employeeId"
+    where e."supervisorId" = current_employee_id()
+  )
 );
 drop policy if exists onboarding_item_insert on "OnboardingItem";
 create policy onboarding_item_insert on "OnboardingItem" for insert with check (is_admin());
