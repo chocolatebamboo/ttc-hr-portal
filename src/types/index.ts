@@ -25,6 +25,7 @@ export interface CurrentEmployee {
   jobTitle: string;
   departmentId: string | null;
   supervisorId: string | null;
+  avatarUrl: string | null;
 }
 
 export interface TimeEntryDTO {
@@ -58,6 +59,7 @@ export interface AdminAttendanceRowDTO {
  *  omits personal contact info). Only ever returned to an admin — see src/lib/employees-admin.ts. */
 export interface EmployeeAdminRowDTO {
   id: string;
+  avatarUrl: string | null;
   employeeCode: string;
   firstName: string;
   lastName: string;

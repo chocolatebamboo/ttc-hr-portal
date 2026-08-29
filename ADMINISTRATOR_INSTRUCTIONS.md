@@ -164,6 +164,10 @@ picture, so it's admin-only end to end.
   explains this next to the Role field when it applies. You also can't change your own Role or
   Employment Status field from this form, for the same lockout-prevention reason — ask another
   admin.
+- **Profile photo** — from Edit, upload, replace, or remove someone's photo (JPEG/PNG/WebP, up
+  to 5MB). It appears on this list, in their header avatar when signed in, and wherever else
+  their initials circle would otherwise show. There's no self-service photo upload yet — an
+  admin sets it from here for now.
 - **Deactivate / Reactivate** — revokes or restores login access immediately.
   `getCurrentEmployee()` checks this on *every* request, not just at sign-in, so a deactivated
   employee is blocked on their very next action rather than staying logged in until a session

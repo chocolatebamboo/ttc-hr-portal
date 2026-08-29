@@ -1,6 +1,7 @@
 import { withRlsContext } from "@/lib/db";
 import { isAdmin, ForbiddenError } from "@/lib/authorization";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { getAvatarPublicUrl, deleteAvatarFile } from "@/lib/storage";
 import type { CurrentEmployee, EmployeeAdminRowDTO, EmploymentStatus, Role } from "@/types";
 
 export class InvalidEmployeeError extends Error {
@@ -32,11 +33,13 @@ type EmployeeWithRelations = {
   supervisor: { firstName: string; lastName: string; preferredName: string | null } | null;
   deactivatedAt: Date | null;
   hireDate: Date;
+  avatarStorageKey: string | null;
 };
 
 function toDTO(e: EmployeeWithRelations): EmployeeAdminRowDTO {
   return {
     id: e.id,
+    avatarUrl: e.avatarStorageKey ? getAvatarPublicUrl(e.avatarStorageKey) : null,
     employeeCode: e.employeeCode,
     firstName: e.firstName,
     lastName: e.lastName,
@@ -84,6 +87,7 @@ const RELATIONS_SELECT = {
   supervisor: { select: { firstName: true, lastName: true, preferredName: true } },
   deactivatedAt: true,
   hireDate: true,
+  avatarStorageKey: true,
 } as const;
 
 /** Admin roster — every employee, active AND deactivated (unlike Directory/roster.ts, which
@@ -347,6 +351,50 @@ export async function reactivateEmployee(actor: CurrentEmployee, employeeId: str
       data: { deactivatedAt: null },
       select: RELATIONS_SELECT,
     });
+    return toDTO(updated);
+  });
+}
+
+/**
+ * Saves a newly-uploaded photo's storage key onto the employee's row, replacing whichever one
+ * was there before. The route handler has already done the actual upload (storage.ts's
+ * uploadAvatarFile) by the time this runs — this is only the database half. The old file (if
+ * any) is deleted after the row update succeeds, not before, so a failed update never leaves
+ * the employee pointing at a key that's already gone.
+ */
+export async function setEmployeeAvatar(actor: CurrentEmployee, employeeId: string, storageKey: string) {
+  if (!isAdmin(actor)) throw new ForbiddenError();
+
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const existing = await tx.employee.findUnique({ where: { id: employeeId } });
+    if (!existing) throw new InvalidEmployeeError("That employee record doesn't exist.");
+
+    const updated = await tx.employee.update({
+      where: { id: employeeId },
+      data: { avatarStorageKey: storageKey },
+      select: RELATIONS_SELECT,
+    });
+
+    if (existing.avatarStorageKey) await deleteAvatarFile(existing.avatarStorageKey);
+    return toDTO(updated);
+  });
+}
+
+/** Clears an employee's photo back to the initials placeholder. */
+export async function removeEmployeeAvatar(actor: CurrentEmployee, employeeId: string) {
+  if (!isAdmin(actor)) throw new ForbiddenError();
+
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const existing = await tx.employee.findUnique({ where: { id: employeeId } });
+    if (!existing) throw new InvalidEmployeeError("That employee record doesn't exist.");
+
+    const updated = await tx.employee.update({
+      where: { id: employeeId },
+      data: { avatarStorageKey: null },
+      select: RELATIONS_SELECT,
+    });
+
+    if (existing.avatarStorageKey) await deleteAvatarFile(existing.avatarStorageKey);
     return toDTO(updated);
   });
 }

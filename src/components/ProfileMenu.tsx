@@ -14,14 +14,28 @@ import { UserCircleIcon, LogOutIcon, ChevronDownIcon } from "@/components/icons"
  * settings, since none of that is built (or in scope) here. Add to this menu only as real
  * features land, not to mirror the reference more completely.
  */
+function Avatar({ avatarUrl, initials, className }: { avatarUrl: string | null; initials: string; className: string }) {
+  if (avatarUrl) {
+    // eslint-disable-next-line @next/next/no-img-element -- public storage URL
+    return <img src={avatarUrl} alt="" className={`${className} object-cover`} />;
+  }
+  return (
+    <span className={`${className} bg-accent-ink text-white font-semibold flex items-center justify-center`}>
+      {initials}
+    </span>
+  );
+}
+
 export default function ProfileMenu({
   displayName,
   jobTitle,
   initials,
+  avatarUrl,
 }: {
   displayName: string;
   jobTitle: string;
   initials: string;
+  avatarUrl: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -61,9 +75,7 @@ export default function ProfileMenu({
         aria-expanded={open}
         className="flex items-center gap-2 rounded-full pl-1 pr-2 py-1 hover:bg-black/[0.03] transition-colors"
       >
-        <span className="h-7 w-7 rounded-full bg-accent-ink text-white text-xs font-semibold flex items-center justify-center shrink-0">
-          {initials}
-        </span>
+        <Avatar avatarUrl={avatarUrl} initials={initials} className="h-7 w-7 rounded-full text-xs shrink-0" />
         <span className="text-sm text-foreground hidden sm:inline">{displayName}</span>
         <ChevronDownIcon className={`h-4 w-4 text-muted transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
@@ -74,9 +86,7 @@ export default function ProfileMenu({
           className="absolute right-0 top-full mt-2 w-60 rounded-xl border border-border bg-surface shadow-lg py-1.5 z-30"
         >
           <div className="flex items-center gap-3 px-3.5 py-2.5">
-            <span className="h-9 w-9 rounded-full bg-accent-ink text-white text-sm font-semibold flex items-center justify-center shrink-0">
-              {initials}
-            </span>
+            <Avatar avatarUrl={avatarUrl} initials={initials} className="h-9 w-9 rounded-full text-sm shrink-0" />
             <div className="min-w-0">
               <p className="text-sm font-medium truncate">{displayName}</p>
               <p className="text-xs text-muted truncate">{jobTitle}</p>

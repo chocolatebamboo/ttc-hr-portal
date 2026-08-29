@@ -1,5 +1,6 @@
 import { withUserIdContext } from "@/lib/db";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getAvatarPublicUrl } from "@/lib/storage";
 import type { CurrentEmployee } from "@/types";
 
 /**
@@ -47,6 +48,7 @@ export async function getCurrentEmployee(): Promise<CurrentEmployee | null> {
     jobTitle: employee.jobTitle,
     departmentId: employee.departmentId,
     supervisorId: employee.supervisorId,
+    avatarUrl: employee.avatarStorageKey ? getAvatarPublicUrl(employee.avatarStorageKey) : null,
   };
 }
 

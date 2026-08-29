@@ -58,6 +58,16 @@ model Employee {
   employmentStatus EmploymentStatus  @default(ACTIVE)
   hireDate         DateTime
 
+  // Storage key (path within the "avatars" Supabase Storage bucket, NOT a URL) for this
+  // employee's profile photo — null until they have one. Kept as a bare key rather than a
+  // stored URL for the same reason storageKey is used on Document: the bucket is a Supabase
+  // implementation detail that can move, and src/lib/storage.ts's getAvatarPublicUrl() is the
+  // one place that turns a key into a real URL. Unlike Document's storageKey, this bucket is
+  // PUBLIC (see README "Profile photo bucket") — an admin-uploaded headshot isn't confidential
+  // the way HR documents are, and it needs to render as a plain <img src> in lists (Employees
+  // admin, Directory, Team) without minting a signed URL per row on every page load.
+  avatarStorageKey String?
+
   departmentId String?
   department   Department? @relation(fields: [departmentId], references: [id])
 

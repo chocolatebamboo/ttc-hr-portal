@@ -2,7 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { SearchIcon } from "@/components/icons";
+import AvatarEditor from "@/components/AvatarEditor";
 import type { EmployeeAdminRowDTO, EmploymentStatus, Role } from "@/types";
+
+function initialsOf(firstName: string, lastName: string): string {
+  return `${firstName[0] ?? ""}${lastName[0] ?? ""}`.toUpperCase();
+}
 
 type LoadState = "loading" | "ready" | "error" | "empty";
 
@@ -303,25 +308,39 @@ export default function EmployeesAdminView({
           {filtered.map((row) => (
             <div key={row.id} className="px-4 py-3.5">
               <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium truncate">
-                    {row.preferredName || row.firstName} {row.lastName}
-                    {row.deactivatedAt && (
-                      <span className="ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-black/5 text-muted">
-                        Deactivated
-                      </span>
-                    )}
-                  </p>
-                  <p className="text-xs text-muted truncate">
-                    {row.jobTitle}
-                    {row.departmentName ? ` · ${row.departmentName}` : ""}
-                    {row.role !== "EMPLOYEE" ? ` · ${ROLE_LABEL[row.role]}` : ""}
-                    {row.employmentStatus !== "ACTIVE" ? ` · ${STATUS_LABEL[row.employmentStatus]}` : ""}
-                  </p>
-                  <p className="text-xs text-muted truncate">
-                    {row.ttcEmail} · {row.employeeCode}
-                    {row.supervisorName ? ` · reports to ${row.supervisorName}` : ""}
-                  </p>
+                <div className="flex items-center gap-3 min-w-0">
+                  {row.avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- public storage URL
+                    <img
+                      src={row.avatarUrl}
+                      alt=""
+                      className="h-9 w-9 rounded-full object-cover border border-border shrink-0"
+                    />
+                  ) : (
+                    <span className="h-9 w-9 rounded-full bg-accent-ink text-white text-xs font-semibold flex items-center justify-center shrink-0">
+                      {initialsOf(row.firstName, row.lastName)}
+                    </span>
+                  )}
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">
+                      {row.preferredName || row.firstName} {row.lastName}
+                      {row.deactivatedAt && (
+                        <span className="ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-black/5 text-muted">
+                          Deactivated
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-xs text-muted truncate">
+                      {row.jobTitle}
+                      {row.departmentName ? ` · ${row.departmentName}` : ""}
+                      {row.role !== "EMPLOYEE" ? ` · ${ROLE_LABEL[row.role]}` : ""}
+                      {row.employmentStatus !== "ACTIVE" ? ` · ${STATUS_LABEL[row.employmentStatus]}` : ""}
+                    </p>
+                    <p className="text-xs text-muted truncate">
+                      {row.ttcEmail} · {row.employeeCode}
+                      {row.supervisorName ? ` · reports to ${row.supervisorName}` : ""}
+                    </p>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <button
@@ -355,6 +374,12 @@ export default function EmployeesAdminView({
                   <EmployeeForm
                     mode="edit"
                     initial={valuesFromRow(row)}
+                    photo={{
+                      employeeId: row.id,
+                      name: `${row.firstName} ${row.lastName}`,
+                      avatarUrl: row.avatarUrl,
+                      onChange: load,
+                    }}
                     departmentNames={departmentNames}
                     supervisorOptions={activeEmployees}
                     excludeSupervisorId={row.id}
@@ -384,6 +409,7 @@ export default function EmployeesAdminView({
 function EmployeeForm({
   mode,
   initial,
+  photo,
   departmentNames,
   supervisorOptions,
   excludeSupervisorId,
@@ -396,6 +422,9 @@ function EmployeeForm({
 }: {
   mode: "create" | "edit";
   initial: EmployeeFormValues;
+  /** Only present in edit mode — the photo control needs a real employee id to upload
+   *  against, so there's nowhere for it to live on the create form until the record exists. */
+  photo?: { employeeId: string; name: string; avatarUrl: string | null; onChange: () => void };
   departmentNames: string[];
   supervisorOptions: EmployeeAdminRowDTO[];
   excludeSupervisorId: string | null;
@@ -428,6 +457,14 @@ function EmployeeForm({
 
   return (
     <form onSubmit={handleSubmit} className="bg-black/[0.02] border border-border rounded-xl p-4 space-y-3.5">
+      {photo && (
+        <AvatarEditor
+          employeeId={photo.employeeId}
+          name={photo.name}
+          avatarUrl={photo.avatarUrl}
+          onChange={photo.onChange}
+        />
+      )}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <TextField label="First name" required value={values.firstName} onChange={(v) => set("firstName", v)} />
         <TextField label="Last name" required value={values.lastName} onChange={(v) => set("lastName", v)} />

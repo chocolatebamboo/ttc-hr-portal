@@ -28,7 +28,12 @@ export default async function PortalLayout({ children }: { children: React.React
             <Image src="/ttc-logo.png" alt="" width={32} height={32} className="h-8 w-8 rounded-full" priority />
             <span className="font-serif font-bold text-accent hidden sm:inline">HR Portal</span>
           </div>
-          <ProfileMenu displayName={displayName} jobTitle={employee.jobTitle} initials={initials} />
+          <ProfileMenu
+            displayName={displayName}
+            jobTitle={employee.jobTitle}
+            initials={initials}
+            avatarUrl={employee.avatarUrl}
+          />
         </header>
 
         <main className="flex-1 px-4 md:px-6 py-6 pb-24 md:pb-6">{children}</main>

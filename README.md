@@ -185,6 +185,17 @@ through the service-role key from a server route, after `src/lib/documents.ts` h
 confirmed (via Postgres RLS, under that specific employee's identity) that they're allowed to
 see the document in question.
 
+### 3c. Profile photo bucket
+
+In the Supabase dashboard, go to Storage and create a new bucket named exactly `avatars`.
+**Check "Public bucket" this time** — the opposite choice from `documents` above. A profile
+photo isn't a confidential HR record the way a signed offer letter or W-4 is, and it needs to
+render as a plain `<img src>` in employee lists without minting a fresh signed URL for every
+row on every page load. Who may SET a photo is still fully gated at the app layer (the
+`assertIsAdmin()` check in `/api/admin/employees/[id]/photo`) — this bucket only controls who
+can *read* a photo once one exists, which for a headshot on an internal HR portal is fine to
+be "anyone with the exact URL."
+
 ### 4. Install, migrate, run
 
 ```bash

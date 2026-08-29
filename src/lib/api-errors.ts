@@ -11,7 +11,7 @@ import { InvalidPtoRequestError } from "@/lib/pto-actions";
 import { InvalidEmployeeError } from "@/lib/employees-admin";
 import { InvalidDepartmentError } from "@/lib/departments-admin";
 import { DocumentNotFoundError, InvalidDocumentError } from "@/lib/documents";
-import { DocumentUploadError } from "@/lib/storage";
+import { DocumentUploadError, AvatarUploadError } from "@/lib/storage";
 import { OnboardingNotFoundError, InvalidOnboardingError } from "@/lib/onboarding";
 import { AnnouncementNotFoundError, InvalidAnnouncementError } from "@/lib/announcements";
 import { InvalidPayrollRangeError } from "@/lib/payroll";
@@ -42,6 +42,7 @@ export function toErrorResponse(err: unknown) {
     err instanceof InvalidDepartmentError ||
     err instanceof InvalidDocumentError ||
     err instanceof DocumentUploadError ||
+    err instanceof AvatarUploadError ||
     err instanceof InvalidOnboardingError ||
     err instanceof InvalidAnnouncementError ||
     err instanceof InvalidPayrollRangeError
