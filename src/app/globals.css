@@ -60,19 +60,17 @@
    real font stacks directly into @theme inline) so this file has exactly one place that
    defines what "sans" and "serif" mean here. */
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #17130f;
-    --foreground: #f1ece6;
-    --surface: #211b17;
-    --border: #38302a;
-    --muted: #b3a99e;
-    --ttc-blue: #6ea3f2;
-    --ttc-blue-ink: #bcd4fb;
-    --ttc-pink: #ff5cb8;
-    --ttc-pink-ink: #ffa0d6;
-  }
-}
+/*
+ * Deliberately NOT auto-switching to a dark palette on prefers-color-scheme: dark anymore
+ * (removed Aug 2026 — see git history for the values if a real dark-mode toggle ever gets
+ * built). CB's own browser/OS runs in dark mode, which was silently swapping in a near-black
+ * background + palette here — invisible in every sandbox screenshot used to validate the
+ * light-theme work in this same session (screenshot tooling doesn't run in dark mode by
+ * default), so the light theme kept looking right to review and wrong on CB's actual screen.
+ * This app has no dark-mode toggle of its own, so "matches the OS" was the only thing
+ * deciding it — now nothing does, and every visitor gets the same light theme regardless of
+ * their system setting, which is what was actually being designed this whole time.
+ */
 
 body {
   background: var(--background);
