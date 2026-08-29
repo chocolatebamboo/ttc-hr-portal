@@ -92,6 +92,13 @@ uploading it as a new document and archiving the old one.
 
 ## Getting set up
 
+> **A live Supabase project already exists for this app** (`chocolatebambooproductions@gmail.com's
+> Project`, region `ca-central-1`) — schema deployed, RLS applied and audited (see "Security
+> notes"), storage bucket created. Steps 1-2 below are already done for that project; ask CB for
+> the connection values (project URL, anon key, and the `app_user` database password) rather than
+> re-running them against the same project. Follow steps 1-2 as written only if you're standing up
+> a *separate* environment (e.g. staging) from scratch.
+
 ### 1. Create the Supabase project
 
 Create a project at supabase.com. You'll need three things from it: the project URL, the
@@ -186,6 +193,10 @@ email invite to set their own password — the script never sees or sets a real 
 anyone) and the matching `Employee` rows, wired with the org relationships the pilot workflows
 need. It's idempotent — safe to re-run if you add someone or fix a typo.
 
+Run this from a machine with normal internet access — it needs to reach the real Supabase Auth
+API directly. It can't be run from the sandboxed environment this app was built in, which has an
+allowlisted network that doesn't include the live project's own domain.
+
 See **`PILOT_TESTING.md`** for the actual per-role workflow checklist to run the pilot
 against — this is the step that's meant to catch what a solo mock-and-screenshot cycle can't:
 real email deliverability, real phones and browsers, and people who don't already know where
@@ -214,12 +225,19 @@ starts:
     period is still awaiting approval)
 11. ~~Security + mobile test pass~~ ✅ (found and fixed a real pre-existing RLS bug — see
     "Security notes" below — then ran ~20 cross-employee authorization tests against every
-    module plus a mobile-viewport pass on every page; nothing else found)
+    module plus a mobile-viewport pass on every page; nothing else found). **Re-verified
+    against the real live Supabase project once it was connected** (everything up to this
+    point had only ever been tested against JS mocks of Postgres, not a real database) — this
+    live pass found and fixed three more real defects, including one that would have hard-broken
+    every RLS policy in production. Full findings, table-by-table access matrix, and live test
+    results: **`SECURITY_VERIFICATION_REPORT.md`**.
 12. Pilot accounts (1 HR/Super Admin, 1 Supervisor, 2–3 Employees) running the complete
-    workflows from the brief — **tooling ready, not yet run**: no Supabase project exists yet
-    for this app (see "Getting set up" §7 / `scripts/create-pilot-accounts.mjs` and
-    `PILOT_TESTING.md`). This is the one roadmap step that genuinely needs real infrastructure
-    and real people, not something buildable further in isolation.
+    workflows from the brief — **infrastructure ready, tooling ready, not yet run.** The live
+    Supabase project now exists and is fully migrated/secured (see item 11), but
+    `scripts/create-pilot-accounts.mjs` needs real network access to the Supabase Auth API to
+    send invite emails, which the sandboxed environment this app was built in doesn't have —
+    see "Getting set up" §7 / `PILOT_TESTING.md`. This is the one roadmap step that genuinely
+    needs a real machine and real people, not something buildable further in isolation.
 
 **Not yet built, worth flagging now:** an HR-wide attendance view and an HR-wide "upcoming
 PTO across everyone" view (both `/admin/attendance` and `/admin/pto`, still stubs — HR
@@ -232,6 +250,24 @@ there's real UI for HR to follow instructions against — writing it earlier wou
 screens that don't exist yet.
 
 ## Security notes for whoever reviews this before launch
+
+- **A full live audit was run against the real Supabase project — see
+  `SECURITY_VERIFICATION_REPORT.md` for the complete table-by-table findings.** Everything
+  below this bullet was found and fixed earlier in the session, entirely against JS mocks of
+  Postgres, because no live database existed yet. Once the real project was connected, a second
+  pass tested every table, function, storage bucket, and grant against the actual live
+  database — not policy text, not mocks — and caught three more real defects that mock-based
+  testing structurally could not have found: (1) the RLS identity function compared a `text`
+  column to a `uuid` literal, which Postgres rejects outright — every policy would have
+  hard-failed on every request in production; (2) three tables (`Department`, `Announcement`,
+  `AnnouncementAudience`) had Row-Level Security disabled entirely, leaving them reachable
+  through Supabase's own auto-exposed REST API to anyone holding the public anon key; (3) a
+  `search_path` hardening change briefly broke the admin-check function, caught immediately by
+  testing live rather than trusting a clean advisor re-scan. All three are fixed and re-verified
+  live, along with a defense-in-depth pass revoking Supabase's default anon/authenticated table
+  grants (RLS already blocked them, but a grant-level block doesn't depend on RLS being correct).
+  `prisma/rls.sql` reflects every fix and was proven to match the live database by re-running
+  the entire file end-to-end with zero errors, not just by inspection.
 
 - **A real bug was found and fixed during the step 11 security pass, and it would have broken
   login for everyone against a real database.** `getCurrentEmployee()` (`src/lib/auth.ts`) —
