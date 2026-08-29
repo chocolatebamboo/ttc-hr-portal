@@ -15,14 +15,20 @@ export default async function MorePage() {
 
   return (
     <div className="max-w-md md:hidden pb-4">
-      <h1 className="text-xl font-semibold mb-4">More</h1>
+      <h1 className="page-title text-2xl mb-4">More</h1>
       <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
-        {rest.map((item) => (
-          <Link key={item.href} href={item.href} className="flex items-center justify-between px-4 py-3.5">
-            <span className="text-sm">{item.label}</span>
-            <ChevronRightIcon className="h-4 w-4 text-muted" />
-          </Link>
-        ))}
+        {rest.map((item) => {
+          const Icon = item.icon;
+          return (
+            <Link key={item.href} href={item.href} className="flex items-center justify-between px-4 py-3.5">
+              <span className="flex items-center gap-3 text-sm">
+                <Icon className="h-[18px] w-[18px] text-muted shrink-0" />
+                {item.label}
+              </span>
+              <ChevronRightIcon className="h-4 w-4 text-muted" />
+            </Link>
+          );
+        })}
       </div>
 
       {extra.length > 0 && (
@@ -31,12 +37,18 @@ export default async function MorePage() {
             Administration
           </h2>
           <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
-            {extra.map((item) => (
-              <Link key={item.href} href={item.href} className="flex items-center justify-between px-4 py-3.5">
-                <span className="text-sm">{item.label}</span>
-                <ChevronRightIcon className="h-4 w-4 text-muted" />
-              </Link>
-            ))}
+            {extra.map((item) => {
+              const Icon = item.icon;
+              return (
+                <Link key={item.href} href={item.href} className="flex items-center justify-between px-4 py-3.5">
+                  <span className="flex items-center gap-3 text-sm">
+                    <Icon className="h-[18px] w-[18px] text-muted shrink-0" />
+                    {item.label}
+                  </span>
+                  <ChevronRightIcon className="h-4 w-4 text-muted" />
+                </Link>
+              );
+            })}
           </div>
         </>
       )}

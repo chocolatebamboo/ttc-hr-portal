@@ -36,3 +36,23 @@ export async function withRlsContext<T>(
     return fn(tx as unknown as PrismaClient);
   });
 }
+
+/**
+ * The one query that can't use withRlsContext() above: getCurrentEmployee() (src/lib/auth.ts)
+ * resolving a verified Supabase session into an Employee row for the first time in a request.
+ * At that point the app doesn't know employeeId yet — that's the whole point of the query — so
+ * there's nothing to pass withRlsContext(). The one piece of identity that DOES exist already
+ * is the Supabase Auth user id, which this sets as its own session variable; employee_select's
+ * userId clause (prisma/rls.sql) is what makes that enough to read exactly one row: the
+ * caller's own. Every other query in the app, once employeeId is known, goes through
+ * withRlsContext() as normal — this helper exists for this one bootstrapping step only.
+ */
+export async function withUserIdContext<T>(
+  userId: string,
+  fn: (tx: PrismaClient) => Promise<T>
+): Promise<T> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`select set_config('app.current_user_id', ${userId}, true)`;
+    return fn(tx as unknown as PrismaClient);
+  });
+}

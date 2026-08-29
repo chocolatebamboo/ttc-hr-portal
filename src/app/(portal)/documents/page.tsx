@@ -1,5 +1,11 @@
-import ComingSoon from "@/components/ComingSoon";
+import { redirect } from "next/navigation";
+import { getCurrentEmployee } from "@/lib/auth";
+import { isAdmin } from "@/lib/authorization";
+import DocumentsView from "./DocumentsView";
 
-export default function DocumentsPage() {
-  return <ComingSoon title="Documents" note="The secure document center, with acknowledgments — see README.md build order." />;
+export default async function DocumentsPage() {
+  const employee = await getCurrentEmployee();
+  if (!employee) redirect("/login");
+
+  return <DocumentsView canManage={isAdmin(employee)} />;
 }

@@ -1,20 +1,40 @@
 @import "tailwindcss";
 
+/*
+ * Self-hosted fonts (via @fontsource — see package.json), not next/font/google. This started
+ * as a sandbox workaround (this dev environment can't reach fonts.googleapis.com, so
+ * next/font/google was silently falling back to a generic system serif/sans whenever a
+ * preview screenshot was taken — the actual cause of the "two different fonts" mismatch CB
+ * flagged), but it's the better choice regardless: no external request at all, so page load
+ * never depends on Google's fonts CDN being reachable, fast or not blocked by someone's
+ * network. IBM Plex Sans is a fixed-weight family (400/500/600 imported below in
+ * src/app/layout.tsx); Fraunces is imported as a single variable-font file covering every
+ * weight, which is why only one import line is needed for it.
+ */
 :root {
-  --background: #f7f8fa;
-  --foreground: #171f2b;
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-serif: "Fraunces Variable", ui-serif, Georgia, "Times New Roman", serif;
+
+  /* Warm off-white, closer to TTC's branded BambooHR instance than a cool gray. */
+  --background: #f7f6f1;
+  --foreground: #201a22;
 
   /*
-   * Placeholder brand tokens pulled from the TTC logo (blue ring / magenta mark) — swap
-   * these for the exact hex values from the Wix Editor's Design panel or TTC's brand
-   * guidelines before this ships. See README.md "Brand tokens".
+   * Exact brand values, sampled from the TTC logo file (public/ttc-logo.png):
+   * outer ring blue rgb(1,105,240), inner seal pink rgb(237,0,140). Two shades of pink:
+   * --ttc-pink is the bright brand mark, used for large/bold text, borders and icon accents
+   * where its ~4.2:1 contrast on this background is fine (WCAG "large text" needs 3:1).
+   * --ttc-pink-ink is a darkened version (~6.4:1) for anything small — nav labels, links,
+   * button backgrounds carrying white text — so body-sized brand-colored text stays
+   * readable. Same pattern already existed for blue; kept and tightened to the real hex.
    */
-  --ttc-blue: #1a5fc4;
-  --ttc-blue-ink: #0d3f8c;
-  --ttc-pink: #d81b74;
+  --ttc-blue: #0169f0;
+  --ttc-blue-ink: #0052bb;
+  --ttc-pink: #ed008c;
+  --ttc-pink-ink: #b8006f;
   --surface: #ffffff;
-  --border: #dfe3ea;
-  --muted: #4c5768;
+  --border: #e4e0d6;
+  --muted: #6b6560;
 }
 
 @theme inline {
@@ -26,23 +46,112 @@
   --color-brand: var(--ttc-blue);
   --color-brand-ink: var(--ttc-blue-ink);
   --color-accent: var(--ttc-pink);
+  --color-accent-ink: var(--ttc-pink-ink);
   --font-sans: var(--font-sans);
+  --font-serif: var(--font-serif);
 }
+
+/* @theme inline above maps Tailwind's --font-sans/--font-serif tokens onto the :root values
+   defined at the top of this file — kept as separate declarations (rather than folding the
+   real font stacks directly into @theme inline) so this file has exactly one place that
+   defines what "sans" and "serif" mean here. */
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0e131e;
-    --foreground: #e7ebf3;
-    --surface: #161d2b;
-    --border: #2a3345;
-    --muted: #9aa5b8;
+    --background: #17130f;
+    --foreground: #f1ece6;
+    --surface: #211b17;
+    --border: #38302a;
+    --muted: #b3a99e;
     --ttc-blue: #6ea3f2;
     --ttc-blue-ink: #bcd4fb;
-    --ttc-pink: #f16aa8;
+    --ttc-pink: #ff5cb8;
+    --ttc-pink-ink: #ffa0d6;
   }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
+}
+
+/*
+ * Shared component classes — kept in one place so every page's buttons, page titles and
+ * empty states read as one system instead of each screen hand-rolling its own Tailwind
+ * string. Pill-shaped buttons and bold serif page titles are the two most recognizable
+ * marks of the BambooHR reference this was designed against; everything else (cards, tables,
+ * form fields) stayed close to what shipped in the Phase 1 foundation.
+ */
+@layer components {
+  .page-title {
+    font-family: var(--font-serif);
+    font-weight: 700;
+    color: var(--ttc-pink);
+    letter-spacing: -0.01em;
+  }
+
+  .section-icon-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 1.75rem;
+    width: 1.75rem;
+    border-radius: 9999px;
+    background: color-mix(in srgb, var(--ttc-pink) 12%, transparent);
+    color: var(--ttc-pink-ink);
+    flex-shrink: 0;
+  }
+
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    background: var(--ttc-pink-ink);
+    color: white;
+    font-weight: 600;
+    transition: filter 0.15s ease;
+  }
+  .btn-primary:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+  .btn-primary:disabled {
+    opacity: 0.6;
+  }
+
+  .btn-outline {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    border: 1.5px solid var(--ttc-pink-ink);
+    color: var(--ttc-pink-ink);
+    background: transparent;
+    font-weight: 600;
+    transition: background 0.15s ease;
+  }
+  .btn-outline:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--ttc-pink) 8%, transparent);
+  }
+  .btn-outline:disabled {
+    opacity: 0.6;
+  }
+
+  .btn-neutral {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    border: 1px solid var(--border);
+    color: var(--foreground);
+    background: var(--surface);
+    font-weight: 500;
+    transition: background 0.15s ease;
+  }
+  .btn-neutral:hover:not(:disabled) {
+    background: color-mix(in srgb, black 3%, transparent);
+  }
+  .btn-neutral:disabled {
+    opacity: 0.5;
+  }
 }

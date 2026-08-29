@@ -87,14 +87,14 @@ export default function TeamPtoSection({ employeeId }: { employeeId: string }) {
                   <button
                     onClick={() => decide(r.id, "APPROVED")}
                     disabled={busyId === r.id}
-                    className="rounded-md bg-brand text-white text-xs font-medium px-2.5 py-1.5 disabled:opacity-60"
+                    className="btn-primary text-xs px-3 py-1.5"
                   >
                     Approve
                   </button>
                   <button
                     onClick={() => setDenyingId(denyingId === r.id ? null : r.id)}
                     disabled={busyId === r.id}
-                    className="rounded-md border border-border text-xs font-medium px-2.5 py-1.5 disabled:opacity-60"
+                    className="btn-neutral text-xs px-3 py-1.5"
                   >
                     Deny
                   </button>
@@ -112,12 +112,12 @@ export default function TeamPtoSection({ employeeId }: { employeeId: string }) {
                 onChange={(e) => setDenyComment(e.target.value)}
                 placeholder="Optional note for the employee…"
                 rows={2}
-                className="flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-brand"
+                className="flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
               />
               <button
                 onClick={() => decide(r.id, "DENIED", denyComment.trim() || undefined)}
                 disabled={busyId === r.id}
-                className="rounded-md bg-accent text-white text-xs font-medium px-3 py-1.5 disabled:opacity-60 self-start"
+                className="btn-primary text-xs px-3 py-1.5 self-start"
               >
                 Confirm deny
               </button>

@@ -84,7 +84,7 @@ export default function TimeClockCard() {
         <p className="text-sm text-accent mb-3">
           Unable to load your time clock. Please try again or contact HR.
         </p>
-        <button onClick={refresh} className="text-sm text-brand hover:underline">
+        <button onClick={refresh} className="text-sm text-accent-ink font-medium hover:underline">
           Try again
         </button>
       </div>
@@ -134,7 +134,7 @@ export default function TimeClockCard() {
             <button
               onClick={() => performAction(primaryAction.endpoint)}
               disabled={actionState === "submitting"}
-              className="flex-1 min-h-[56px] rounded-xl bg-brand text-white text-base font-semibold disabled:opacity-60"
+              className="btn-primary flex-1 min-h-[56px] text-base"
             >
               {actionState === "submitting" ? "Updating…" : primaryAction.label}
             </button>
@@ -143,7 +143,7 @@ export default function TimeClockCard() {
             <button
               onClick={() => performAction("/api/time/clock-out")}
               disabled={actionState === "submitting"}
-              className="min-h-[56px] px-5 rounded-xl border border-border text-sm font-medium disabled:opacity-60"
+              className="btn-neutral min-h-[56px] px-5 text-sm"
             >
               Clock Out
             </button>

@@ -21,6 +21,12 @@ export function isAdmin(actor: CurrentEmployee): boolean {
   return ADMIN_ROLES.includes(actor.role);
 }
 
+/** For admin-only routes (document management, etc.) where there's no target employee to
+ *  check a relationship against — the actor's role alone decides it. */
+export function assertIsAdmin(actor: CurrentEmployee): void {
+  if (!isAdmin(actor)) throw new ForbiddenError();
+}
+
 /**
  * True if `actor` may view/act on `targetEmployeeId`'s work-related records (time entries,
  * PTO). Admins: anyone. Supervisors: their direct reports only — checked against the
@@ -34,12 +40,21 @@ export async function canAccessEmployeeRecords(
   if (actor.id === targetEmployeeId) return true;
 
   if (actor.role === "SUPERVISOR") {
-    // Import locally to avoid a circular import between auth libs.
-    const { prisma } = await import("@/lib/db");
-    const target = await prisma.employee.findUnique({
-      where: { id: targetEmployeeId },
-      select: { supervisorId: true },
-    });
+    // Import locally to avoid a circular import between auth libs. Reads under the ACTOR's
+    // own RLS identity — not a bare, unscoped `prisma` call — because employee_select
+    // requires a set identity to allow anything through (see prisma/rls.sql). A supervisor
+    // querying a real report of theirs matches employee_select's own "supervisorId = me"
+    // clause and the row comes back; querying anyone else still resolves (the directory-style
+    // clause makes any active employee's row visible to an authenticated caller), so the
+    // actual narrowing happens right here, in the comparison below — RLS decided the row
+    // could be READ, this decides whether the caller may ACT on it.
+    const { withRlsContext } = await import("@/lib/db");
+    const target = await withRlsContext({ employeeId: actor.id, role: actor.role }, (tx) =>
+      tx.employee.findUnique({
+        where: { id: targetEmployeeId },
+        select: { supervisorId: true },
+      })
+    );
     return target?.supervisorId === actor.id;
   }
 

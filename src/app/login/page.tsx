@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
@@ -34,10 +35,8 @@ export default function LoginPage() {
     <main className="flex-1 flex items-center justify-center px-4 py-12">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <div className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-brand text-white font-semibold text-lg mb-4">
-            TTC
-          </div>
-          <h1 className="text-xl font-semibold text-foreground">Staff sign in</h1>
+          <Image src="/ttc-logo.png" alt="Talented Teen Club" width={64} height={64} className="mx-auto mb-4" priority />
+          <h1 className="page-title text-2xl">Staff sign in</h1>
           <p className="text-sm text-muted mt-1">Talented Teen Club HR Portal</p>
         </div>
 
@@ -56,7 +55,7 @@ export default function LoginPage() {
               autoComplete="username"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-accent"
               placeholder="you@talentedteenclub.org"
             />
           </div>
@@ -72,7 +71,7 @@ export default function LoginPage() {
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-accent"
             />
           </div>
 
@@ -85,13 +84,13 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={status === "loading"}
-            className="w-full rounded-lg bg-brand text-white font-medium py-3 text-base disabled:opacity-60"
+            className="btn-primary w-full py-3 text-base"
           >
             {status === "loading" ? "Signing in…" : "Sign in"}
           </button>
 
           <p className="text-center text-sm">
-            <a href="/forgot-password" className="text-brand hover:underline">
+            <a href="/forgot-password" className="text-accent-ink font-medium hover:underline">
               Forgot your password?
             </a>
           </p>

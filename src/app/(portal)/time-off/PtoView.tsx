@@ -41,10 +41,10 @@ export default function PtoView() {
   return (
     <div className="max-w-2xl">
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-semibold">Time Off</h1>
+        <h1 className="page-title text-2xl">Time Off</h1>
         <button
           onClick={() => setFormOpen((o) => !o)}
-          className="rounded-lg bg-brand text-white text-sm font-medium px-4 py-2"
+          className={formOpen ? "btn-neutral text-sm px-4 py-2" : "btn-primary text-sm px-4 py-2"}
         >
           {formOpen ? "Cancel" : "Request Time Off"}
         </button>
@@ -151,7 +151,7 @@ function PtoRequestForm({ onSubmitted }: { onSubmitted: () => void }) {
         <select
           value={type}
           onChange={(e) => setType(e.target.value as PtoType)}
-          className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-brand"
+          className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-accent"
         >
           {TYPE_OPTIONS.map((t) => (
             <option key={t} value={t}>
@@ -169,7 +169,7 @@ function PtoRequestForm({ onSubmitted }: { onSubmitted: () => void }) {
             required
             value={startDate}
             onChange={(e) => setStartDate(e.target.value)}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-brand"
+            className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-accent"
           />
         </div>
         <div>
@@ -179,7 +179,7 @@ function PtoRequestForm({ onSubmitted }: { onSubmitted: () => void }) {
             required
             value={endDate}
             onChange={(e) => setEndDate(e.target.value)}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-brand"
+            className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-accent"
           />
         </div>
       </div>
@@ -194,7 +194,7 @@ function PtoRequestForm({ onSubmitted }: { onSubmitted: () => void }) {
           value={hours}
           onChange={(e) => setHours(e.target.value)}
           placeholder="e.g. 8"
-          className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-brand"
+          className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-accent"
         />
       </div>
 
@@ -204,7 +204,7 @@ function PtoRequestForm({ onSubmitted }: { onSubmitted: () => void }) {
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           rows={2}
-          className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-brand"
+          className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-accent"
         />
       </div>
 
@@ -217,7 +217,7 @@ function PtoRequestForm({ onSubmitted }: { onSubmitted: () => void }) {
       <button
         type="submit"
         disabled={status === "submitting"}
-        className="rounded-lg bg-brand text-white font-medium px-5 py-2.5 text-sm disabled:opacity-60"
+        className="btn-primary px-5 py-2.5 text-sm"
       >
         {status === "submitting" ? "Submitting…" : "Submit Request"}
       </button>

@@ -88,7 +88,7 @@ export default function ReviewTimesheetView({ employeeId }: { employeeId: string
         <div className="flex items-center gap-2">
           <button
             onClick={() => setOffset((o) => o - 1)}
-            className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-black/[0.03]"
+            className="btn-neutral h-8 w-8 text-sm"
             aria-label="Previous week"
           >
             ←
@@ -99,7 +99,7 @@ export default function ReviewTimesheetView({ employeeId }: { employeeId: string
           <button
             onClick={() => setOffset((o) => Math.min(0, o + 1))}
             disabled={offset === 0}
-            className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-black/[0.03] disabled:opacity-40"
+            className="btn-neutral h-8 w-8 text-sm"
             aria-label="Next week"
           >
             →

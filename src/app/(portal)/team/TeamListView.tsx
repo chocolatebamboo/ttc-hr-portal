@@ -26,7 +26,7 @@ export default function TeamListView() {
 
   return (
     <div className="max-w-2xl">
-      <h1 className="text-xl font-semibold mb-1">My Team</h1>
+      <h1 className="page-title text-2xl mb-1">My Team</h1>
       <p className="text-sm text-muted mb-5">Review and approve timesheets for the people you supervise.</p>
 
       {loadState === "loading" && (

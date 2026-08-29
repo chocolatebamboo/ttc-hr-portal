@@ -67,11 +67,11 @@ export default function TimesheetView() {
   return (
     <div className="max-w-3xl">
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-semibold">My Time</h1>
+        <h1 className="page-title text-2xl">My Time</h1>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setOffset((o) => o - 1)}
-            className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-black/[0.03]"
+            className="btn-neutral h-8 w-8 text-sm"
             aria-label="Previous week"
           >
             ←
@@ -82,7 +82,7 @@ export default function TimesheetView() {
           <button
             onClick={() => setOffset((o) => Math.min(0, o + 1))}
             disabled={offset === 0}
-            className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-black/[0.03] disabled:opacity-40"
+            className="btn-neutral h-8 w-8 text-sm"
             aria-label="Next week"
           >
             →

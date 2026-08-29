@@ -5,10 +5,15 @@ import { toErrorResponse } from "@/lib/api-errors";
 import type { DirectReportDTO } from "@/types";
 
 /**
- * GET /api/team/reports — the caller's own direct reports (RLS's employee_select policy
- * already limits "Employee" rows visible to a non-admin caller to: themselves, and anyone
- * whose supervisorId is them — so this query can't return someone else's team even if the
- * WHERE clause below were wrong).
+ * GET /api/team/reports — the caller's own direct reports.
+ *
+ * Unlike most queries in this app, the `where: { supervisorId: reviewer.id }` below is doing
+ * the actual narrowing by itself — employee_select (prisma/rls.sql) now allows any active
+ * employee's row through to any authenticated caller (the Directory needs that), so RLS is no
+ * longer an independent backstop for THIS specific query the way it still is for, say,
+ * time entries or PTO. If this WHERE clause were ever removed or weakened, this route would
+ * start returning every active employee, not just the reviewer's own team. Worth remembering
+ * before "simplifying" this query.
  */
 export async function GET() {
   try {

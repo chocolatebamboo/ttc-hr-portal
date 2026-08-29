@@ -146,18 +146,18 @@ function TimesheetRow({
         {review && (
           <td className="px-4 py-2.5">
             {isActionable ? (
-              <div className="flex gap-2">
+              <div className="flex flex-col gap-1 items-start">
                 <button
                   onClick={() => entry && review.onApprove(entry.id)}
                   disabled={isReviewBusy}
-                  className="rounded-md bg-brand text-white text-xs font-medium px-2.5 py-1.5 disabled:opacity-60"
+                  className="btn-primary text-xs px-3 py-1 whitespace-nowrap w-full justify-center"
                 >
                   Approve
                 </button>
                 <button
                   onClick={() => setReturning((r) => !r)}
                   disabled={isReviewBusy}
-                  className="rounded-md border border-border text-xs font-medium px-2.5 py-1.5 disabled:opacity-60"
+                  className="btn-neutral text-xs px-3 py-1 whitespace-nowrap w-full justify-center"
                 >
                   Return
                 </button>
@@ -173,7 +173,7 @@ function TimesheetRow({
               <button
                 onClick={() => (editing ? setEditing(false) : startEditing())}
                 disabled={isCorrectionBusy}
-                className="rounded-md border border-border text-xs font-medium px-2.5 py-1.5 disabled:opacity-60"
+                className="btn-neutral text-xs px-3 py-1.5"
               >
                 {editing ? "Cancel" : "Edit & resubmit"}
               </button>
@@ -201,7 +201,7 @@ function TimesheetRow({
                 onChange={(e) => setComment(e.target.value)}
                 placeholder="Explain what needs correcting…"
                 rows={2}
-                className="flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-brand"
+                className="flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
               />
               <div className="flex gap-2 sm:flex-col">
                 <button
@@ -212,13 +212,13 @@ function TimesheetRow({
                     setComment("");
                   }}
                   disabled={!comment.trim() || isReviewBusy}
-                  className="rounded-md bg-accent text-white text-xs font-medium px-3 py-1.5 disabled:opacity-60"
+                  className="btn-primary text-xs px-3 py-1.5"
                 >
                   Send back
                 </button>
                 <button
                   onClick={() => setReturning(false)}
-                  className="rounded-md border border-border text-xs font-medium px-3 py-1.5"
+                  className="btn-neutral text-xs px-3 py-1.5"
                 >
                   Cancel
                 </button>
@@ -243,13 +243,13 @@ function TimesheetRow({
                 <button
                   onClick={submitCorrection}
                   disabled={isCorrectionBusy}
-                  className="rounded-md bg-brand text-white text-xs font-medium px-3 py-1.5 disabled:opacity-60"
+                  className="btn-primary text-xs px-3 py-1.5"
                 >
                   {isCorrectionBusy ? "Submitting…" : "Resubmit for approval"}
                 </button>
                 <button
                   onClick={() => setEditing(false)}
-                  className="rounded-md border border-border text-xs font-medium px-3 py-1.5"
+                  className="btn-neutral text-xs px-3 py-1.5"
                 >
                   Cancel
                 </button>
@@ -270,7 +270,7 @@ function TimeField({ label, value, onChange }: { label: string; value: string; o
         type="time"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded-md border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-brand"
+        className="rounded-md border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
       />
     </label>
   );

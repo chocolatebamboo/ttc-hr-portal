@@ -29,7 +29,7 @@ export default function BottomNav() {
               key={href}
               href={href}
               className={`flex flex-col items-center justify-center gap-1 py-2.5 min-h-[56px] text-[11px] ${
-                active ? "text-brand-ink" : "text-muted"
+                active ? "text-accent-ink font-medium" : "text-muted"
               }`}
             >
               <Icon className="h-5 w-5" />

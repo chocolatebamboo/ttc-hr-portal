@@ -24,7 +24,7 @@ export default function ForgotPasswordPage() {
   return (
     <main className="flex-1 flex items-center justify-center px-4 py-12">
       <div className="w-full max-w-sm">
-        <h1 className="text-xl font-semibold mb-1.5">Reset your password</h1>
+        <h1 className="page-title text-2xl mb-1.5">Reset your password</h1>
         <p className="text-sm text-muted mb-6">
           We&apos;ll email you a link to choose a new one.
         </p>
@@ -45,20 +45,16 @@ export default function ForgotPasswordPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@talentedteenclub.org"
-              className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-accent"
             />
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-lg bg-brand text-white font-medium py-3 text-base disabled:opacity-60"
-            >
+            <button type="submit" disabled={loading} className="btn-primary w-full py-3 text-base">
               {loading ? "Sending…" : "Send reset link"}
             </button>
           </form>
         )}
 
         <p className="text-center text-sm mt-4">
-          <a href="/login" className="text-brand hover:underline">
+          <a href="/login" className="text-accent-ink font-medium hover:underline">
             Back to sign in
           </a>
         </p>

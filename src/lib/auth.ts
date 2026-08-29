@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/db";
+import { withUserIdContext } from "@/lib/db";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { CurrentEmployee } from "@/types";
 
@@ -9,6 +9,14 @@ import type { CurrentEmployee } from "@/types";
  * very next request after HR flips deactivatedAt, this returns null and every route below
  * treats the caller as logged out, regardless of whether their browser session is still
  * technically valid.
+ *
+ * This is the one lookup in the app that can't run through withRlsContext() — employeeId is
+ * exactly what this function is trying to discover, so there's nothing to pass it yet. It
+ * goes through withUserIdContext() instead (see db.ts and employee_select in prisma/rls.sql),
+ * which is what makes this a real RLS-scoped read rather than the bare, unscoped Prisma call
+ * it used to be — that version relied on no session identity being set at all, which is not
+ * the same thing as being safely readable, and would have silently returned nothing for
+ * every user against a real Postgres connection.
  */
 export async function getCurrentEmployee(): Promise<CurrentEmployee | null> {
   const supabase = await createSupabaseServerClient();
@@ -18,9 +26,9 @@ export async function getCurrentEmployee(): Promise<CurrentEmployee | null> {
 
   if (!user) return null;
 
-  const employee = await prisma.employee.findUnique({
-    where: { userId: user.id },
-  });
+  const employee = await withUserIdContext(user.id, (tx) =>
+    tx.employee.findUnique({ where: { userId: user.id } })
+  );
 
   if (!employee) return null;
   if (employee.deactivatedAt) return null;

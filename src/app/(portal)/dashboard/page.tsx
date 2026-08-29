@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentEmployee } from "@/lib/auth";
 import { withRlsContext } from "@/lib/db";
+import { listDocumentsForEmployee } from "@/lib/documents";
 import TimeClockCard from "@/components/TimeClockCard";
 import PtoStatusPill from "@/components/PtoStatusPill";
 import { PTO_TYPE_LABEL, formatDateRange } from "@/lib/time";
@@ -25,10 +26,13 @@ export default async function DashboardPage() {
     })
   );
 
+  const documents = await listDocumentsForEmployee(employee);
+  const pendingAcknowledgments = documents.filter((d) => d.requiresAcknowledgment && !d.acknowledgedAt);
+
   return (
     <div className="max-w-2xl space-y-6">
       <div>
-        <h1 className="text-xl font-semibold">
+        <h1 className="page-title text-2xl md:text-3xl">
           Welcome, {employee.preferredName || employee.firstName}
         </h1>
         <p className="text-sm text-muted mt-0.5">{employee.jobTitle}</p>
@@ -43,7 +47,7 @@ export default async function DashboardPage() {
             <Link
               key={action.href}
               href={action.href}
-              className="rounded-xl border border-border bg-surface px-4 py-3.5 text-sm font-medium hover:border-brand transition-colors"
+              className="rounded-xl border border-border bg-surface px-4 py-3.5 text-sm font-medium hover:border-accent hover:text-accent-ink transition-colors"
             >
               {action.label}
             </Link>
@@ -73,9 +77,24 @@ export default async function DashboardPage() {
 
       <div>
         <h2 className="text-sm font-medium text-muted mb-2">Documents awaiting your acknowledgment</h2>
-        <div className="rounded-xl border border-border bg-surface px-4 py-4 text-sm text-muted">
-          The document center isn&apos;t built yet.
-        </div>
+        {pendingAcknowledgments.length === 0 ? (
+          <div className="rounded-xl border border-border bg-surface px-4 py-4 text-sm text-muted">
+            You&apos;re all caught up — nothing needs your acknowledgment right now.
+          </div>
+        ) : (
+          <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
+            {pendingAcknowledgments.map((doc) => (
+              <Link
+                key={doc.id}
+                href="/documents"
+                className="flex items-center justify-between px-4 py-3 text-sm hover:bg-black/[0.02] transition-colors"
+              >
+                <span>{doc.title}</span>
+                <span className="text-accent-ink font-medium whitespace-nowrap">Review →</span>
+              </Link>
+            ))}
+          </div>
+        )}
       </div>
 
       <div>

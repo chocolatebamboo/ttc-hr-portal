@@ -30,10 +30,10 @@ export default async function ReviewEmployeePage(
 
   return (
     <div className="max-w-3xl">
-      <Link href="/team" className="text-sm text-brand hover:underline mb-3 inline-block">
+      <Link href="/team" className="text-sm text-muted hover:text-accent-ink mb-3 inline-block">
         ← My Team
       </Link>
-      <h1 className="text-xl font-semibold">
+      <h1 className="page-title text-2xl">
         {target.preferredName || target.firstName} {target.lastName}
       </h1>
       <p className="text-sm text-muted mb-5">{target.jobTitle}</p>
