@@ -88,6 +88,7 @@ model Employee {
   acknowledgments      DocumentAcknowledgment[]
   onboarding           EmployeeOnboarding?
   announcementsWritten Announcement[]        @relation("AnnouncementAuthor")
+  announcementAudiences AnnouncementAudience[]
   auditLogEntries      AuditLog[]            @relation("ActorOnAuditLog")
 
   @@index([supervisorId])
@@ -327,6 +328,7 @@ model Announcement {
   author         Employee  @relation("AnnouncementAuthor", fields: [authorId], references: [id])
   publishDate    DateTime  @default(now())
   expirationDate DateTime?
+  createdAt      DateTime  @default(now())
 
   audiences AnnouncementAudience[]
 
@@ -341,6 +343,7 @@ model AnnouncementAudience {
   departmentId   String?
   department     Department?   @relation(fields: [departmentId], references: [id])
   employeeId     String?       // targets a specific employee when set
+  employee       Employee?     @relation(fields: [employeeId], references: [id])
 
   @@index([announcementId])
 }
