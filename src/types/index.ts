@@ -53,6 +53,33 @@ export interface AdminAttendanceRowDTO {
   missingClockOutCount: number;
 }
 
+/** One row in the Employees admin page (src/app/(portal)/admin/employees) — every employee,
+ *  active or deactivated, with the full HR record (unlike DirectoryEntryDTO, which deliberately
+ *  omits personal contact info). Only ever returned to an admin — see src/lib/employees-admin.ts. */
+export interface EmployeeAdminRowDTO {
+  id: string;
+  employeeCode: string;
+  firstName: string;
+  lastName: string;
+  preferredName: string | null;
+  ttcEmail: string;
+  workPhone: string | null;
+  personalPhone: string | null;
+  personalEmail: string | null;
+  emergencyContactName: string | null;
+  emergencyContactPhone: string | null;
+  emergencyContactRelation: string | null;
+  jobTitle: string;
+  role: Role;
+  employmentStatus: EmploymentStatus;
+  departmentId: string | null;
+  departmentName: string | null;
+  supervisorId: string | null;
+  supervisorName: string | null;
+  deactivatedAt: string | null;
+  hireDate: string;
+}
+
 export interface DirectReportDTO {
   id: string;
   firstName: string;

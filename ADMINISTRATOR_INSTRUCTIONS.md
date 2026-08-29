@@ -2,10 +2,10 @@
 
 A walkthrough of everything an HR Admin or Super Admin can do in the TTC HR Portal, written
 against the app as it exists today. This is the "Administrator Instructions" the original
-project brief called for — it was deliberately written last, once there was real UI to
-describe, rather than earlier against screens that didn't exist yet. See README.md's "What's
-NOT built yet" for the two admin areas (an Employees page, and system-level Administration
-settings) this document can't cover because they aren't built.
+project brief called for — it was deliberately written first once there was real UI to
+describe, and updated again once the Employees page followed. See README.md's "What's NOT
+built yet" for the one remaining admin area (system-level Administration settings) this
+document can't cover because it isn't built.
 
 Two roles can do everything in this document: **HR Admin** and **Super Admin**. The app
 doesn't currently distinguish between them anywhere in the UI or in `src/lib/authorization.ts`
@@ -21,9 +21,9 @@ alone to keep a non-admin out.
 Admin accounts sign in the same way as everyone else, at the deployed URL's `/login` page,
 with the email and password Supabase Auth has on file. There's no separate admin login. Once
 signed in, the left sidebar (or the bottom nav on a phone) shows an extra section below the
-regular employee links — Attendance, PTO Management, Documents' Manage tab, Onboarding's Manage
-tab, Announcements' Manage tab, Reports, and Administration — that a non-admin never sees at
-all, not even as a disabled/greyed-out link.
+regular employee links — Employees, Attendance, PTO Management, Documents' Manage tab,
+Onboarding's Manage tab, Announcements' Manage tab, Reports, and Administration — that a
+non-admin never sees at all, not even as a disabled/greyed-out link.
 
 If you need to set someone's password directly instead of relying on the invite-email flow
 (useful when a link has expired, or email delivery is unreliable), see
@@ -136,23 +136,43 @@ download a number that would otherwise be quietly missing hours — go clear tho
 Attendance first (or accept the gap knowingly) before running payroll off an export with that
 warning showing.
 
-## Deactivating an employee
+## Employees (`/admin/employees`)
 
-There's no dedicated Employees admin page yet (see README's "What's NOT built yet"), so
-deactivating someone today means setting `Employee.deactivatedAt` directly in the database —
-ask whoever manages the Supabase project to do this, or run the update via Supabase's SQL
-editor. The effect is immediate and total: `getCurrentEmployee()` checks `deactivatedAt` on
-*every* request, not just at sign-in, so a deactivated employee is blocked on their very next
-action rather than staying logged in until a session naturally expires. There is no
-session-level caching of this status anywhere that would let a deactivated account keep
-working past that point.
+Every employee record — active and deactivated — with the full HR record: everything Directory
+shows plus personal phone, personal email, and emergency contact, none of which Directory ever
+exposes even to an admin (see Directory above). This is the one page in the app with that full
+picture, so it's admin-only end to end.
+
+- **Add Employee** — fill in name, email, job title, role, employment status, department
+  (type an existing one or a brand new name — new departments are created automatically),
+  supervisor, hire date, and optionally phone/emergency-contact details. Submitting sends a
+  real Supabase invite email to the address you entered — the same mechanism
+  `scripts/create-pilot-accounts.mjs` uses, just built into the app now. Nobody, including you,
+  ever sees or sets the new employee's password; they set it themselves from the invite link.
+  If the email already has an Auth account (say, someone deactivated and being re-added), the
+  existing account is reused rather than a duplicate invite going out.
+- **Edit** — change anything about an existing employee except their login email (changing that
+  would also require updating their linked Supabase Auth account, which isn't wired up yet —
+  ask whoever manages the Supabase project for an email change) and their active/deactivated
+  state, which is the dedicated action below instead of a field in this form. An HR Admin can
+  edit every field on a Super Admin's record except that person's role — only an existing Super
+  Admin can grant or change the Super Admin role, on anyone including themselves; the form
+  explains this next to the Role field when it applies. You also can't change your own Role or
+  Employment Status field from this form, for the same lockout-prevention reason — ask another
+  admin.
+- **Deactivate / Reactivate** — revokes or restores login access immediately.
+  `getCurrentEmployee()` checks this on *every* request, not just at sign-in, so a deactivated
+  employee is blocked on their very next action rather than staying logged in until a session
+  naturally expires — there's no session-level caching of this status that would delay it. You
+  can't deactivate your own account from here, on purpose, so an admin can never accidentally
+  lock themselves out.
+
+Search filters by name, email, job title, department, or employee code as you type.
 
 ## What HR/Super Admin still can't do from the UI
 
-An Employees admin page — adding a new employee (today that only happens as a side effect of
-running `scripts/create-pilot-accounts.mjs`, or by hand against the database), editing an
-existing one's title/department/supervisor, or reactivating a deactivated one — doesn't exist
-yet, and neither does the system-level Administration page (`/admin/administration`, currently
-a plain "Not built yet" stub). Both nav links are visible to admins today so their eventual
-location in the app is obvious, but they don't pretend to work — see README.md's Roadmap for
-where these sit in the build order.
+The system-level Administration page (`/admin/administration`) is still a plain "Not built yet"
+stub — what actually belongs on it (beyond what code and RLS already enforce) hasn't been
+decided yet. The nav link is visible to admins today so its eventual location in the app is
+obvious, but it doesn't pretend to work — see README.md's Roadmap for where it sits in the
+build order.

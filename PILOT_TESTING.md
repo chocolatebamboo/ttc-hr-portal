@@ -31,10 +31,9 @@ button is.
 The README's "What's NOT built yet" list is current — worth skimming before the pilot starts so
 these don't get reported as surprises:
 
-- There's no Employees admin page yet — adding, editing, deactivating, or reassigning an
-  employee's role/supervisor/department only happens by hand in the database today, not through
-  the UI.
 - The `/admin/administration` page (system-level roles/permissions/settings) is a stub.
+- An employee's login email can't be changed from the Employees page — that needs a matching
+  change on their Supabase Auth account, which isn't wired up yet.
 - Tables that scroll sideways on a narrow phone screen (the weekly timesheet, in particular) are
   an intentional design choice, not a layout bug — the columns are all there if you scroll.
 
@@ -104,9 +103,17 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
       and download the Payroll Hours CSV. Open it and sanity-check the numbers against what was
       actually clocked and approved. Confirm the "still awaiting approval" warning shows up if
       anything in range hasn't been approved yet.
-- [ ] Deactivate one pilot account temporarily (a throwaway one, not someone mid-workflow) and
-      confirm they're immediately signed out / blocked on their next request — then reactivate
-      them and confirm they're back in.
+- [ ] Open Employees — confirm every pilot tester shows up with the right role, department, and
+      supervisor. Edit one person's job title or department and confirm it saves.
+- [ ] From Employees, add one more person (a throwaway test account you control) with **Add
+      Employee** and confirm the invite email arrives — this is now the in-app alternative to
+      running `scripts/create-pilot-accounts.mjs` from a terminal.
+- [ ] Deactivate that throwaway account from Employees and confirm they're immediately signed
+      out / blocked on their next request — then Reactivate them and confirm they're back in.
+      Also confirm you can't deactivate your own account from here.
+- [ ] As the HR Admin pilot tester (not a Super Admin), confirm you can edit a Super Admin's
+      other fields but the Role field is locked with an explanation when it's already Super
+      Admin or you try to set it to Super Admin.
 - [ ] Open Attendance — confirm it shows every pilot employee for the current week (not just
       one supervisor's team), and that the awaiting-approval / missing-clock-out counts match
       what you'd expect from what the Employee testers actually did.

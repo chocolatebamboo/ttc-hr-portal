@@ -57,6 +57,17 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   past-expiration "Expired" ones) with who it targeted, and can delete one outright — unlike
   Documents, there's no archive/audit-trail concept for a post that was never a legal or HR
   record in the first place.
+- **Employees admin page** — `/admin/employees` (HR/Super Admin only) lists every employee,
+  active and deactivated, with full HR record fields Directory deliberately never shows
+  (personal phone/email, emergency contact). Adding a new employee sends them a real Supabase
+  invite email — the same `inviteUserByEmail` flow `scripts/create-pilot-accounts.mjs` uses,
+  now built into the app itself — and creates their Department (by name, upserted) and
+  Employee row. Editing covers everything except login email (would also require updating the
+  linked Supabase Auth account, out of scope for now) and active/deactivated state, which is
+  its own dedicated Deactivate/Reactivate action so it can't be fat-fingered inside a big edit
+  form; self-deactivation is blocked outright. Granting or changing anyone's role to/from Super
+  Admin is restricted to an actor who is already a Super Admin — an HR Admin can still edit
+  every other field on a Super Admin's record, just not that one.
 - **HR-wide Attendance dashboard** — `/admin/attendance` (HR/Super Admin only) lists every
   active employee for a selected week, not just one supervisor's team, with an
   awaiting-approval count and a missing-clock-out count per person and an optional department
@@ -101,11 +112,10 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
 
 ## What's NOT built yet
 
-An Employees admin page (add/edit/deactivate an employee, change role/supervisor/department
-through the UI — today that only happens by hand in the database) and system-level
-Administration settings (`/admin/administration` — roles/permissions/system config) — both
-still stubs. Every corresponding nav link in the app currently opens a page that plainly says
-"Not built yet" rather than pretending. See **Roadmap** for the build order.
+System-level Administration settings (`/admin/administration`) — still a stub; what belongs on
+it is still undecided (roles/permissions config beyond what's already enforced in code and RLS?
+org-wide preferences? something else?). The nav link opens a page that plainly says "Not built
+yet" rather than pretending. See **Roadmap** for the build order.
 
 See **`ADMINISTRATOR_INSTRUCTIONS.md`** for the full HR/Super Admin walkthrough of everything
 that IS built.
@@ -272,12 +282,17 @@ starts:
 13. ~~HR-wide Attendance + PTO dashboards, bulk timesheet approval, document versioning~~ ✅
     (`/admin/attendance`, `/admin/pto`, "Approve all awaiting" on the per-employee review page,
     "New version" on the Documents Manage tab — see "What's built so far" above for each).
-14. ~~Administrator Instructions~~ ✅ — see **`ADMINISTRATOR_INSTRUCTIONS.md`**, written now
+14. ~~Employees admin page~~ ✅ (`/admin/employees` — add/edit/deactivate/reactivate, real
+    Supabase invite emails from the UI). This also gives item 12 above a second path that
+    doesn't need `scripts/create-pilot-accounts.mjs` run from a machine with real network
+    access — the deployed app itself (on Render, not this sandbox) can send the invite
+    directly, so adding the Supervisor/Employee pilot testers can happen from the Employees
+    page instead of the script, if that's easier.
+15. ~~Administrator Instructions~~ ✅ — see **`ADMINISTRATOR_INSTRUCTIONS.md`**, written now
     that there's real UI to document against.
 
-**Not yet built, worth flagging now:** an Employees admin page (add/edit/deactivate/reassign
-an employee through the UI) and system-level Administration settings (`/admin/administration`)
-— both still stubs; see "What's NOT built yet" above.
+**Not yet built, worth flagging now:** system-level Administration settings
+(`/admin/administration`) — still a stub; see "What's NOT built yet" above.
 
 ## Security notes for whoever reviews this before launch
 
