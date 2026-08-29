@@ -31,9 +31,10 @@ button is.
 The README's "What's NOT built yet" list is current — worth skimming before the pilot starts so
 these don't get reported as surprises:
 
-- There's no HR-wide "everyone's timesheets" or "everyone's upcoming PTO" view yet — HR sees one
-  supervisor's team at a time, the same as a supervisor does.
-- Approvals are one at a time — there's no "approve the whole week" or "approve all" button yet.
+- There's no Employees admin page yet — adding, editing, deactivating, or reassigning an
+  employee's role/supervisor/department only happens by hand in the database today, not through
+  the UI.
+- The `/admin/administration` page (system-level roles/permissions/settings) is a stub.
 - Tables that scroll sideways on a narrow phone screen (the weekly timesheet, in particular) are
   an intentional design choice, not a layout bug — the columns are all there if you scroll.
 
@@ -106,6 +107,18 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
 - [ ] Deactivate one pilot account temporarily (a throwaway one, not someone mid-workflow) and
       confirm they're immediately signed out / blocked on their next request — then reactivate
       them and confirm they're back in.
+- [ ] Open Attendance — confirm it shows every pilot employee for the current week (not just
+      one supervisor's team), and that the awaiting-approval / missing-clock-out counts match
+      what you'd expect from what the Employee testers actually did.
+- [ ] Open PTO Management — confirm the Pending queue shows requests from every pilot employee,
+      approve or deny one directly from there, and confirm the Upcoming section lists anything
+      already approved with a start date today or later.
+- [ ] On a supervisor's per-employee review page (My Team → an employee, or via Attendance),
+      submit enough of that employee's days to have more than one Awaiting Approval at once,
+      then use "Approve all awaiting" and confirm every one of them updates.
+- [ ] On the Documents Manage tab, upload a new version of a document that requires
+      acknowledgment; confirm an employee who already acknowledged the old version is asked to
+      acknowledge again, and that the version number shown ticks up.
 - [ ] Everything in the Employee and Supervisor checklists too, since HR can act as either.
 
 ## After the pilot

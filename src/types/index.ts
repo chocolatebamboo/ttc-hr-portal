@@ -40,6 +40,19 @@ export interface TimeEntryDTO {
   reviewComment?: string | null;
 }
 
+/** One row in the HR-wide attendance dashboard (src/app/(portal)/admin/attendance) — every
+ *  active employee, not just one supervisor's team, for a selected week. */
+export interface AdminAttendanceRowDTO {
+  employeeId: string;
+  name: string;
+  jobTitle: string;
+  department: string | null;
+  awaitingApprovalCount: number;
+  /** Entries with a clockIn but no clockOut yet, within the selected week — the "missing
+   *  clock-outs" the admin attendance dashboard is meant to surface. */
+  missingClockOutCount: number;
+}
+
 export interface DirectReportDTO {
   id: string;
   firstName: string;
@@ -65,6 +78,21 @@ export interface PtoRequestDTO {
   reviewComment: string | null;
   reviewedAt: string | null;
   createdAt: string;
+}
+
+/** Same shape as PtoRequestDTO plus who it belongs to — for the HR-wide PTO dashboard
+ *  (src/app/(portal)/admin/pto), which lists requests across every employee at once rather
+ *  than one supervisor's team. */
+export interface AdminPtoRequestDTO extends PtoRequestDTO {
+  employeeId: string;
+  employeeName: string;
+}
+
+/** GET /api/admin/pto's response — a pending queue for HR to act on, and a forward-looking
+ *  view of who's already approved to be out, so HR can see coverage gaps before they happen. */
+export interface AdminPtoSummaryDTO {
+  pending: AdminPtoRequestDTO[];
+  upcoming: AdminPtoRequestDTO[];
 }
 
 export type DocumentCategory =

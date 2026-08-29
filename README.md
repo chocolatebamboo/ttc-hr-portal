@@ -57,6 +57,33 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   past-expiration "Expired" ones) with who it targeted, and can delete one outright — unlike
   Documents, there's no archive/audit-trail concept for a post that was never a legal or HR
   record in the first place.
+- **HR-wide Attendance dashboard** — `/admin/attendance` (HR/Super Admin only) lists every
+  active employee for a selected week, not just one supervisor's team, with an
+  awaiting-approval count and a missing-clock-out count per person and an optional department
+  filter. No new RLS policy was needed for this — `is_admin()` already grants the
+  `time_entry_select` policy full org-wide read access (`prisma/rls.sql`), so the query in
+  `src/lib/attendance-admin.ts` simply doesn't filter by `employeeId` when the caller is an
+  admin. Clicking a row opens the same per-employee review page a supervisor uses.
+- **HR-wide PTO dashboard** — `/admin/pto` (HR/Super Admin only) shows every employee's
+  still-Pending requests as an actionable queue (Approve/Deny right there, same
+  `/api/pto/requests/[id]/decide` endpoint a supervisor uses — an admin identity already
+  passes `assertCanReviewTimesheet`'s admin bypass for any employee) plus every already-Approved
+  request starting today or later, so HR can see upcoming coverage gaps before they happen.
+- **Bulk timesheet approval** — the per-employee review page (`/team/[employeeId]`, used by
+  both supervisors and HR/Super Admin) now has an "Approve all awaiting" button that approves
+  every day in the visible week still Awaiting Approval in one request
+  (`POST /api/time/entries/bulk-approve` → `bulkApproveTimeEntries` in
+  `src/lib/time-actions.ts`). It re-checks authorization and each entry's own status
+  server-side rather than trusting the client's list, and silently skips (rather than failing
+  the whole batch over) any entry someone else already decided in the meantime.
+- **Document versioning** — HR/Super Admin can upload a replacement file for an existing
+  document ("New version" on the Manage tab) without re-creating it: the file goes through the
+  same private-storage upload as a new document, then `Document.version` increments and
+  `storageKey` swaps to the new file. The old file is left in storage, not deleted. Because
+  every acknowledgment is already keyed to `(document, employee, version)`
+  (`DocumentAcknowledgment`'s unique constraint), bumping the version is by itself what makes
+  every employee's prior acknowledgment stale again — no separate "clear acknowledgments" step
+  exists or is needed.
 - **Payroll hours export** — HR/Super Admin picks a date range on the Reports page and gets a
   preview table, or downloads it straight as a CSV, of approved hours per employee: regular
   hours (from Time & Attendance) plus vacation/sick/personal/other-leave hours (from approved
@@ -74,10 +101,14 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
 
 ## What's NOT built yet
 
-The HR-wide Attendance and PTO Management dashboards, an Employees admin page, and system-level
-Administration settings — all still stubs, see the "Not yet built, worth flagging now" note
-below. Every corresponding nav link in the app currently opens a page that plainly says "Not
-built yet" rather than pretending. See **Roadmap** for the build order.
+An Employees admin page (add/edit/deactivate an employee, change role/supervisor/department
+through the UI — today that only happens by hand in the database) and system-level
+Administration settings (`/admin/administration` — roles/permissions/system config) — both
+still stubs. Every corresponding nav link in the app currently opens a page that plainly says
+"Not built yet" rather than pretending. See **Roadmap** for the build order.
+
+See **`ADMINISTRATOR_INSTRUCTIONS.md`** for the full HR/Super Admin walkthrough of everything
+that IS built.
 
 Also worth flagging: Directory and Announcements have no "manage employees" overlap with the
 still-unbuilt `/admin/employees` page — Directory is read-only for everyone (including HR), and
@@ -214,8 +245,7 @@ starts:
 5. ~~Supervisor timesheet approval~~ ✅ (My Team, review + approve/return, employee correction + resubmit)
 6. ~~PTO request + approval~~ ✅ (submit, cancel, supervisor approve/deny with a note)
 7. ~~Document center + acknowledgments~~ ✅ (upload, per-role visibility via RLS, view via
-   signed URL, acknowledge, archive, admin progress tracking — "upload a new version" not yet
-   built, see "What's NOT built yet")
+   signed URL, acknowledge, archive, admin progress tracking, upload a new version)
 8. ~~Onboarding checklist~~ ✅ (HR starts + seeds a checklist, custom items, self- or
    admin-completion, auto-tracked completion date)
 9. ~~Directory + announcements~~ ✅ (searchable company directory; HR posts company-wide,
@@ -239,15 +269,15 @@ starts:
     see "Getting set up" §7 / `PILOT_TESTING.md`. This is the one roadmap step that genuinely
     needs a real machine and real people, not something buildable further in isolation.
 
-**Not yet built, worth flagging now:** an HR-wide attendance view and an HR-wide "upcoming
-PTO across everyone" view (both `/admin/attendance` and `/admin/pto`, still stubs — HR
-today can only see one supervisor's team at a time, same as a supervisor can), and bulk
-"approve the whole week in one click" — right now each day/request is decided individually,
-which is correct but a little slow for a supervisor with a big team.
+13. ~~HR-wide Attendance + PTO dashboards, bulk timesheet approval, document versioning~~ ✅
+    (`/admin/attendance`, `/admin/pto`, "Approve all awaiting" on the per-employee review page,
+    "New version" on the Documents Manage tab — see "What's built so far" above for each).
+14. ~~Administrator Instructions~~ ✅ — see **`ADMINISTRATOR_INSTRUCTIONS.md`**, written now
+    that there's real UI to document against.
 
-Admin-facing documentation ("Administrator Instructions" in the brief) will be written once
-there's real UI for HR to follow instructions against — writing it earlier would describe
-screens that don't exist yet.
+**Not yet built, worth flagging now:** an Employees admin page (add/edit/deactivate/reassign
+an employee through the UI) and system-level Administration settings (`/admin/administration`)
+— both still stubs; see "What's NOT built yet" above.
 
 ## Security notes for whoever reviews this before launch
 

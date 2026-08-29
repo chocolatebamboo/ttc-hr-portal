@@ -155,6 +155,37 @@ export async function createDocument(actor: CurrentEmployee, input: CreateDocume
   );
 }
 
+/**
+ * Admin uploads a replacement file for an existing document — the "new version" flow. Bumps
+ * `version` and swaps in the new storageKey; the OLD file stays in storage untouched (nothing
+ * here deletes it) so a past version is still recoverable if someone needs it. Acknowledgments
+ * are per-(document, employee, version) already (see DocumentAcknowledgment's unique
+ * constraint), so bumping version alone is what makes every employee's ack stale again —
+ * listDocumentsForEmployee only ever matches an ack against doc.version, and
+ * listAllDocumentsForAdmin's acknowledgedCount only counts acks at the current version — no
+ * separate "clear acknowledgments" step is needed.
+ */
+export async function createNewDocumentVersion(
+  actor: CurrentEmployee,
+  documentId: string,
+  storageKey: string
+) {
+  if (!isAdmin(actor)) throw new ForbiddenError();
+
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const doc = await tx.document.findUnique({ where: { id: documentId } });
+    if (!doc) throw new DocumentNotFoundError();
+    if (doc.archivedAt) {
+      throw new InvalidDocumentError("An archived document can't be given a new version.");
+    }
+
+    return tx.document.update({
+      where: { id: documentId },
+      data: { storageKey, version: { increment: 1 } },
+    });
+  });
+}
+
 /** Admin archives a document — it stops appearing to employees and drops off the active
  *  management list, but is kept (not deleted) for the audit/record-keeping trail. */
 export async function archiveDocument(actor: CurrentEmployee, documentId: string) {

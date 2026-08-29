@@ -170,6 +170,44 @@ export async function reviewTimeEntry(
   });
 }
 
+/**
+ * Approves every AWAITING_APPROVAL entry in `entryIds` that belongs to `employeeId`, in one
+ * shot — the "approve the whole week" button on ReviewTimesheetView. Authorization is the
+ * caller's job (assertCanReviewTimesheet against `employeeId`, same as the single-entry
+ * approve route) since every id here is expected to belong to the one employee already being
+ * reviewed on that page; this still re-checks employeeId per row rather than trusting the
+ * list, and silently skips anything not actually AWAITING_APPROVAL (already decided by
+ * someone else in the meantime, say) instead of failing the whole batch over one stale row.
+ */
+export async function bulkApproveTimeEntries(
+  reviewer: CurrentEmployee,
+  employeeId: string,
+  entryIds: string[]
+) {
+  return withRlsContext({ employeeId: reviewer.id, role: reviewer.role }, async (tx) => {
+    const entries = await tx.timeEntry.findMany({ where: { id: { in: entryIds } } });
+    const approvable = entries.filter(
+      (e) => e.employeeId === employeeId && e.status === "AWAITING_APPROVAL"
+    );
+
+    if (approvable.length > 0) {
+      await tx.timeEntry.updateMany({
+        where: { id: { in: approvable.map((e) => e.id) } },
+        data: { status: "APPROVED" },
+      });
+      await tx.timeEntryAuditEvent.createMany({
+        data: approvable.map((e) => ({
+          timeEntryId: e.id,
+          action: "TIMESHEET_APPROVED" as const,
+          actorId: reviewer.id,
+        })),
+      });
+    }
+
+    return { approvedCount: approvable.length, requestedCount: entryIds.length };
+  });
+}
+
 export class InvalidCorrectionError extends Error {
   constructor(message: string) {
     super(message);

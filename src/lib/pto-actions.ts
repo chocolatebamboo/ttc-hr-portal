@@ -1,5 +1,7 @@
 import { withRlsContext } from "@/lib/db";
-import type { CurrentEmployee } from "@/types";
+import { isAdmin, ForbiddenError } from "@/lib/authorization";
+import { todayDateKey } from "@/lib/time";
+import type { AdminPtoRequestDTO, AdminPtoSummaryDTO, CurrentEmployee } from "@/types";
 
 export class InvalidPtoRequestError extends Error {
   constructor(message: string) {
@@ -83,5 +85,50 @@ export async function decidePtoRequest(
         reviewComment: comment?.trim() || null,
       },
     });
+  });
+}
+
+/**
+ * HR-wide PTO dashboard (src/app/(portal)/admin/pto) — admin-only, like listAdminAttendance:
+ * no new RLS policy needed since is_admin() already grants pto_select full org-wide read
+ * access (prisma/rls.sql). Returns two lists: every still-Pending request (the queue HR needs
+ * to act on) and every already-Approved request starting today or later (so HR can see
+ * upcoming coverage gaps before they happen, not just the backlog).
+ */
+export async function listAdminPto(actor: CurrentEmployee): Promise<AdminPtoSummaryDTO> {
+  if (!isAdmin(actor)) throw new ForbiddenError();
+
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const today = new Date(`${todayDateKey()}T00:00:00.000Z`);
+
+    const [pending, upcoming] = await Promise.all([
+      tx.ptoRequest.findMany({
+        where: { status: "PENDING" },
+        include: { employee: { select: { firstName: true, lastName: true, preferredName: true } } },
+        orderBy: { createdAt: "asc" },
+      }),
+      tx.ptoRequest.findMany({
+        where: { status: "APPROVED", endDate: { gte: today } },
+        include: { employee: { select: { firstName: true, lastName: true, preferredName: true } } },
+        orderBy: { startDate: "asc" },
+      }),
+    ]);
+
+    const toDTO = (r: (typeof pending)[number]): AdminPtoRequestDTO => ({
+      id: r.id,
+      employeeId: r.employeeId,
+      employeeName: `${r.employee.preferredName || r.employee.firstName} ${r.employee.lastName}`,
+      type: r.type,
+      startDate: r.startDate.toISOString(),
+      endDate: r.endDate.toISOString(),
+      hours: r.hours,
+      reason: r.reason,
+      status: r.status,
+      reviewComment: r.reviewComment,
+      reviewedAt: r.reviewedAt ? r.reviewedAt.toISOString() : null,
+      createdAt: r.createdAt.toISOString(),
+    });
+
+    return { pending: pending.map(toDTO), upcoming: upcoming.map(toDTO) };
   });
 }

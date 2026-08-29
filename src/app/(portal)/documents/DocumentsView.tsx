@@ -219,6 +219,8 @@ function AdminDocumentsPanel() {
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [formOpen, setFormOpen] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [versioningId, setVersioningId] = useState<string | null>(null);
+  const [versionError, setVersionError] = useState("");
 
   async function load() {
     setLoadState("loading");
@@ -243,6 +245,27 @@ function AdminDocumentsPanel() {
     try {
       await fetch(`/api/documents/${id}/archive`, { method: "POST" });
       await load();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function uploadNewVersion(id: string, file: File) {
+    setBusyId(id);
+    setVersionError("");
+    try {
+      const form = new FormData();
+      form.set("file", file);
+      const res = await fetch(`/api/documents/${id}/version`, { method: "POST", body: form });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setVersionError(data.error ?? "Unable to upload a new version. Please try again.");
+        return;
+      }
+      setVersioningId(null);
+      await load();
+    } catch {
+      setVersionError("Unable to reach the server. Check your connection and try again.");
     } finally {
       setBusyId(null);
     }
@@ -297,7 +320,18 @@ function AdminDocumentsPanel() {
 
       {loadState === "ready" && (
         <div className="mt-4 space-y-6">
-          <DocumentTable rows={active} onArchive={archive} busyId={busyId} />
+          <DocumentTable
+            rows={active}
+            onArchive={archive}
+            busyId={busyId}
+            versioningId={versioningId}
+            onVersioningToggle={(id) => {
+              setVersionError("");
+              setVersioningId((current) => (current === id ? null : id));
+            }}
+            onUploadVersion={uploadNewVersion}
+            versionError={versionError}
+          />
           {archived.length > 0 && (
             <div>
               <h2 className="text-sm font-medium text-muted mb-2">Archived</h2>
@@ -315,43 +349,116 @@ function DocumentTable({
   onArchive,
   busyId,
   archived = false,
+  versioningId = null,
+  onVersioningToggle,
+  onUploadVersion,
+  versionError = "",
 }: {
   rows: DocumentAdminSummaryDTO[];
   onArchive: (id: string) => void;
   busyId: string | null;
   archived?: boolean;
+  versioningId?: string | null;
+  onVersioningToggle?: (id: string) => void;
+  onUploadVersion?: (id: string, file: File) => void;
+  versionError?: string;
 }) {
   if (rows.length === 0) return null;
 
   return (
     <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
       {rows.map((doc) => (
-        <div key={doc.id} className="px-4 py-3.5 flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-sm font-medium truncate">{doc.title}</p>
-            <p className="text-xs text-muted">
-              {DOCUMENT_CATEGORY_LABEL[doc.category]} · {DOCUMENT_VISIBILITY_LABEL[doc.visibility]}
-              {doc.visibility !== "GLOBAL" ? ` (${doc.assignedToLabel})` : ""} · Added{" "}
-              {formatDocumentDate(doc.createdAt)}
-            </p>
-            {doc.requiresAcknowledgment && (
-              <p className="text-xs text-muted mt-0.5">
-                {doc.acknowledgedCount} / {doc.eligibleCount} acknowledged
+        <div key={doc.id} className="px-4 py-3.5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">
+                {doc.title}
+                {doc.version > 1 ? ` · v${doc.version}` : ""}
               </p>
+              <p className="text-xs text-muted">
+                {DOCUMENT_CATEGORY_LABEL[doc.category]} · {DOCUMENT_VISIBILITY_LABEL[doc.visibility]}
+                {doc.visibility !== "GLOBAL" ? ` (${doc.assignedToLabel})` : ""} · Added{" "}
+                {formatDocumentDate(doc.createdAt)}
+              </p>
+              {doc.requiresAcknowledgment && (
+                <p className="text-xs text-muted mt-0.5">
+                  {doc.acknowledgedCount} / {doc.eligibleCount} acknowledged at current version
+                </p>
+              )}
+            </div>
+            {!archived && (
+              <div className="flex items-center gap-2 shrink-0">
+                {onVersioningToggle && (
+                  <button
+                    onClick={() => onVersioningToggle(doc.id)}
+                    disabled={busyId === doc.id}
+                    className="btn-neutral text-xs px-3 py-1.5"
+                  >
+                    New version
+                  </button>
+                )}
+                <button
+                  onClick={() => onArchive(doc.id)}
+                  disabled={busyId === doc.id}
+                  className="btn-neutral text-xs px-3 py-1.5 flex items-center gap-1.5"
+                >
+                  <ArchiveIcon className="h-3.5 w-3.5" />
+                  {busyId === doc.id ? "Archiving…" : "Archive"}
+                </button>
+              </div>
             )}
           </div>
-          {!archived && (
-            <button
-              onClick={() => onArchive(doc.id)}
-              disabled={busyId === doc.id}
-              className="btn-neutral text-xs px-3 py-1.5 flex items-center gap-1.5 shrink-0"
-            >
-              <ArchiveIcon className="h-3.5 w-3.5" />
-              {busyId === doc.id ? "Archiving…" : "Archive"}
-            </button>
+
+          {versioningId === doc.id && onUploadVersion && (
+            <NewVersionForm
+              busy={busyId === doc.id}
+              error={versionError}
+              onSubmit={(file) => onUploadVersion(doc.id, file)}
+            />
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+function NewVersionForm({
+  busy,
+  error,
+  onSubmit,
+}: {
+  busy: boolean;
+  error: string;
+  onSubmit: (file: File) => void;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+
+  return (
+    <div className="mt-3 bg-black/[0.02] rounded-lg p-3">
+      <p className="text-xs text-muted mb-2">
+        Uploading a new version replaces the file employees see and requires everyone to
+        acknowledge it again, if this document requires acknowledgment. The old file stays on
+        record.
+      </p>
+      <div className="flex flex-col sm:flex-row gap-2 items-start">
+        <input
+          type="file"
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          className="text-sm file:mr-3 file:rounded-full file:border-0 file:bg-black/[0.04] file:px-3 file:py-1.5 file:text-xs file:font-medium hover:file:bg-black/[0.08]"
+        />
+        <button
+          onClick={() => file && onSubmit(file)}
+          disabled={!file || busy}
+          className="btn-primary text-xs px-3 py-1.5 shrink-0"
+        >
+          {busy ? "Uploading…" : "Upload"}
+        </button>
+      </div>
+      {error && (
+        <p role="alert" className="text-xs text-accent mt-2">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

@@ -12,6 +12,7 @@ export default function ReviewTimesheetView({ employeeId }: { employeeId: string
   const [entries, setEntries] = useState<TimeEntryDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [busyEntryId, setBusyEntryId] = useState<string | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [actionError, setActionError] = useState("");
   const [actionNotice, setActionNotice] = useState("");
 
@@ -82,6 +83,37 @@ export default function ReviewTimesheetView({ employeeId }: { employeeId: string
     }
   }
 
+  const awaitingCount = entries.filter((e) => e.status === "AWAITING_APPROVAL").length;
+
+  async function approveAllAwaiting() {
+    const entryIds = entries.filter((e) => e.status === "AWAITING_APPROVAL").map((e) => e.id);
+    if (entryIds.length === 0) return;
+
+    setBulkBusy(true);
+    setActionError("");
+    setActionNotice("");
+    try {
+      const res = await fetch("/api/time/entries/bulk-approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ employeeId, entryIds }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setActionError(data.error ?? "Unable to approve this week. Please try again.");
+      } else {
+        setActionNotice(
+          `Approved ${data.approvedCount} ${data.approvedCount === 1 ? "day" : "days"}.`
+        );
+      }
+    } catch {
+      setActionError("Unable to reach the server. Check your connection and try again.");
+    } finally {
+      setBulkBusy(false);
+      load();
+    }
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
@@ -105,6 +137,18 @@ export default function ReviewTimesheetView({ employeeId }: { employeeId: string
             →
           </button>
         </div>
+
+        {awaitingCount > 0 && (
+          <button
+            onClick={approveAllAwaiting}
+            disabled={bulkBusy}
+            className="btn-primary text-sm px-4 py-1.5"
+          >
+            {bulkBusy
+              ? "Approving…"
+              : `Approve all awaiting (${awaitingCount})`}
+          </button>
+        )}
       </div>
 
       {actionNotice && (
