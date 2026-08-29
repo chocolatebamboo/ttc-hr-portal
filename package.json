@@ -9,8 +9,8 @@
     "lint": "eslint",
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
-    "db:deploy": "prisma migrate deploy",
+    "db:migrate": "node --env-file=.env.local scripts/migrate.mjs migrate dev --schema prisma/schema.prisma",
+    "db:deploy": "node --env-file=.env.local scripts/migrate.mjs migrate deploy --schema prisma/schema.prisma",
     "db:studio": "prisma studio",
     "pilot:create-accounts": "node --env-file=.env.local scripts/create-pilot-accounts.mjs"
   },

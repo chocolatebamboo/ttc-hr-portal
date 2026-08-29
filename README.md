@@ -170,8 +170,10 @@ Copy `.env.example` to `.env.local` and fill in:
 
 - `DATABASE_URL` — connects as `app_user` (the restricted role from step 2), **not** the
   default `postgres` superuser Supabase gives you. This is what makes RLS real.
-- `MIGRATE_DATABASE_URL` — the elevated `postgres` connection string, used only by
-  `prisma migrate` locally/in CI, never by the deployed app.
+- `MIGRATE_DATABASE_URL` — the elevated `postgres` connection string, used only by the
+  `npm run db:migrate` / `db:deploy` scripts below (never by the deployed app, and never
+  directly by `prisma/schema.prisma` — its datasource always points at `DATABASE_URL`; see
+  `scripts/migrate.mjs` for how the swap happens).
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` — from Supabase Project
   Settings → API.
 - `SUPABASE_SERVICE_ROLE_KEY` — from Supabase Project Settings → API → `service_role`
@@ -205,11 +207,17 @@ be "anyone with the exact URL."
 ### 4. Install, migrate, run
 
 ```bash
-npm install          # also runs `prisma generate` via postinstall
-npx prisma migrate dev --schema prisma/schema.prisma   # uses MIGRATE_DATABASE_URL
+npm install                        # also runs `prisma generate` via postinstall
+npm run db:migrate -- --name init  # uses MIGRATE_DATABASE_URL — see scripts/migrate.mjs
 # then re-run prisma/rls.sql in the Supabase SQL editor (step 2) against the fresh tables
 npm run dev
 ```
+
+Use `npm run db:migrate -- --name <whatever>` any time the schema changes and you need a new
+migration; use `npm run db:deploy` (no `--name`, nothing interactive) to apply already-generated
+migrations somewhere non-interactive, like CI or a fresh clone. Don't run `npx prisma migrate ...`
+directly — without the `MIGRATE_DATABASE_URL` swap those scripts do, it runs as `app_user`, whose
+whole point (see `prisma/rls.sql`) is to have zero DDL privileges, so it'll fail.
 
 > A note on this repo's own build history: `prisma generate` fetches from a host that was
 > network-blocked in the sandboxed environment this was built in, so the Prisma client itself
