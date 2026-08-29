@@ -141,6 +141,49 @@ body {
 }
 
 /*
+ * Reusable entrance animation — a small upward fade, meant for a handful of top-level
+ * sections on a page (CB's ask: the dashboard, on load), not for every element on the page
+ * or every navigation. `both` keeps the element at its 0%-keyframe state (invisible) during
+ * the `animation-delay` below rather than flashing visible-then-hidden-then-animating, which
+ * is what makes the stagger actually look staggered instead of everything appearing at once
+ * and then re-animating. `.animate-in-2/3/4/5` are plain animation-delay steps — CSS custom
+ * properties would need an extra `@property` registration to animate reliably across
+ * browsers, and 5 named steps is little enough to just spell out. Respects
+ * prefers-reduced-motion by skipping the animation outright rather than offering a
+ * "shorter" version — content simply appears, already in its final state.
+ */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-in {
+  animation: fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-in-2 {
+  animation-delay: 0.07s;
+}
+.animate-in-3 {
+  animation-delay: 0.14s;
+}
+.animate-in-4 {
+  animation-delay: 0.21s;
+}
+.animate-in-5 {
+  animation-delay: 0.28s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-in {
+    animation: none;
+  }
+}
+
+/*
  * Shared component classes — kept in one place so every page's buttons, page titles and
  * empty states read as one system instead of each screen hand-rolling its own Tailwind
  * string. Pill-shaped buttons and bold serif page titles are the two most recognizable
