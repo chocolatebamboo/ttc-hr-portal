@@ -30,6 +30,11 @@ If you need to set someone's password directly instead of relying on the invite-
 `scripts/set-password.mjs` — a one-off script that uses the same admin Supabase credentials as
 the pilot account script and never routes the password through this app itself.
 
+If nobody has the Super Admin role yet (a brand new deployment, for instance), see
+`scripts/set-role.mjs` — the Employees page and the app itself have no way to create the very
+first Super Admin, since only a Super Admin can grant that role and nobody can change their own
+role, so this one-off script sets it directly. See the README's "Getting set up" §8 for usage.
+
 ## Attendance (`/admin/attendance`)
 
 The one place to see every active employee's timesheet status for a given week at once,

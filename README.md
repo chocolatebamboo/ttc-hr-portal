@@ -243,6 +243,19 @@ against — this is the step that's meant to catch what a solo mock-and-screensh
 real email deliverability, real phones and browsers, and people who don't already know where
 every button is.
 
+### 8. Bootstrapping your first Super Admin
+
+The Employees admin page (see "What's built so far" below) can't create the very first Super
+Admin — only an existing Super Admin can grant that role to someone else, and nobody can
+change their own role from that page (the self-lockout guard, working as intended). Until at
+least one Super Admin exists, that's a chicken-and-egg problem the UI can't solve on its own.
+
+`scripts/set-role.mjs` is the one-time escape hatch: run
+`node --env-file=.env.local scripts/set-role.mjs someone@talentedteenclub.org SUPER_ADMIN` from
+a machine with the real `.env.local` (same one `create-pilot-accounts.mjs` needs) to set any
+existing employee's role directly. Once one real Super Admin account exists, everyone else's
+role can be managed from the Employees page instead.
+
 ## Roadmap (Phase 1 build order)
 
 Matches the order in the project brief — each step is built and tested before the next
