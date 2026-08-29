@@ -98,7 +98,7 @@ export default function TimeClockCard() {
   const showSecondaryClockOut = state === "CLOCKED_IN";
 
   return (
-    <div className="rounded-2xl border border-border bg-surface p-6 shadow-sm">
+    <div className="frost-card rounded-2xl border border-border bg-surface p-6 shadow-sm">
       <div className="flex items-center justify-between mb-5">
         <div>
           <p className="text-xs uppercase tracking-wide text-muted/70 mb-1">Today</p>

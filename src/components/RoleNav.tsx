@@ -12,9 +12,9 @@ function NavLink({ item }: { item: NavItem }) {
   return (
     <Link
       href={item.href}
-      className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors ${
+      className={`flex items-center gap-2.5 rounded-full px-3 py-2 text-sm transition-colors ${
         active
-          ? "bg-accent/10 text-accent-ink font-semibold"
+          ? "bg-accent-ink text-white font-semibold shadow-sm"
           : "text-muted hover:bg-black/[0.03] hover:text-foreground"
       }`}
     >

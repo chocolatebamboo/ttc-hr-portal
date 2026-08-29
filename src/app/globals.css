@@ -15,12 +15,12 @@
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-serif: "Fraunces Variable", ui-serif, Georgia, "Times New Roman", serif;
 
-  /* Plain white page background (CB's call, Aug 2026 — was a warm off-white before this;
-     see globals.css git history for that rationale if it ever needs to come back). Cards
-     (--surface, also white) now separate from the page via the .bg-surface.border-border
-     shadow rule further down instead of a background-tone difference, matching the
-     soft-shadow dashboard references CB shared. */
-  --background: #ffffff;
+  /* Soft neutral light gray page background (CB's call, Aug 2026 — was a warm off-white
+     before this; see globals.css git history for that rationale if it ever needs to come
+     back). Landed here after CB tried a plain #ffffff first and found it too flat next to
+     the dashboard references they shared — white --surface cards need a background with a
+     hint of tone under them to actually read as "cards" via shadow alone. */
+  --background: #f1f1ef;
   --foreground: #201a22;
 
   /*
@@ -96,6 +96,50 @@ body {
   box-shadow:
     0 1px 2px rgba(32, 26, 34, 0.04),
     0 6px 20px rgba(32, 26, 34, 0.05);
+}
+
+/*
+ * One subtle brand-pink glow behind the top of every portal page's main content — applied
+ * once, here, to <main> in the shared (portal) layout, rather than per-page, so it's
+ * consistent everywhere without every page needing its own decorative markup. Deliberately
+ * a single color (the brand pink, not a pink+blue mix) and low-opacity: CB's explicit ask
+ * was "not too many colors, maintain the main accent color" — this is meant to be felt more
+ * than seen. `overflow-x: clip` (not `hidden`, which would also block sticky/fixed
+ * descendants) keeps the oversized glow from ever creating horizontal scroll.
+ */
+.portal-main-glow {
+  position: relative;
+  overflow-x: clip;
+}
+.portal-main-glow::before {
+  content: "";
+  position: absolute;
+  top: -120px;
+  right: -120px;
+  width: 420px;
+  height: 420px;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--ttc-pink) 16%, transparent), transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+.portal-main-glow > * {
+  position: relative;
+  z-index: 1;
+}
+
+/*
+ * True frosted glass (translucency + backdrop-blur) for the one card CB specifically
+ * approved this treatment for — the daily time-clock card, the single most-seen "hero"
+ * element in the app. Only meaningful when something with visual variation (the glow above)
+ * sits behind it, which is why this is paired with .portal-main-glow on the dashboard rather
+ * than applied everywhere; every other card stays plain opaque bg-surface, per "not too many
+ * colors/effects everywhere."
+ */
+.frost-card {
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
 }
 
 /*
