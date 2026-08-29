@@ -61,12 +61,10 @@ export default async function DashboardPage() {
                   <Link
                     key={action.href}
                     href={action.href}
-                    className="group flex flex-col items-center text-center gap-2 rounded-xl px-3 py-4 hover:bg-black/[0.03] transition-colors"
+                    className="flex flex-col items-center text-center gap-2 rounded-xl px-3 py-4 text-muted hover:bg-black/[0.03] hover:text-foreground transition-colors"
                   >
-                    <span className="section-icon-chip h-10 w-10 group-hover:bg-accent-ink/15 transition-colors">
-                      <action.icon className="h-[18px] w-[18px]" />
-                    </span>
-                    <span className="text-xs font-medium leading-tight">{action.label}</span>
+                    <action.icon className="h-5 w-5" />
+                    <span className="text-xs font-medium leading-tight text-foreground">{action.label}</span>
                   </Link>
                 ))}
               </div>
