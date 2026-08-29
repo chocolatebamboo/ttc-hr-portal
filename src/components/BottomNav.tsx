@@ -20,7 +20,7 @@ const ITEMS = [
 export default function BottomNav() {
   const pathname = usePathname();
   return (
-    <nav className="md:hidden fixed bottom-0 inset-x-0 z-20 border-t border-border bg-surface/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
+    <nav className="animate-in md:hidden fixed bottom-0 inset-x-0 z-20 border-t border-border bg-surface/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
       <div className="grid grid-cols-5">
         {ITEMS.map(({ label, href, Icon }) => {
           const active = pathname === href || (href === "/more" && pathname.startsWith("/more"));

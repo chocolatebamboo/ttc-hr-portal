@@ -35,13 +35,13 @@ export default function RoleNav({ role }: { role: Role }) {
   const { primary, extra } = navForRole(role);
   return (
     <nav className="hidden md:flex md:w-56 md:flex-col md:shrink-0 md:border-r md:border-border md:py-6 md:px-3 md:gap-6">
-      <div className="flex flex-col gap-0.5">
+      <div className="animate-in flex flex-col gap-0.5">
         {primary.map((item) => (
           <NavLink key={item.href} item={item} />
         ))}
       </div>
       {extra.length > 0 && (
-        <div className="flex flex-col gap-0.5">
+        <div className="animate-in animate-in-2 flex flex-col gap-0.5">
           <div className="px-3 pb-1 text-xs font-medium uppercase tracking-wide text-muted/70">
             Administration
           </div>

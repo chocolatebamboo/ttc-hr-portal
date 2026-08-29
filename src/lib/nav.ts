@@ -33,13 +33,18 @@ export const EMPLOYEE_NAV: NavItem[] = [
 
 export const SUPERVISOR_NAV: NavItem[] = [{ label: "My Team", href: "/team", icon: UsersIcon }];
 
+// Documents, Onboarding and Announcements are deliberately NOT repeated here even though
+// admins manage all three — each of those pages (DocumentsView/OnboardingView/
+// AnnouncementsView) already renders its own admin-only "Manage" tab via a `canManage` prop
+// when the signed-in employee is an admin, so the single employee-nav link already goes
+// somewhere that offers the admin controls. A second admin-section link pointing at the exact
+// same href used to sit here too — same page, same route, just listed twice in the sidebar —
+// which is the "why does Announcements show up twice" bug CB flagged; removed rather than
+// re-added.
 export const ADMIN_NAV: NavItem[] = [
   { label: "Employees", href: "/admin/employees", icon: IdCardIcon },
   { label: "Attendance", href: "/admin/attendance", icon: ClockIcon },
   { label: "PTO Management", href: "/admin/pto", icon: CalendarIcon },
-  { label: "Documents", href: "/documents", icon: FolderIcon },
-  { label: "Onboarding", href: "/onboarding", icon: ChecklistIcon },
-  { label: "Announcements", href: "/announcements", icon: MegaphoneIcon },
   { label: "Reports", href: "/admin/reports", icon: ChartIcon },
   { label: "Administration", href: "/admin/administration", icon: GearIcon },
 ];
