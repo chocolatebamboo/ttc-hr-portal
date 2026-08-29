@@ -9,6 +9,7 @@ import {
 } from "@/lib/time-actions";
 import { InvalidPtoRequestError } from "@/lib/pto-actions";
 import { InvalidEmployeeError } from "@/lib/employees-admin";
+import { InvalidDepartmentError } from "@/lib/departments-admin";
 import { DocumentNotFoundError, InvalidDocumentError } from "@/lib/documents";
 import { DocumentUploadError } from "@/lib/storage";
 import { OnboardingNotFoundError, InvalidOnboardingError } from "@/lib/onboarding";
@@ -38,6 +39,7 @@ export function toErrorResponse(err: unknown) {
     err instanceof InvalidCorrectionError ||
     err instanceof InvalidPtoRequestError ||
     err instanceof InvalidEmployeeError ||
+    err instanceof InvalidDepartmentError ||
     err instanceof InvalidDocumentError ||
     err instanceof DocumentUploadError ||
     err instanceof InvalidOnboardingError ||

@@ -3,9 +3,8 @@
 A walkthrough of everything an HR Admin or Super Admin can do in the TTC HR Portal, written
 against the app as it exists today. This is the "Administrator Instructions" the original
 project brief called for — it was deliberately written first once there was real UI to
-describe, and updated again once the Employees page followed. See README.md's "What's NOT
-built yet" for the one remaining admin area (system-level Administration settings) this
-document can't cover because it isn't built.
+describe, and updated again as the Employees and Administration pages followed. See README.md's
+"What's NOT built yet" for the couple of small, deliberate gaps that remain.
 
 Two roles can do everything in this document: **HR Admin** and **Super Admin**. The app
 doesn't currently distinguish between them anywhere in the UI or in `src/lib/authorization.ts`
@@ -174,10 +173,28 @@ picture, so it's admin-only end to end.
 
 Search filters by name, email, job title, department, or employee code as you type.
 
-## What HR/Super Admin still can't do from the UI
+## Administration (`/admin/administration`)
 
-The system-level Administration page (`/admin/administration`) is still a plain "Not built yet"
-stub — what actually belongs on it (beyond what code and RLS already enforce) hasn't been
-decided yet. The nav link is visible to admins today so its eventual location in the app is
-obvious, but it doesn't pretend to work — see README.md's Roadmap for where it sits in the
-build order.
+Department management — the one system-level setting this app actually needed a dedicated
+admin UI for. Departments already exist throughout the app (every employee's `department`
+field, the Attendance/PTO department filters, Document/Announcement targeting); this is where
+they're managed directly instead of only ever coming into existence implicitly by typing a new
+name into the Employees form.
+
+- **Add Department** — creates an empty department ahead of assigning anyone to it. You can
+  still create one the old way too (type a new name into Employees' Department field), so use
+  whichever order fits how you're setting things up.
+- **Rename** — every employee, document, and announcement already pointing at that department
+  keeps pointing at the same row, so they all just show the new name — nothing else needs to
+  change.
+- **Delete** — only works while the department has zero employees, and nothing else (a document
+  or announcement) still targets it. If it's still in use, the button stays disabled and the
+  count next to the name tells you why; reassign or remove those first from wherever they're
+  set (Employees, Documents' Manage tab, Announcements' Manage tab), then delete it.
+
+What's deliberately NOT here: an organization name, timezone, pay-period start day, or any
+other org-wide setting — the app doesn't read any of those anywhere yet, so adding fields for
+them now would just be decoration. If a real need for one shows up, it's a small addition to
+this page rather than a new one. See README.md's "What's NOT built yet" for the couple of other
+small, deliberate gaps (mainly: an employee's login email can't be changed from the Employees
+page yet).

@@ -1,5 +1,12 @@
-import ComingSoon from "@/components/ComingSoon";
+import { redirect } from "next/navigation";
+import { getCurrentEmployee } from "@/lib/auth";
+import { isAdmin } from "@/lib/authorization";
+import AdministrationView from "./AdministrationView";
 
-export default function AdministrationPage() {
-  return <ComingSoon title="Administration" note="Roles, permissions, and system settings." />;
+export default async function AdministrationPage() {
+  const employee = await getCurrentEmployee();
+  if (!employee) redirect("/login");
+  if (!isAdmin(employee)) redirect("/dashboard");
+
+  return <AdministrationView />;
 }

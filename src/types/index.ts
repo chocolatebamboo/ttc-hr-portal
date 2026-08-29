@@ -170,6 +170,16 @@ export interface DepartmentDTO {
   name: string;
 }
 
+/** One row in the Administration page's Departments section (src/app/(portal)/admin/administration)
+ *  — unlike the bare DepartmentDTO above (an assignment-picker option elsewhere), this carries
+ *  the employeeCount that decides whether Delete is even allowed. See src/lib/departments-admin.ts. */
+export interface DepartmentAdminRowDTO {
+  id: string;
+  name: string;
+  employeeCount: number;
+  createdAt: string;
+}
+
 /** Shared by any admin form that assigns something to a department or an employee (document
  *  uploads, announcement audiences) — see src/lib/roster.ts. */
 export interface AssignmentOptionsDTO {

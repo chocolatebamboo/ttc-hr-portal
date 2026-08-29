@@ -31,7 +31,8 @@ button is.
 The README's "What's NOT built yet" list is current — worth skimming before the pilot starts so
 these don't get reported as surprises:
 
-- The `/admin/administration` page (system-level roles/permissions/settings) is a stub.
+- The `/admin/administration` page only manages departments — there's no org-wide settings
+  section (company name, timezone, etc.) because nothing else in the app reads one yet.
 - An employee's login email can't be changed from the Employees page — that needs a matching
   change on their Supabase Auth account, which isn't wired up yet.
 - Tables that scroll sideways on a narrow phone screen (the weekly timesheet, in particular) are
@@ -126,6 +127,10 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
 - [ ] On the Documents Manage tab, upload a new version of a document that requires
       acknowledgment; confirm an employee who already acknowledged the old version is asked to
       acknowledge again, and that the version number shown ticks up.
+- [ ] Open Administration — add a throwaway department, rename it, confirm the new name shows
+      up immediately on that department's employees (check Employees or Directory). Confirm
+      Delete is disabled (with an explanation) while an employee is still assigned to it, then
+      reassign that employee elsewhere and confirm Delete now works.
 - [ ] Everything in the Employee and Supervisor checklists too, since HR can act as either.
 
 ## After the pilot

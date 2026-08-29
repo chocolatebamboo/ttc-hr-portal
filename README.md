@@ -57,6 +57,13 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   past-expiration "Expired" ones) with who it targeted, and can delete one outright — unlike
   Documents, there's no archive/audit-trail concept for a post that was never a legal or HR
   record in the first place.
+- **Administration (department management)** — `/admin/administration` (HR/Super Admin only)
+  manages `Department` rows directly: add one ahead of assigning anyone to it, rename one (every
+  employee/document/announcement already pointing at it just sees the new name, since nothing
+  about `departmentId` changes), or delete one — refused, with a clear explanation rather than a
+  raw database error, while any employee, document, or announcement still references it. This is
+  the one system-level setting the app actually needed a dedicated UI for; see "What's NOT built
+  yet" below for what's deliberately not here.
 - **Employees admin page** — `/admin/employees` (HR/Super Admin only) lists every employee,
   active and deactivated, with full HR record fields Directory deliberately never shows
   (personal phone/email, emergency contact). Adding a new employee sends them a real Supabase
@@ -112,24 +119,20 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
 
 ## What's NOT built yet
 
-System-level Administration settings (`/admin/administration`) — still a stub; what belongs on
-it is still undecided (roles/permissions config beyond what's already enforced in code and RLS?
-org-wide preferences? something else?). The nav link opens a page that plainly says "Not built
-yet" rather than pretending. See **Roadmap** for the build order.
+Administration (`/admin/administration`) covers department management only (see "What's built
+so far" above) — it deliberately doesn't invent org-wide settings nothing else in the app reads
+yet (a company name, a timezone, a pay-period start day, roles/permissions config beyond what's
+already enforced in code and RLS). If a real need for one of those shows up, it's a small
+addition to an already-built page rather than a new one.
+
+An employee's login email can't be changed from the Employees page — that would also require
+updating their linked Supabase Auth account to match, which isn't wired up yet; see
+`scripts/set-password.mjs` and `ADMINISTRATOR_INSTRUCTIONS.md` for the closest existing
+workaround (setting a password directly), and ask whoever manages the Supabase project for an
+email change in the meantime.
 
 See **`ADMINISTRATOR_INSTRUCTIONS.md`** for the full HR/Super Admin walkthrough of everything
 that IS built.
-
-Also worth flagging: Directory and Announcements have no "manage employees" overlap with the
-still-unbuilt `/admin/employees` page — Directory is read-only for everyone (including HR), and
-an announcement's audience picker reuses the same roster the Documents assignee picker uses
-(`src/lib/roster.ts`), not a separate employee-management feature.
-
-Within the Document Center itself, one thing is deliberately deferred: replacing a document
-with a new file to trigger re-acknowledgment. The data model supports it (`Document.version`,
-and `DocumentAcknowledgment` is keyed on `documentVersion` for exactly this reason), but there
-is no "upload a new version" action in the UI yet — today, re-issuing a policy means
-uploading it as a new document and archiving the old one.
 
 ## Getting set up
 
@@ -303,9 +306,14 @@ starts:
     page instead of the script, if that's easier.
 15. ~~Administrator Instructions~~ ✅ — see **`ADMINISTRATOR_INSTRUCTIONS.md`**, written now
     that there's real UI to document against.
+16. ~~Administration (department management)~~ ✅ (`/admin/administration` — add/rename/delete
+    departments, with delete refused while anything still references one). Also adds
+    `scripts/set-role.mjs`, the one-off script that bootstraps the very first Super Admin
+    account — see "Getting set up" §8.
 
-**Not yet built, worth flagging now:** system-level Administration settings
-(`/admin/administration`) — still a stub; see "What's NOT built yet" above.
+Every item from the original project brief is now built. What's left is genuinely optional
+follow-on work, not a gap in Phase 1 scope — see "What's NOT built yet" above for the couple of
+small, deliberate omissions (a login-email-change flow, and org-wide settings nothing yet reads).
 
 ## Security notes for whoever reviews this before launch
 
