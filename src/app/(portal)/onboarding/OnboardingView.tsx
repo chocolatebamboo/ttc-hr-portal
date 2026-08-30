@@ -6,12 +6,18 @@ import {
   ChecklistIcon,
   FolderIcon,
   GraduationCapIcon,
+  AwardIcon,
   UsersIcon,
   LockIcon,
   TrashIcon,
 } from "@/components/icons";
 import OnboardingStatusPill from "@/components/OnboardingStatusPill";
 import type {
+  CertificationAnswerInput,
+  CertificationAttemptDTO,
+  CertificationQuestionAdminDTO,
+  CertificationQuestionDTO,
+  CertificationReviewOutcome,
   DocumentAdminSummaryDTO,
   EmployeeOnboardingDTO,
   OnboardingAdminSummaryDTO,
@@ -34,6 +40,7 @@ const TYPE_ICON: Record<OnboardingItemType, (props: { className?: string }) => R
   DOCUMENT: FolderIcon,
   TRAINING: GraduationCapIcon,
   MEETING: UsersIcon,
+  CERTIFICATION: AwardIcon,
 };
 
 const TYPE_LABEL: Record<OnboardingItemType, string> = {
@@ -41,6 +48,7 @@ const TYPE_LABEL: Record<OnboardingItemType, string> = {
   DOCUMENT: "Document",
   TRAINING: "Training",
   MEETING: "Meeting",
+  CERTIFICATION: "Certification",
 };
 
 // "What happens after" copy for the current-step card — answers the second of the three
@@ -51,6 +59,8 @@ const AFTER_COPY: Record<OnboardingItemType, string> = {
     "Once you acknowledge this document, it goes to HR or your supervisor for approval before the next step unlocks.",
   TRAINING: "Once you mark this done, it goes to HR or your supervisor for approval before the next step unlocks.",
   MEETING: "Once you confirm this happened, it goes to HR or your supervisor for approval before the next step unlocks.",
+  CERTIFICATION:
+    "Once you submit the test, it goes to HR or your supervisor for review — some answers are graded instantly, others are read by a person before this step unlocks the next one.",
 };
 
 /** Same two-tab pattern as the Documents page: one route, "My Onboarding" for everyone and a
@@ -227,7 +237,13 @@ function MyOnboarding() {
       )}
 
       {currentItem && (
-        <CurrentStepCard item={currentItem} busy={busy} error={actionError} onAdvance={() => advance(currentItem.id)} />
+        <CurrentStepCard
+          item={currentItem}
+          busy={busy}
+          error={actionError}
+          onAdvance={() => advance(currentItem.id)}
+          onReload={load}
+        />
       )}
 
       <h2 className="text-sm font-medium text-muted mb-2 mt-5">All steps</h2>
@@ -260,11 +276,13 @@ function CurrentStepCard({
   busy,
   error,
   onAdvance,
+  onReload,
 }: {
   item: OnboardingItemDTO;
   busy: boolean;
   error: string;
   onAdvance: () => void;
+  onReload: () => void;
 }) {
   const Icon = TYPE_ICON[item.itemType];
   const [viewError, setViewError] = useState("");
@@ -307,6 +325,8 @@ function CurrentStepCard({
           Submitted — waiting on HR or your supervisor to approve this step. You&apos;ll see the next
           step here as soon as it&apos;s approved.
         </p>
+      ) : item.itemType === "CERTIFICATION" ? (
+        <CertificationTestForm itemId={item.id} onSubmitted={onReload} />
       ) : (
         <>
           {item.itemType === "DOCUMENT" && (
@@ -356,6 +376,222 @@ function CurrentStepCard({
 }
 
 // ---------------------------------------------------------------------------
+// Certification (Aug 2026 document gap analysis, item 5) — the New Hire Excellence Certification
+// Test itself. Renders in place of the generic advance button for a CERTIFICATION step; the
+// employee fills in all 26 questions and submits once, same "one action" shape as every other
+// step type. See src/lib/certification.ts for scoring; this form never sees an answer key.
+// ---------------------------------------------------------------------------
+
+type DraftAnswer = { answerText: string; selectedKeys: string[] };
+
+function isAnswered(draft: DraftAnswer | undefined): boolean {
+  if (!draft) return false;
+  return draft.answerText.trim().length > 0 || draft.selectedKeys.some((k) => k.trim().length > 0);
+}
+
+function CertificationTestForm({ itemId, onSubmitted }: { itemId: string; onSubmitted: () => void }) {
+  const [questions, setQuestions] = useState<CertificationQuestionDTO[]>([]);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [drafts, setDrafts] = useState<Record<string, DraftAnswer>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoadState("loading");
+    fetch(`/api/onboarding/items/${itemId}/certification`)
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
+      .then((data) => {
+        if (cancelled) return;
+        setQuestions(data.questions);
+        setLoadState("ready");
+      })
+      .catch(() => {
+        if (!cancelled) setLoadState("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once per step
+  }, [itemId]);
+
+  function draftFor(questionId: string): DraftAnswer {
+    return drafts[questionId] ?? { answerText: "", selectedKeys: [] };
+  }
+
+  function setText(questionId: string, answerText: string) {
+    setDrafts((d) => ({ ...d, [questionId]: { ...draftFor(questionId), answerText } }));
+  }
+
+  function setSingleChoice(questionId: string, key: string) {
+    setDrafts((d) => ({ ...d, [questionId]: { ...draftFor(questionId), selectedKeys: [key] } }));
+  }
+
+  function toggleChoice(questionId: string, key: string) {
+    setDrafts((d) => {
+      const current = draftFor(questionId).selectedKeys;
+      const next = current.includes(key) ? current.filter((k) => k !== key) : [...current, key];
+      return { ...d, [questionId]: { ...draftFor(questionId), selectedKeys: next } };
+    });
+  }
+
+  function setListEntry(questionId: string, index: number, value: string) {
+    setDrafts((d) => {
+      const current = [...draftFor(questionId).selectedKeys];
+      while (current.length <= index) current.push("");
+      current[index] = value;
+      return { ...d, [questionId]: { ...draftFor(questionId), selectedKeys: current } };
+    });
+  }
+
+  const allAnswered = questions.length > 0 && questions.every((q) => isAnswered(drafts[q.id]));
+
+  async function submit() {
+    setSubmitting(true);
+    setError("");
+    try {
+      const answers: CertificationAnswerInput[] = questions.map((q) => {
+        const d = draftFor(q.id);
+        return { questionId: q.id, answerText: d.answerText || undefined, selectedKeys: d.selectedKeys };
+      });
+      const res = await fetch(`/api/onboarding/items/${itemId}/certification/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answers }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error ?? "Unable to submit the test.");
+        return;
+      }
+      onSubmitted();
+    } catch {
+      setError("Unable to reach the server. Check your connection and try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (loadState === "loading") {
+    return <div className="h-24 rounded-xl border border-border bg-background animate-pulse mt-1" />;
+  }
+  if (loadState === "error" || questions.length === 0) {
+    return (
+      <p className="text-sm text-accent mt-1">
+        Unable to load the certification test right now. Please try again or contact HR.
+      </p>
+    );
+  }
+
+  let currentSection = "";
+
+  return (
+    <div className="mt-1 space-y-4">
+      <p className="text-xs text-muted">
+        Answer every question, then submit once at the end — some answers are graded instantly,
+        others are reviewed by HR or your supervisor before this step is approved. 85% or higher
+        is a passing score.
+      </p>
+      {questions.map((q) => {
+        const showSectionHeader = q.section !== currentSection;
+        currentSection = q.section;
+        const draft = draftFor(q.id);
+        return (
+          <div key={q.id}>
+            {showSectionHeader && (
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted mb-2 mt-1">{q.section}</p>
+            )}
+            <div className="rounded-lg border border-border bg-background p-3.5">
+              <p className="text-sm font-medium mb-2.5">
+                {q.number}. {q.prompt}
+              </p>
+
+              {q.type === "MULTIPLE_CHOICE" && q.options && (
+                <div className="space-y-1.5">
+                  {q.options.map((opt) => (
+                    <label key={opt.key} className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input
+                        type="radio"
+                        name={q.id}
+                        checked={draft.selectedKeys[0] === opt.key}
+                        onChange={() => setSingleChoice(q.id, opt.key)}
+                      />
+                      {opt.label}
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {q.type === "CHECKBOX_ALL" && q.options && (
+                <div className="space-y-1.5">
+                  {q.options.map((opt) => (
+                    <label key={opt.key} className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={draft.selectedKeys.includes(opt.key)}
+                        onChange={() => toggleChoice(q.id, opt.key)}
+                      />
+                      {opt.label}
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {q.type === "FILL_IN_BLANK" && (
+                <input
+                  type="text"
+                  value={draft.answerText}
+                  onChange={(e) => setText(q.id, e.target.value)}
+                  placeholder="Your answer…"
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
+                />
+              )}
+
+              {q.type === "LIST_MATCH" && (
+                <div className="space-y-1.5">
+                  {Array.from({ length: q.requiredMatchCount ?? 2 }).map((_, i) => (
+                    <input
+                      key={i}
+                      type="text"
+                      value={draft.selectedKeys[i] ?? ""}
+                      onChange={(e) => setListEntry(q.id, i, e.target.value)}
+                      placeholder={`${i + 1}.`}
+                      className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
+                    />
+                  ))}
+                </div>
+              )}
+
+              {q.type === "SHORT_ANSWER" && (
+                <textarea
+                  value={draft.answerText}
+                  onChange={(e) => setText(q.id, e.target.value)}
+                  rows={3}
+                  placeholder="Your answer…"
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
+                />
+              )}
+            </div>
+          </div>
+        );
+      })}
+
+      {error && (
+        <p role="alert" className="text-sm text-accent">
+          {error}
+        </p>
+      )}
+
+      <button onClick={submit} disabled={submitting || !allAnswered} className="btn-primary text-sm px-5 py-2.5">
+        {submitting ? "Submitting…" : "Submit Test"}
+      </button>
+      {!allAnswered && <p className="text-xs text-muted">Answer every question to enable Submit.</p>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Admin / Supervisor: Manage
 // ---------------------------------------------------------------------------
 
@@ -366,6 +602,7 @@ function AdminOnboardingPanel({ canStart }: { canStart: boolean }) {
   const [startPickerId, setStartPickerId] = useState<string | null>(null);
   const [templates, setTemplates] = useState<OnboardingTemplateSummaryDTO[]>([]);
   const [showTemplateManager, setShowTemplateManager] = useState(false);
+  const [showCertManager, setShowCertManager] = useState(false);
 
   async function loadRoster() {
     setLoadState("loading");
@@ -408,16 +645,27 @@ function AdminOnboardingPanel({ canStart }: { canStart: boolean }) {
       </p>
 
       {canStart && (
-        <div className="mb-4">
+        <div className="mb-4 flex flex-wrap gap-2">
           <button
             onClick={() => setShowTemplateManager((v) => !v)}
             className="btn-neutral text-xs px-3 py-1.5"
           >
             {showTemplateManager ? "Close Templates" : "Manage Templates"}
           </button>
+          <button
+            onClick={() => setShowCertManager((v) => !v)}
+            className="btn-neutral text-xs px-3 py-1.5"
+          >
+            {showCertManager ? "Close Certification Test" : "Manage Certification Test"}
+          </button>
           {showTemplateManager && (
-            <div className="mt-3">
+            <div className="mt-3 w-full">
               <TemplateManager templates={templates} onChanged={loadTemplates} />
+            </div>
+          )}
+          {showCertManager && (
+            <div className="mt-3 w-full">
+              <CertificationQuestionBankEditor />
             </div>
           )}
         </div>
@@ -860,6 +1108,7 @@ function TemplateAddItemForm({ templateId, onAdded }: { templateId: string; onAd
           <option value="DOCUMENT">Document</option>
           <option value="TRAINING">Training</option>
           <option value="MEETING">Meeting</option>
+          <option value="CERTIFICATION">Certification</option>
         </select>
         <input
           type="number"
@@ -897,6 +1146,402 @@ function TemplateAddItemForm({ templateId, onAdded }: { templateId: string; onAd
   );
 }
 
+// ---------------------------------------------------------------------------
+// Admin: certification answer-key editor. Only the KEY fields are editable here — question
+// wording, order, and points are code-seeded (see CertificationQuestion's doc comment in
+// schema.prisma) since they mirror the real source document; this is deliberately narrower than
+// TemplateEditor above, which builds whole steps from scratch.
+// ---------------------------------------------------------------------------
+
+type CertKeyDraft = {
+  correctOptionKeys: string[];
+  acceptedAnswers: string; // comma-separated for editing; split/joined on save
+  requiredMatchCount: string;
+  rubric: string;
+};
+
+function CertificationQuestionBankEditor() {
+  const [questions, setQuestions] = useState<CertificationQuestionAdminDTO[]>([]);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, CertKeyDraft>>({});
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  async function load() {
+    setLoadState("loading");
+    try {
+      const res = await fetch("/api/onboarding/certification/questions");
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setQuestions(data.questions);
+      setLoadState("ready");
+    } catch {
+      setLoadState("error");
+    }
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+  }, []);
+
+  function openDraft(q: CertificationQuestionAdminDTO) {
+    setDrafts((d) => ({
+      ...d,
+      [q.id]: {
+        correctOptionKeys: q.correctOptionKeys,
+        acceptedAnswers: q.acceptedAnswers.join(", "),
+        requiredMatchCount: q.requiredMatchCount != null ? String(q.requiredMatchCount) : "",
+        rubric: q.rubric ?? "",
+      },
+    }));
+    setOpenId(openId === q.id ? null : q.id);
+    setError("");
+  }
+
+  function setSingleCorrect(id: string, key: string) {
+    setDrafts((d) => ({ ...d, [id]: { ...d[id], correctOptionKeys: [key] } }));
+  }
+
+  function toggleCorrect(id: string, key: string) {
+    setDrafts((d) => {
+      const current = d[id].correctOptionKeys;
+      const next = current.includes(key) ? current.filter((k) => k !== key) : [...current, key];
+      return { ...d, [id]: { ...d[id], correctOptionKeys: next } };
+    });
+  }
+
+  async function save(q: CertificationQuestionAdminDTO) {
+    const draft = drafts[q.id];
+    if (!draft) return;
+    setBusyId(q.id);
+    setError("");
+    try {
+      const body: Record<string, unknown> = { rubric: draft.rubric || null };
+      if (q.type === "MULTIPLE_CHOICE" || q.type === "CHECKBOX_ALL") {
+        body.correctOptionKeys = draft.correctOptionKeys;
+      }
+      if (q.type === "FILL_IN_BLANK" || q.type === "LIST_MATCH") {
+        body.acceptedAnswers = draft.acceptedAnswers
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (q.type === "LIST_MATCH") {
+          body.requiredMatchCount = draft.requiredMatchCount ? Number(draft.requiredMatchCount) : null;
+        }
+      }
+      const res = await fetch(`/api/onboarding/certification/questions/${q.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error ?? "Unable to save this question's answer key.");
+        return;
+      }
+      setOpenId(null);
+      await load();
+    } catch {
+      setError("Unable to reach the server. Check your connection and try again.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  if (loadState === "loading") {
+    return <div className="h-20 rounded-xl border border-border bg-background animate-pulse" />;
+  }
+  if (loadState === "error") {
+    return (
+      <div className="rounded-xl border border-border bg-background p-4 text-sm text-accent">
+        Unable to load the certification question bank.
+      </div>
+    );
+  }
+
+  let currentSection = "";
+
+  return (
+    <div className="rounded-xl border border-border bg-background p-4 space-y-2">
+      <p className="text-xs text-muted mb-1">
+        Only the answer key is editable here — question wording and order mirror TTC&rsquo;s real
+        certification test. A fill-in-the-blank or list question with no accepted answers yet
+        (like &ldquo;Name three TTC programs&rdquo;) falls back to manual review until you set one.
+      </p>
+      <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
+        {questions.map((q) => {
+          const showSectionHeader = q.section !== currentSection;
+          currentSection = q.section;
+          const isOpen = openId === q.id;
+          const draft = drafts[q.id];
+          const busy = busyId === q.id;
+          const unconfigured =
+            (q.type === "FILL_IN_BLANK" || q.type === "LIST_MATCH") && q.acceptedAnswers.length === 0;
+          return (
+            <div key={q.id}>
+              {showSectionHeader && (
+                <p className="px-4 pt-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                  {q.section}
+                </p>
+              )}
+              <button onClick={() => openDraft(q)} className="w-full text-left px-4 py-2.5">
+                <p className="text-sm truncate">
+                  {q.number}. {q.prompt}
+                </p>
+                <p className="text-xs text-muted">
+                  {q.type === "SHORT_ANSWER" ? "Manual review only" : q.type.replace(/_/g, " ").toLowerCase()}
+                  {unconfigured && <span className="text-amber-700"> · Key not configured — manual review for now</span>}
+                </p>
+              </button>
+              {isOpen && draft && (
+                <div className="px-4 pb-3.5 space-y-2">
+                  {q.type === "MULTIPLE_CHOICE" && q.options && (
+                    <div className="space-y-1">
+                      {q.options.map((opt) => (
+                        <label key={opt.key} className="flex items-center gap-2 text-sm">
+                          <input
+                            type="radio"
+                            checked={draft.correctOptionKeys[0] === opt.key}
+                            onChange={() => setSingleCorrect(q.id, opt.key)}
+                          />
+                          {opt.label}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {q.type === "CHECKBOX_ALL" && q.options && (
+                    <div className="space-y-1">
+                      {q.options.map((opt) => (
+                        <label key={opt.key} className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={draft.correctOptionKeys.includes(opt.key)}
+                            onChange={() => toggleCorrect(q.id, opt.key)}
+                          />
+                          {opt.label}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {(q.type === "FILL_IN_BLANK" || q.type === "LIST_MATCH") && (
+                    <>
+                      <label className="block text-xs text-muted">Accepted answers (comma-separated)</label>
+                      <input
+                        type="text"
+                        value={draft.acceptedAnswers}
+                        onChange={(e) =>
+                          setDrafts((d) => ({ ...d, [q.id]: { ...draft, acceptedAnswers: e.target.value } }))
+                        }
+                        placeholder="e.g. PUSH Leadership Academy, Camp Talent, Youth Mentorship Circle"
+                        className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
+                      />
+                      {q.type === "LIST_MATCH" && (
+                        <>
+                          <label className="block text-xs text-muted">Entries required to pass this question</label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={draft.requiredMatchCount}
+                            onChange={(e) =>
+                              setDrafts((d) => ({ ...d, [q.id]: { ...draft, requiredMatchCount: e.target.value } }))
+                            }
+                            className="w-24 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
+                          />
+                        </>
+                      )}
+                    </>
+                  )}
+                  <label className="block text-xs text-muted">Reviewer rubric (shown when grading manually)</label>
+                  <textarea
+                    value={draft.rubric}
+                    onChange={(e) => setDrafts((d) => ({ ...d, [q.id]: { ...draft, rubric: e.target.value } }))}
+                    rows={2}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
+                  />
+                  <div className="flex justify-end">
+                    <button onClick={() => save(q)} disabled={busy} className="btn-primary text-xs px-3 py-1.5">
+                      {busy ? "Saving…" : "Save"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {error && (
+        <p role="alert" className="text-sm text-accent">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// Admin/supervisor grading UI for one CERTIFICATION step's attempt history — embedded inline
+// under that item's row in EmployeeChecklistDetail (below). Fetches independently, same pattern
+// as ReadinessChecklistPanel/CheckpointsPanel: this has nothing to do with the plain-item
+// approve/return flow above it beyond sharing a row.
+function CertificationReviewPanel({ itemId, onGraded }: { itemId: string; onGraded: () => void }) {
+  const [attempts, setAttempts] = useState<CertificationAttemptDTO[]>([]);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [expandedAttemptId, setExpandedAttemptId] = useState<string | null>(null);
+  const [comments, setComments] = useState<Record<string, string>>({});
+  const [busyResponseId, setBusyResponseId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  async function load() {
+    setLoadState("loading");
+    try {
+      const res = await fetch(`/api/onboarding/items/${itemId}/certification/attempts`);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setAttempts(data.attempts);
+      if (data.attempts.length > 0) setExpandedAttemptId((id: string | null) => id ?? data.attempts[0].id);
+      setLoadState("ready");
+    } catch {
+      setLoadState("error");
+    }
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-fetch only when the selected step changes
+  }, [itemId]);
+
+  async function grade(responseId: string, outcome: CertificationReviewOutcome) {
+    setBusyResponseId(responseId);
+    setError("");
+    try {
+      const res = await fetch(`/api/onboarding/certification/responses/${responseId}/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ outcome, comment: comments[responseId] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error ?? "Unable to save this grade.");
+        return;
+      }
+      await load();
+      onGraded();
+    } finally {
+      setBusyResponseId(null);
+    }
+  }
+
+  if (loadState === "loading") {
+    return <div className="mx-4 mb-3 h-16 rounded-lg border border-border bg-surface animate-pulse" />;
+  }
+  if (loadState === "error") {
+    return (
+      <p className="mx-4 mb-3 text-sm text-accent">Unable to load this employee&rsquo;s certification attempts.</p>
+    );
+  }
+  if (attempts.length === 0) {
+    return <p className="mx-4 mb-3 text-sm text-muted">No attempts submitted yet.</p>;
+  }
+
+  return (
+    <div className="mx-4 mb-3 rounded-lg border border-border bg-surface p-3 space-y-2.5">
+      {attempts.map((attempt, i) => {
+        const isOpen = expandedAttemptId === attempt.id;
+        const isLatest = i === 0;
+        return (
+          <div key={attempt.id} className={i > 0 ? "pt-2.5 border-t border-border" : ""}>
+            <button
+              onClick={() => setExpandedAttemptId(isOpen ? null : attempt.id)}
+              className="w-full flex items-center justify-between gap-3 text-left"
+            >
+              <span className="text-xs text-muted">
+                {isLatest ? "Latest attempt" : "Earlier attempt"} · {new Date(attempt.submittedAt).toLocaleString()}
+              </span>
+              <span
+                className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                  attempt.status === "PASSED"
+                    ? "bg-emerald-100 text-emerald-800"
+                    : attempt.status === "FAILED"
+                      ? "bg-rose-100 text-rose-800"
+                      : "bg-amber-100 text-amber-800"
+                }`}
+              >
+                {attempt.status === "SUBMITTED"
+                  ? "Needs review"
+                  : `${attempt.status === "PASSED" ? "Passed" : "Failed"} · ${Math.round(attempt.finalScorePercent ?? 0)}%`}
+              </span>
+            </button>
+            {isOpen && (
+              <div className="mt-2 space-y-2">
+                {attempt.responses.map((r) => (
+                  <div key={r.id} className="rounded-lg border border-border bg-background p-2.5">
+                    <p className="text-xs font-medium mb-1">
+                      {r.number}. {r.prompt}
+                    </p>
+                    <p className="text-xs text-muted mb-1.5">
+                      {r.selectedKeys.length > 0 ? r.selectedKeys.join(", ") : r.answerText || "(no answer)"}
+                    </p>
+                    {r.isAutoScored ? (
+                      <span
+                        className={`text-xs font-medium ${r.isCorrect ? "text-emerald-700" : "text-rose-700"}`}
+                      >
+                        {r.isCorrect ? "Correct" : "Incorrect"} ({r.pointsEarned}/{r.pointsPossible} pts)
+                      </span>
+                    ) : r.reviewedAt ? (
+                      <p className="text-xs">
+                        <span className={r.reviewOutcome === "MEETS" ? "text-emerald-700" : "text-rose-700"}>
+                          {r.reviewOutcome === "MEETS" ? "Meets expectations" : "Does not meet expectations"}
+                        </span>
+                        {r.reviewComment && <span className="text-muted"> — {r.reviewComment}</span>}
+                      </p>
+                    ) : attempt.status === "SUBMITTED" ? (
+                      <div className="space-y-1.5">
+                        {r.rubric && <p className="text-[11px] text-muted italic">{r.rubric}</p>}
+                        <input
+                          type="text"
+                          value={comments[r.id] ?? ""}
+                          onChange={(e) => setComments((c) => ({ ...c, [r.id]: e.target.value }))}
+                          placeholder="Comment (optional)"
+                          className="w-full rounded-lg border border-border bg-surface px-2.5 py-1 text-xs outline-none focus:ring-2 focus:ring-accent"
+                        />
+                        <div className="flex gap-1.5">
+                          <button
+                            onClick={() => grade(r.id, "MEETS")}
+                            disabled={busyResponseId === r.id}
+                            className="btn-primary text-xs px-2.5 py-1"
+                          >
+                            Meets Expectations
+                          </button>
+                          <button
+                            onClick={() => grade(r.id, "DOES_NOT_MEET")}
+                            disabled={busyResponseId === r.id}
+                            className="btn-neutral text-xs px-2.5 py-1"
+                          >
+                            Does Not Meet
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted">Not graded (attempt already finalized).</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {error && (
+        <p role="alert" className="text-sm text-accent">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function EmployeeChecklistDetail({
   employeeId,
   canAddItems,
@@ -912,6 +1557,7 @@ function EmployeeChecklistDetail({
   const [returningId, setReturningId] = useState<string | null>(null);
   const [returnReason, setReturnReason] = useState("");
   const [actionError, setActionError] = useState("");
+  const [certOpenItemId, setCertOpenItemId] = useState<string | null>(null);
 
   async function load() {
     setLoadState("loading");
@@ -1043,7 +1689,16 @@ function EmployeeChecklistDetail({
                     </button>
                   </div>
                 )}
+                {item.itemType === "CERTIFICATION" && item.status !== "NOT_STARTED" && (
+                  <button
+                    onClick={() => setCertOpenItemId(certOpenItemId === item.id ? null : item.id)}
+                    className="btn-neutral text-xs px-2.5 py-1 shrink-0"
+                  >
+                    {certOpenItemId === item.id ? "Close" : "Review Test"}
+                  </button>
+                )}
               </div>
+              {certOpenItemId === item.id && <CertificationReviewPanel itemId={item.id} onGraded={load} />}
               {returningId === item.id && (
                 <div className="mt-2.5 flex flex-col sm:flex-row gap-2">
                   <input
@@ -1410,6 +2065,7 @@ function AddItemForm({
           <option value="DOCUMENT">Document</option>
           <option value="TRAINING">Training</option>
           <option value="MEETING">Meeting</option>
+          <option value="CERTIFICATION">Certification</option>
         </select>
         <input
           type="date"

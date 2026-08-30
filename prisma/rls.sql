@@ -409,6 +409,102 @@ drop policy if exists onboarding_checkpoint_insert on "OnboardingCheckpoint";
 create policy onboarding_checkpoint_insert on "OnboardingCheckpoint" for insert with check (is_admin());
 
 
+-- Certification (Aug 2026 document gap analysis, item 5) — TTC's real New Hire Excellence
+-- Certification Test.
+--
+-- CertificationQuestion: broad read for any authenticated employee (they need the prompts/
+-- options to take the test), admin-only write. This is a ROW policy only — it does NOT stop the
+-- key columns (correctOptionKeys/acceptedAnswers/rubric) from coming back over this connection;
+-- what actually keeps the answer key from ever reaching an employee is that the app's own
+-- employee-facing query (getCertificationQuestionsForTaking, src/lib/certification.ts) never
+-- selects those columns in the first place — the same "RLS = rows, app SELECT = columns" split
+-- already used for Employee's personalPhone/emergencyContact* etc. above. The admin question-
+-- bank editor is the one caller that selects the full row, and it's admin-gated at the app layer
+-- too (assertIsAdmin).
+alter table "CertificationQuestion" enable row level security;
+alter table "CertificationQuestion" force row level security;
+
+drop policy if exists certification_question_select on "CertificationQuestion";
+create policy certification_question_select on "CertificationQuestion" for select using (
+  is_admin() or current_employee_id() is not null
+);
+drop policy if exists certification_question_write on "CertificationQuestion";
+create policy certification_question_write on "CertificationQuestion" for all using (is_admin()) with check (is_admin());
+
+
+-- CertificationAttempt / CertificationResponse: SELECT follows the usual three-way shape (self /
+-- supervisor-of / admin) — an employee must be able to see their own test results, the same as
+-- Documents or PTO. UPDATE is deliberately narrower than that: admin or supervisor-of ONLY, never
+-- self — grading (auto-score at submission is done by the app under the employee's own identity
+-- via INSERT, but the manual-review fields this policy's UPDATE covers are a reviewer's job, and
+-- an employee must never be able to grade — or un-grade — their own certification attempt.
+alter table "CertificationAttempt" enable row level security;
+alter table "CertificationAttempt" force row level security;
+
+drop policy if exists certification_attempt_select on "CertificationAttempt";
+create policy certification_attempt_select on "CertificationAttempt" for select using (
+  is_admin()
+  or "employeeId" = current_employee_id()
+  or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+);
+
+-- Only the employee themselves may create their own attempt (submitCertificationAttempt always
+-- runs under the employee's own identity — see src/lib/onboarding.ts's loadActionableOnboardingItem,
+-- which the DOCUMENT step already uses the same "only the employee themselves" rule for).
+drop policy if exists certification_attempt_insert on "CertificationAttempt";
+create policy certification_attempt_insert on "CertificationAttempt" for insert with check (
+  "employeeId" = current_employee_id() or is_admin()
+);
+
+drop policy if exists certification_attempt_update on "CertificationAttempt";
+create policy certification_attempt_update on "CertificationAttempt" for update using (
+  is_admin()
+  or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+) with check (
+  is_admin()
+  or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+);
+
+
+alter table "CertificationResponse" enable row level security;
+alter table "CertificationResponse" force row level security;
+
+drop policy if exists certification_response_select on "CertificationResponse";
+create policy certification_response_select on "CertificationResponse" for select using (
+  is_admin()
+  or "attemptId" in (
+    select id from "CertificationAttempt"
+    where "employeeId" = current_employee_id()
+       or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+  )
+);
+
+drop policy if exists certification_response_insert on "CertificationResponse";
+create policy certification_response_insert on "CertificationResponse" for insert with check (
+  is_admin()
+  or "attemptId" in (select id from "CertificationAttempt" where "employeeId" = current_employee_id())
+);
+
+-- The grading write — same "admin or supervisor-of, never self" rule as CertificationAttempt's
+-- update policy just above, for the same reason.
+drop policy if exists certification_response_update on "CertificationResponse";
+create policy certification_response_update on "CertificationResponse" for update using (
+  is_admin()
+  or "attemptId" in (
+    select ca.id from "CertificationAttempt" ca
+    join "Employee" e on e.id = ca."employeeId"
+    where e."supervisorId" = current_employee_id()
+  )
+) with check (
+  is_admin()
+  or "attemptId" in (
+    select ca.id from "CertificationAttempt" ca
+    join "Employee" e on e.id = ca."employeeId"
+    where e."supervisorId" = current_employee_id()
+  )
+);
+
+
 alter table "AuditLog" enable row level security;
 alter table "AuditLog" force row level security;
 

@@ -15,6 +15,7 @@ import { DocumentUploadError, AvatarUploadError } from "@/lib/storage";
 import { OnboardingNotFoundError, InvalidOnboardingError, MissingReturnReasonError } from "@/lib/onboarding";
 import { AnnouncementNotFoundError, InvalidAnnouncementError } from "@/lib/announcements";
 import { InvalidPayrollRangeError } from "@/lib/payroll";
+import { CertificationNotFoundError, InvalidCertificationError } from "@/lib/certification";
 
 /** Maps our typed domain errors to the right HTTP status instead of leaking a 500 + stack. */
 export function toErrorResponse(err: unknown) {
@@ -30,7 +31,8 @@ export function toErrorResponse(err: unknown) {
   if (
     err instanceof DocumentNotFoundError ||
     err instanceof OnboardingNotFoundError ||
-    err instanceof AnnouncementNotFoundError
+    err instanceof AnnouncementNotFoundError ||
+    err instanceof CertificationNotFoundError
   ) {
     return NextResponse.json({ error: err.message }, { status: 404 });
   }
@@ -46,7 +48,8 @@ export function toErrorResponse(err: unknown) {
     err instanceof AvatarUploadError ||
     err instanceof InvalidOnboardingError ||
     err instanceof InvalidAnnouncementError ||
-    err instanceof InvalidPayrollRangeError
+    err instanceof InvalidPayrollRangeError ||
+    err instanceof InvalidCertificationError
   ) {
     return NextResponse.json({ error: err.message }, { status: 400 });
   }

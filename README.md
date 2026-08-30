@@ -69,6 +69,21 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   never automates) and three fixed **30/60/90-Day Checkpoints** (due date, freeform notes,
   optional training-milestone/development-goal fields, a follow-up flag) — deliberately not a
   performance-management system, just a lightweight, un-gated follow-up record.
+- **Certification** — a fifth step type, Certification, seeds TTC's real New Hire Excellence
+  Certification Test (26 questions mirroring the source document one-for-one) in place of a
+  single click: the employee answers every question and submits once. Multiple-choice,
+  fill-in-the-blank, and select-all questions score instantly against an answer key; open-ended
+  and scenario questions (and any question whose key HR hasn't configured yet — a fill-in or
+  list question with no accepted answers is a deliberate "not configured" state, not a gap)
+  route to HR or the employee's supervisor for manual grading, with CB's own rubric shown
+  alongside each one. The step stays in Awaiting Approval until every manual question is graded
+  and the combined score is checked against the 85% passing threshold from the source test —
+  Approve is refused (with a plain-language reason) until grading is complete and the attempt
+  actually passed; a failed attempt gets Returned like any other step, and resubmitting starts a
+  fresh, separately-tracked attempt rather than overwriting the old one. Only the answer key
+  itself (correct options, accepted text variants, the manual-review rubric) is admin-editable,
+  from the same Manage tab's "Manage Certification Test" screen — question wording, order, and
+  points mirror the real document and aren't meant to be rewritten in-app.
 - **Directory** — every active employee, to every authenticated employee: name, title,
   department, role, work email, work phone — nothing more. This is the one place in the app
   where RLS's row-level grant is deliberately broader than what any single request needs; see

@@ -195,7 +195,7 @@ export interface AssignmentOptionsDTO {
 // NOT_STARTED covers both "locked" and "available" — see OnboardingItemDTO.locked, computed
 // separately from this status by src/lib/onboarding.ts.
 export type OnboardingItemStatus = "NOT_STARTED" | "AWAITING_APPROVAL" | "RETURNED" | "COMPLETED";
-export type OnboardingItemType = "TASK" | "DOCUMENT" | "TRAINING" | "MEETING";
+export type OnboardingItemType = "TASK" | "DOCUMENT" | "TRAINING" | "MEETING" | "CERTIFICATION";
 
 export interface OnboardingItemDTO {
   id: string;
@@ -316,6 +316,102 @@ export interface OnboardingTemplateDTO {
   name: string;
   description: string | null;
   items: OnboardingTemplateItemDTO[];
+}
+
+// ---------------------------------------------------------------------------
+// Certification (Aug 2026 document gap analysis, item 5) — see src/lib/certification.ts
+// ---------------------------------------------------------------------------
+
+export type CertificationQuestionType =
+  | "MULTIPLE_CHOICE"
+  | "FILL_IN_BLANK"
+  | "CHECKBOX_ALL"
+  | "LIST_MATCH"
+  | "SHORT_ANSWER";
+
+export type CertificationAttemptStatus = "SUBMITTED" | "PASSED" | "FAILED";
+
+export type CertificationReviewOutcome = "MEETS" | "DOES_NOT_MEET";
+
+export interface CertificationOptionDTO {
+  key: string;
+  label: string;
+}
+
+/** What an employee sees while taking the test, or reviewing their own past answers — NEVER
+ *  includes the answer key (correctOptionKeys/acceptedAnswers) regardless of who's viewing; see
+ *  getCertificationQuestionsForTaking in src/lib/certification.ts. rubric is included since it's
+ *  reviewer guidance, not the key itself — low sensitivity either way. */
+export interface CertificationQuestionDTO {
+  id: string;
+  number: number;
+  section: string;
+  sortOrder: number;
+  prompt: string;
+  type: CertificationQuestionType;
+  points: number;
+  options: CertificationOptionDTO[] | null;
+  /** LIST_MATCH only — how many entries the employee should fill in. */
+  requiredMatchCount: number | null;
+}
+
+/** Admin-only — the question bank editor's view, with the answer key included. See
+ *  listCertificationQuestionsForAdmin in src/lib/certification.ts. */
+export interface CertificationQuestionAdminDTO extends CertificationQuestionDTO {
+  correctOptionKeys: string[];
+  acceptedAnswers: string[];
+  rubric: string | null;
+  active: boolean;
+}
+
+/** One graded (or awaiting-grading) answer within an attempt — shared by the employee's own
+ *  results view and the HR/supervisor review panel; see listCertificationAttempts. Never
+ *  includes the question's own answer key, only this response's outcome. */
+export interface CertificationResponseDTO {
+  id: string;
+  questionId: string;
+  number: number;
+  section: string;
+  prompt: string;
+  type: CertificationQuestionType;
+  options: CertificationOptionDTO[] | null;
+  rubric: string | null;
+  answerText: string | null;
+  selectedKeys: string[];
+  isAutoScored: boolean;
+  isCorrect: boolean | null;
+  pointsEarned: number | null;
+  pointsPossible: number;
+  needsManualReview: boolean;
+  reviewOutcome: CertificationReviewOutcome | null;
+  reviewComment: string | null;
+  reviewedAt: string | null;
+}
+
+export interface CertificationAttemptDTO {
+  id: string;
+  status: CertificationAttemptStatus;
+  submittedAt: string;
+  objectivePointsEarned: number;
+  objectivePointsPossible: number;
+  totalPointsPossible: number;
+  manualPointsEarned: number | null;
+  /** Null until every needsManualReview response has been graded. */
+  finalScorePercent: number | null;
+  passThresholdPercent: number;
+  reviewedAt: string | null;
+  responses: CertificationResponseDTO[];
+}
+
+/** One answer the employee is submitting for a single question — see submitCertificationAttempt.
+ *  Which of answerText/selectedKeys is used depends on the question's type (MULTIPLE_CHOICE/
+ *  CHECKBOX_ALL use selectedKeys; FILL_IN_BLANK/SHORT_ANSWER use answerText; LIST_MATCH reuses
+ *  selectedKeys to hold each free-text list entry — see CertificationResponse's doc comment in
+ *  schema.prisma). */
+export interface CertificationAnswerInput {
+  questionId: string;
+  answerText?: string;
+  selectedKeys?: string[];
 }
 
 /** Live "does anything need this person's attention right now" summary — see

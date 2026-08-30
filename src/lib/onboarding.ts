@@ -88,6 +88,7 @@ const REQUIRES_APPROVAL_BY_TYPE: Record<OnboardingItemType, boolean> = {
   DOCUMENT: true,
   TRAINING: true,
   MEETING: true,
+  CERTIFICATION: true,
 };
 
 type RawItem = {
@@ -222,22 +223,13 @@ async function recomputeOnboardingCompletion(actor: CurrentEmployee, onboardingI
 }
 
 /**
- * The one action an employee (or an admin, on their behalf) takes to move a step forward.
- * What it actually does depends on the item's type:
- *  - TASK: a plain checkbox. Completes immediately; checking an already-COMPLETED task
- *    un-does it (the only "undo" this file supports — see the note below).
- *  - DOCUMENT: acknowledges the linked Document (via the real acknowledgeDocument() flow —
- *    not a second, honor-system copy of "did they read it") and submits for approval in the
- *    same action, so the employee never has to separately visit the Documents page first.
- *  - TRAINING / MEETING: submits for approval directly — there's no document step first.
- *
- * A DOCUMENT/TRAINING/MEETING item that's COMPLETED or already AWAITING_APPROVAL can't be
- * re-submitted through this action; only a reviewer's approve/return moves it from there (see
- * decideOnboardingItem below). Only a TASK can be un-done, and only because undoing "I
- * acknowledged this document" or "HR approved this" would misrepresent a decision someone
- * ELSE already made about it, not just the employee's own checkbox.
+ * Shared by advanceOnboardingItem below and submitCertificationAttempt (src/lib/certification.ts):
+ * resolves itemId, checks the caller may act on it (self or admin), and checks it's not locked
+ * (an earlier sibling item, by sortOrder, isn't COMPLETED yet). Both callers throw the same
+ * OnboardingNotFoundError/ForbiddenError/InvalidOnboardingError from here, so both surface an
+ * identical error to their own UI for the same underlying problem.
  */
-export async function advanceOnboardingItem(actor: CurrentEmployee, itemId: string) {
+export async function loadActionableOnboardingItem(actor: CurrentEmployee, itemId: string) {
   const item = await withRlsContext({ employeeId: actor.id, role: actor.role }, (tx) =>
     tx.onboardingItem.findUnique({ where: { id: itemId }, include: { onboarding: true } })
   );
@@ -255,7 +247,35 @@ export async function advanceOnboardingItem(actor: CurrentEmployee, itemId: stri
     throw new InvalidOnboardingError("Complete the previous step first.");
   }
 
+  return { item, employeeId };
+}
+
+/**
+ * The one action an employee (or an admin, on their behalf) takes to move a step forward.
+ * What it actually does depends on the item's type:
+ *  - TASK: a plain checkbox. Completes immediately; checking an already-COMPLETED task
+ *    un-does it (the only "undo" this file supports — see the note below).
+ *  - DOCUMENT: acknowledges the linked Document (via the real acknowledgeDocument() flow —
+ *    not a second, honor-system copy of "did they read it") and submits for approval in the
+ *    same action, so the employee never has to separately visit the Documents page first.
+ *  - TRAINING / MEETING: submits for approval directly — there's no document step first.
+ *
+ * A DOCUMENT/TRAINING/MEETING item that's COMPLETED or already AWAITING_APPROVAL can't be
+ * re-submitted through this action; only a reviewer's approve/return moves it from there (see
+ * decideOnboardingItem below). Only a TASK can be un-done, and only because undoing "I
+ * acknowledged this document" or "HR approved this" would misrepresent a decision someone
+ * ELSE already made about it, not just the employee's own checkbox.
+ */
+export async function advanceOnboardingItem(actor: CurrentEmployee, itemId: string) {
+  const { item, employeeId } = await loadActionableOnboardingItem(actor, itemId);
+
   const itemType = item.itemType as OnboardingItemType;
+
+  if (itemType === "CERTIFICATION") {
+    throw new InvalidOnboardingError(
+      "This step is a certification test — submit it from the Onboarding page instead of a plain click."
+    );
+  }
 
   if (itemType === "TASK") {
     const nextStatus: OnboardingItemStatus = item.status === "COMPLETED" ? "NOT_STARTED" : "COMPLETED";
@@ -342,6 +362,30 @@ export async function decideOnboardingItem(
       })
     );
     return;
+  }
+
+  // A CERTIFICATION step can't be approved on a reviewer's say-so alone the way DOCUMENT/
+  // TRAINING/MEETING can — it gates on the linked CertificationAttempt's own outcome: still
+  // needs the manual-review questions graded, or already graded and didn't reach the passing
+  // score. Both cases should be a RETURN (or "keep reviewing"), never an APPROVE. See
+  // reviewCertificationResponse in src/lib/certification.ts for what finalizes an attempt.
+  if (item.itemType === "CERTIFICATION") {
+    const latestAttempt = await withRlsContext({ employeeId: actor.id, role: actor.role }, (tx) =>
+      tx.certificationAttempt.findFirst({
+        where: { onboardingItemId: itemId },
+        orderBy: { createdAt: "desc" },
+      })
+    );
+    if (!latestAttempt || latestAttempt.status === "SUBMITTED") {
+      throw new InvalidOnboardingError(
+        "Finish reviewing this employee's certification test answers before approving this step."
+      );
+    }
+    if (latestAttempt.status === "FAILED") {
+      throw new InvalidOnboardingError(
+        "This attempt didn't reach the passing score — return this step so the employee can retake the test, rather than approving it."
+      );
+    }
   }
 
   await withRlsContext({ employeeId: actor.id, role: actor.role }, (tx) =>

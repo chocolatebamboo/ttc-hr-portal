@@ -128,6 +128,17 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
       **30/60/90-Day Checkpoints** panel (3 fixed milestones) — check one readiness task and one
       checkpoint off, add a note to a checkpoint, and confirm both save. Ask that employee to
       confirm neither panel appears anywhere on their own Onboarding page.
+- [ ] Add a Certification step to one pilot Employee's checklist (or a template) and have them
+      reach it: confirm the full New Hire Excellence Certification Test renders inline as their
+      current step, Submit is disabled until every question has an answer, and submitting moves
+      the step to Awaiting Approval. Open **Review Test** on their Manage row and confirm the
+      auto-scored questions already show Correct/Incorrect; grade the remaining open-ended ones
+      as Meets/Does Not Meet with a comment. Confirm **Approve** is refused with a clear reason
+      before grading is finished, and again if the final score lands under 85% (use **Return**
+      instead, then confirm the employee can retake it and the earlier attempt stays visible
+      under Review Test as history). Finally, open **Manage Certification Test**, edit one
+      question's answer key (e.g. add a program name to "Name three TTC programs"), and confirm
+      it saves without a code change or redeploy.
 - [ ] Open the Reports page, pick a date range that covers what the Employee testers submitted,
       and download the Payroll Hours CSV. Open it and sanity-check the numbers against what was
       actually clocked and approved. Confirm the "still awaiting approval" warning shows up if

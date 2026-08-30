@@ -232,3 +232,13 @@ export function GraduationCapIcon({ className = base }: IconProps) {
     </svg>
   );
 }
+
+export function AwardIcon({ className = base }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
+      <circle cx="12" cy="8.5" r="5.5" />
+      <path d="m8.7 13.2-1.4 7.3 4.7-2.6 4.7 2.6-1.4-7.3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="m9.7 8.7 1.5 1.5 3-3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}

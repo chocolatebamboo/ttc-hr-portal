@@ -99,6 +99,7 @@ model Employee {
   onboarding           EmployeeOnboarding?
   onboardingReadinessItems OnboardingReadinessItem[]
   onboardingCheckpoints    OnboardingCheckpoint[]
+  certificationAttempts    CertificationAttempt[]
   announcementsWritten Announcement[]        @relation("AnnouncementAuthor")
   announcementAudiences AnnouncementAudience[]
   auditLogEntries      AuditLog[]            @relation("ActorOnAuditLog")
@@ -326,6 +327,13 @@ enum OnboardingItemType {
   DOCUMENT  // completing it means acknowledging the linked Document (see documentId below)
   TRAINING  // e.g. a course or video with no document behind it
   MEETING   // e.g. "Meet with Your Supervisor" — someone confirms it happened
+  // Completing it means passing the linked CertificationAttempt (see
+  // CertificationAttempt.onboardingItemId and src/lib/certification.ts) — the employee submits
+  // answers to the full New Hire Excellence Certification Test rather than a single click, so it
+  // does NOT go through advanceOnboardingItem like the other three approval-requiring types;
+  // see submitCertificationAttempt instead. Reuses the same AWAITING_APPROVAL/RETURNED state
+  // machine for the surrounding step once a test is submitted.
+  CERTIFICATION
 }
 
 model EmployeeOnboarding {
@@ -369,6 +377,11 @@ model OnboardingItem {
   approvedBy   String?
   approvedAt   DateTime?
   returnReason String?               // required when status is set to RETURNED
+
+  // Only set (and only meaningful) when itemType = CERTIFICATION — every attempt the employee
+  // has submitted against this step (retakes after a RETURN included), newest last. See
+  // CertificationAttempt below and src/lib/certification.ts.
+  certificationAttempts CertificationAttempt[]
 
   @@index([onboardingId])
   @@index([documentId])
@@ -476,6 +489,148 @@ model OnboardingCheckpoint {
   createdAt DateTime @default(now())
 
   @@index([employeeId])
+}
+
+// ---------------------------------------------------------------------------
+// Certification (Aug 2026 document gap analysis, item 5) — TTC's real New Hire Excellence
+// Certification Test (TTC_TEST.pdf). A CERTIFICATION-type OnboardingItem (above) is the usual
+// way an employee encounters this, but attempts aren't hard-tied to onboarding — onboardingItemId
+// is nullable so this can also stand alone later (e.g. periodic recertification) without a
+// schema change. Deliberately NOT a general-purpose quiz/LMS builder: the question bank below
+// mirrors the source document's real 26 questions one-for-one, and only the ANSWER KEY portion
+// (correct options, accepted text variants, rubric) is meant to be admin-editable — question
+// wording/order/points stay code-seeded, matching CB's "preserve the source content, don't
+// invent new content" instruction from the gap analysis.
+// ---------------------------------------------------------------------------
+
+enum CertificationQuestionType {
+  MULTIPLE_CHOICE // single correct option — see correctOptionKeys (exactly one key)
+  FILL_IN_BLANK   // free text matched against acceptedAnswers (normalized, case/punctuation-insensitive)
+  CHECKBOX_ALL    // multi-select — correct only if the selection exactly matches correctOptionKeys
+  // Free-text list answers (e.g. "name three TTC programs") matched against acceptedAnswers, with
+  // partial credit down to requiredMatchCount. An empty acceptedAnswers is a valid, deliberate
+  // state — not yet configured — and is scored as needing manual review until an admin sets a
+  // key (see scoreResponse in src/lib/certification.ts). This is exactly Q11's state at launch:
+  // CB asked that its answer key be left for HR to fill in later rather than have this app guess
+  // at TTC's other official program names.
+  LIST_MATCH
+  SHORT_ANSWER    // always manual review — no key is ever configured for this type
+}
+
+model CertificationQuestion {
+  id      String @id @default(uuid())
+  // Stable question number matching the source test (1-24; the two closing scenarios are 25-26
+  // since the source document doesn't number them). Never reused/reassigned — the admin editor
+  // and every attempt's snapshot both key off this for a human-readable "Question 9" reference.
+  number  Int    @unique
+  section String // e.g. "TTC Mission & Identity" — matches the source document's section headers
+  sortOrder Int
+  prompt  String
+  type    CertificationQuestionType
+  points  Int
+
+  // MULTIPLE_CHOICE / CHECKBOX_ALL only: the choices shown, as [{ "key": "A", "label": "..." }].
+  options Json?
+  // MULTIPLE_CHOICE (exactly one key) / CHECKBOX_ALL (every correct key) — admin-editable.
+  correctOptionKeys String[]
+
+  // FILL_IN_BLANK / LIST_MATCH only — admin-editable accepted answers (compared normalized:
+  // trimmed, lowercased, punctuation/whitespace-insensitive). Empty = no key configured yet, see
+  // CertificationQuestionType.LIST_MATCH above.
+  acceptedAnswers    String[]
+  requiredMatchCount Int? // LIST_MATCH only — how many distinct accepted items are required
+
+  // Shown to a reviewer grading a SHORT_ANSWER/unconfigured response — CB's own rubric ("does
+  // the employee demonstrate understanding of TTC's stated standards..."), editable per question
+  // in case a future question needs its own more specific guidance.
+  rubric String?
+
+  // Soft-disable rather than delete — a retired question must still resolve for every past
+  // attempt's CertificationResponse rows (history), so it's never actually removable once used.
+  active Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  updatedBy String? // employee.id of the admin who last changed the answer key
+
+  responses CertificationResponse[]
+
+  @@index([active])
+}
+
+enum CertificationAttemptStatus {
+  SUBMITTED // objective questions auto-scored; still waiting on manual review of the rest
+  PASSED    // fully reviewed, finalScorePercent >= passThresholdPercent
+  FAILED    // fully reviewed, finalScorePercent < passThresholdPercent
+}
+
+model CertificationAttempt {
+  id         String   @id @default(uuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  // Set when this attempt was taken as a step on the employee's guided checklist (the normal
+  // case) — null supports certification existing outside onboarding later without a migration.
+  onboardingItemId String?
+  onboardingItem   OnboardingItem? @relation(fields: [onboardingItemId], references: [id])
+
+  status      CertificationAttemptStatus @default(SUBMITTED)
+  submittedAt DateTime                   @default(now())
+
+  // Snapshotted at submission time (auto-scored immediately) so a later answer-key edit or
+  // question change never silently rewrites a past attempt's own result.
+  objectivePointsEarned   Int
+  objectivePointsPossible Int
+  totalPointsPossible     Int // sum of every active question's points at submission time (100 today)
+
+  // Null until every response with needsManualReview=true on this attempt has been graded — see
+  // reviewCertificationResponse in src/lib/certification.ts, which is what fills these in and
+  // flips `status` from SUBMITTED to PASSED/FAILED in the same action that completes the last
+  // outstanding review.
+  manualPointsEarned Int?
+  finalScorePercent  Float?
+
+  // 85% per TTC_TEST.pdf — kept on the attempt (not just a constant) so a future policy change
+  // never silently reinterprets an already-decided historical attempt.
+  passThresholdPercent Float @default(85)
+
+  reviewedAt DateTime?
+  reviewedBy String?
+
+  createdAt DateTime @default(now())
+
+  responses CertificationResponse[]
+
+  @@index([employeeId])
+  @@index([onboardingItemId])
+}
+
+model CertificationResponse {
+  id         String                @id @default(uuid())
+  attemptId  String
+  attempt    CertificationAttempt  @relation(fields: [attemptId], references: [id])
+  questionId String
+  question   CertificationQuestion @relation(fields: [questionId], references: [id])
+
+  answerText   String? // FILL_IN_BLANK / SHORT_ANSWER free text
+  // MULTIPLE_CHOICE (one key) / CHECKBOX_ALL (every selected key). Also reused, for a LIST_MATCH
+  // question, to hold each raw free-text list entry the employee typed — not really "keys" there,
+  // but avoids a fourth answer column for what's still fundamentally "the employee's selection(s)".
+  selectedKeys String[]
+
+  isAutoScored   Boolean  @default(false) // true the instant this was scored at submission
+  isCorrect      Boolean? // set only when isAutoScored
+  pointsEarned   Int?     // auto: set at submission; manual: set once reviewed; null until then
+  pointsPossible Int      // snapshot of question.points at submission time
+
+  needsManualReview Boolean   @default(false)
+  reviewOutcome     String?   // "MEETS" | "DOES_NOT_MEET" — set only once reviewed
+  reviewComment     String?
+  reviewedAt        DateTime?
+  reviewedBy        String?
+
+  @@index([attemptId])
+  @@index([questionId])
 }
 
 // ---------------------------------------------------------------------------

@@ -125,13 +125,17 @@ Every step has a type, chosen when it's added:
 - **Training** and **Meeting** — the employee marks it done, which submits it for approval.
   There's no document behind these; use them for anything you or a supervisor needs to
   personally confirm happened (a course, a supervisor orientation meeting).
+- **Certification** — the employee fills out and submits TTC's real New Hire Excellence
+  Certification Test in full, right there on the step, and it submits for approval — see
+  "Certification" below for how grading and approval actually work for this one.
 
 Document/Training/Meeting steps all route through **Awaiting Approval** before the next step
 unlocks — you (or the employee's supervisor) either **Approve** it, which completes the step
 and unlocks the next one, or **Return** it with a required reason, which sends it back to the
 employee to fix and resubmit. A checklist's completion date is set the moment every step is
 COMPLETED, and clears again automatically if any step — including one added after the fact —
-isn't.
+isn't. A Certification step also sits in Awaiting Approval, but Approve is refused until its
+test has been fully graded and passed — see "Certification" below.
 
 There's no email for any of this — an employee whose step gets approved or returned, or an
 admin/supervisor whose team has a step awaiting approval, sees it in-app the next time they
@@ -178,6 +182,44 @@ never appear anywhere on the employee's own Onboarding page:
   training milestones or development goals where applicable, and flag whether it needs
   follow-up, then Mark Complete when it's done. This is intentionally lightweight — there's no
   scoring, rating, or performance-review workflow behind it.
+
+### Certification
+
+A Certification step embeds TTC's real 26-question New Hire Excellence Certification Test
+directly in the employee's current step — they answer everything and submit once, the same
+single-action shape as every other step type. What happens next depends on the question:
+
+- Multiple-choice, fill-in-the-blank, and select-all-that-apply questions with a configured
+  answer key are scored the instant the test is submitted.
+- Open-ended and scenario questions — and any fill-in-the-blank or "name a few things" question
+  whose answer key you haven't filled in yet (see below) — need a person to read them. Open
+  **Review Test** on that employee's row (it appears once they've submitted) to grade each one
+  as **Meets Expectations** or **Does Not Meet**, with an optional comment; CB's own rubric is
+  shown alongside each question to keep grading consistent. You or the employee's supervisor can
+  do this — same reviewer rule as everything else in Onboarding.
+
+The step's **Approve** button stays refused, with a plain-language reason, until every
+manual-review question on the latest attempt has been graded AND the combined score (auto-scored
+points plus graded points, out of 100) reaches the test's 85% passing threshold. If it comes up
+short once fully graded, **Return** the step like any other — the employee gets a fresh attempt,
+and every past attempt stays on record under **Review Test** so you can see the full history,
+not just the latest try.
+
+Two questions are intentionally NOT fully configured out of the box, since TTC's own answer key
+for them wasn't available when this was built:
+
+- **"Name three TTC programs"** only has PUSH Leadership Academy confirmed — until you add the
+  rest from **Manage Certification Test** (below), this question is graded manually like an
+  open-ended one, not silently marked wrong.
+- **"List two ways TTC creates leadership opportunities for students"** is treated as manual
+  review permanently, since the source test doesn't specify two official answers to match
+  against.
+
+From the Manage tab, **Manage Certification Test** opens the answer-key editor: pick a question
+to see its correct option(s), accepted text answers, or reviewer rubric, and change them —
+without needing a code change or a redeploy. This is deliberately narrow: the question wording,
+order, and point values mirror TTC's real test document and aren't editable here, only the
+answer key itself.
 
 ## Directory (`/directory`)
 
