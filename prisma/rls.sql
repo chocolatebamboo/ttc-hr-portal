@@ -353,6 +353,35 @@ drop policy if exists onboarding_template_item_all on "OnboardingTemplateItem";
 create policy onboarding_template_item_all on "OnboardingTemplateItem" for all using (is_admin()) with check (is_admin());
 
 
+-- Internal admin/supervisor readiness tasks (Aug 2026 document review) — deliberately NO
+-- self-access clause here, unlike every EmployeeOnboarding/OnboardingItem policy above: an
+-- employee must never be able to see or query their own rows in this table at all. These are
+-- HR/supervisor-only prep tasks (background check, TTC email created, equipment issued, etc.),
+-- not part of the employee's own onboarding view.
+alter table "OnboardingReadinessItem" enable row level security;
+alter table "OnboardingReadinessItem" force row level security;
+
+drop policy if exists onboarding_readiness_select on "OnboardingReadinessItem";
+create policy onboarding_readiness_select on "OnboardingReadinessItem" for select using (
+  is_admin()
+  or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+);
+
+drop policy if exists onboarding_readiness_update on "OnboardingReadinessItem";
+create policy onboarding_readiness_update on "OnboardingReadinessItem" for update using (
+  is_admin()
+  or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+) with check (
+  is_admin()
+  or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+);
+
+-- Insert only ever happens inside startOnboarding (src/lib/onboarding.ts), which is already
+-- admin-only end to end — a supervisor reviews/toggles these but never creates them.
+drop policy if exists onboarding_readiness_insert on "OnboardingReadinessItem";
+create policy onboarding_readiness_insert on "OnboardingReadinessItem" for insert with check (is_admin());
+
+
 alter table "AuditLog" enable row level security;
 alter table "AuditLog" force row level security;
 

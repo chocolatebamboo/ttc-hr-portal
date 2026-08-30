@@ -46,6 +46,22 @@ const DEFAULT_CHECKLIST_ITEMS = [
   "Complete Required Training",
 ];
 
+// Seeded alongside the employee's own checklist above, into the separate, admin/supervisor-only
+// OnboardingReadinessItem table (never shown to the employee) — TTC's real Day-1 human prep
+// tasks from the Aug 2026 document review, not a second onboarding engine. See the model's doc
+// comment in prisma/schema.prisma for why this is a distinct table rather than more
+// OnboardingItem rows.
+const DEFAULT_READINESS_ITEMS = [
+  "Background Check Completed",
+  "TTC Email Account Created",
+  "Google Drive Access Granted",
+  "Equipment/Uniform Issued",
+  "Workspace Prepared",
+  "Site Tour Completed",
+  "Welcome Meeting Completed",
+  "Payroll Setup Completed (External)",
+];
+
 // TASK auto-completes the instant it's checked — there's no one else who needs to sign off on
 // "I reviewed the staff directory." The other three represent something HR or a supervisor
 // should actually verify happened, so they route through AWAITING_APPROVAL first. This is the
@@ -432,6 +448,16 @@ export async function startOnboarding(actor: CurrentEmployee, employeeId: string
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const existing = await tx.employeeOnboarding.findUnique({ where: { employeeId } });
     if (existing) throw new InvalidOnboardingError("This employee's checklist has already been started.");
+
+    // Seeds the separate, admin/supervisor-only readiness checklist in the same action — one
+    // click for HR, not two. Idempotent: if these were already seeded some other way (or this
+    // is somehow called twice), don't duplicate them.
+    const readinessCount = await tx.onboardingReadinessItem.count({ where: { employeeId } });
+    if (readinessCount === 0) {
+      await tx.onboardingReadinessItem.createMany({
+        data: DEFAULT_READINESS_ITEMS.map((label, index) => ({ employeeId, label, sortOrder: index })),
+      });
+    }
 
     if (!templateId) {
       return tx.employeeOnboarding.create({

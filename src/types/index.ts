@@ -278,6 +278,17 @@ export interface OnboardingTemplateItemDTO {
   dueOffsetDays: number | null;
 }
 
+/** One internal readiness task (background check, TTC email created, equipment issued, etc.) —
+ *  see OnboardingReadinessItem in the schema and src/lib/onboarding-readiness.ts. Admin/
+ *  supervisor-only; never returned to, or fetched by, an employee's own onboarding view. */
+export interface OnboardingReadinessItemDTO {
+  id: string;
+  label: string;
+  completed: boolean;
+  completedAt: string | null;
+  sortOrder: number;
+}
+
 export interface OnboardingTemplateDTO {
   id: string;
   name: string;

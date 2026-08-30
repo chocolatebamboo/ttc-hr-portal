@@ -97,6 +97,7 @@ model Employee {
   documentAssignments  DocumentAssignment[]
   acknowledgments      DocumentAcknowledgment[]
   onboarding           EmployeeOnboarding?
+  onboardingReadinessItems OnboardingReadinessItem[]
   announcementsWritten Announcement[]        @relation("AnnouncementAuthor")
   announcementAudiences AnnouncementAudience[]
   auditLogEntries      AuditLog[]            @relation("ActorOnAuditLog")
@@ -412,6 +413,31 @@ model OnboardingTemplateItem {
 
   @@index([templateId])
   @@index([documentId])
+}
+
+// Internal admin/supervisor-only readiness tasks — TTC's own real Day-1 prep work (background
+// check, TTC email account created, Drive access granted, equipment issued, workspace prepared,
+// site tour completed, welcome meeting completed, payroll setup completed externally). These are
+// human tasks TTC wants TRACKED, not automated (see the Aug 2026 document gap analysis) — a
+// deliberate mirror-image of EmployeeOnboarding/OnboardingItem: unordered (no locking/sequence),
+// never gated on each other, and — unlike every other onboarding table — never visible to the
+// employee at all (see prisma/rls.sql: no self-access clause on this one). Not attached to a
+// specific EmployeeOnboarding, because readiness prep (e.g. a background check) often needs to
+// start before HR is ready to start the employee's own guided checklist.
+model OnboardingReadinessItem {
+  id         String   @id @default(uuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  label     String
+  sortOrder Int    @default(0)
+
+  completedAt DateTime?
+  completedBy String? // employee.id of the admin/supervisor who checked it off
+
+  createdAt DateTime @default(now())
+
+  @@index([employeeId])
 }
 
 // ---------------------------------------------------------------------------

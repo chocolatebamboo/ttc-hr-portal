@@ -17,6 +17,7 @@ import type {
   OnboardingAdminSummaryDTO,
   OnboardingItemDTO,
   OnboardingItemType,
+  OnboardingReadinessItemDTO,
   OnboardingTemplateDTO,
   OnboardingTemplateSummaryDTO,
 } from "@/types";
@@ -502,8 +503,9 @@ function AdminOnboardingPanel({ canStart }: { canStart: boolean }) {
                   </div>
                 )}
                 {isSelected && (
-                  <div className="px-4 pb-4">
+                  <div className="px-4 pb-4 space-y-3">
                     <EmployeeChecklistDetail employeeId={row.employeeId} canAddItems={canStart} onChanged={loadRoster} />
+                    <ReadinessChecklistPanel employeeId={row.employeeId} />
                   </div>
                 )}
               </div>
@@ -1073,6 +1075,80 @@ function EmployeeChecklistDetail({
           }}
         />
       )}
+    </div>
+  );
+}
+
+// Internal admin/supervisor-only readiness tasks (background check, TTC email created,
+// equipment issued, etc.) — a separate, unordered checklist from the employee's own onboarding
+// steps above. Never shown to, or fetchable by, the employee (see prisma/rls.sql). Fetches
+// independently rather than folding into EmployeeChecklistDetail's own state, since these two
+// checklists have nothing to do with each other beyond being managed from the same screen.
+function ReadinessChecklistPanel({ employeeId }: { employeeId: string }) {
+  const [items, setItems] = useState<OnboardingReadinessItemDTO[]>([]);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [busyItemId, setBusyItemId] = useState<string | null>(null);
+
+  async function load() {
+    setLoadState("loading");
+    try {
+      const res = await fetch(`/api/onboarding/manage/${employeeId}/readiness`);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setItems(data.items);
+      setLoadState("ready");
+    } catch {
+      setLoadState("error");
+    }
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-fetch only when the selected employee changes
+  }, [employeeId]);
+
+  async function toggle(itemId: string) {
+    setBusyItemId(itemId);
+    try {
+      await fetch(`/api/onboarding/readiness/${itemId}/toggle`, { method: "POST" });
+      await load();
+    } finally {
+      setBusyItemId(null);
+    }
+  }
+
+  if (loadState === "loading") {
+    return <div className="h-16 rounded-xl border border-border bg-background animate-pulse" />;
+  }
+  // Not an error state worth surfacing loudly — most likely this employee's checklist hasn't
+  // been started yet, so there's nothing seeded here (see startOnboarding).
+  if (loadState === "error" || items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-background p-4">
+      <p className="text-xs font-medium text-muted mb-2">Internal Readiness (not visible to employee)</p>
+      <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
+        {items.map((item) => {
+          const busy = busyItemId === item.id;
+          return (
+            <div key={item.id} className="px-4 py-2.5 flex items-center justify-between gap-3">
+              <p className={`text-sm ${item.completed ? "text-muted line-through" : "text-foreground"}`}>
+                {item.label}
+              </p>
+              <button
+                onClick={() => toggle(item.id)}
+                disabled={busy}
+                className="btn-neutral text-xs px-2.5 py-1 shrink-0"
+              >
+                {item.completed ? "Undo" : "Mark Done"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
