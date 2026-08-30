@@ -5,6 +5,7 @@ import { acknowledgeDocument, DocumentNotFoundError } from "@/lib/documents";
 import type {
   CurrentEmployee,
   EmployeeOnboardingDTO,
+  OnboardingAdminStatus,
   OnboardingAdminSummaryDTO,
   OnboardingAttentionDTO,
   OnboardingItemDTO,
@@ -341,18 +342,40 @@ export async function listOnboardingForManager(actor: CurrentEmployee): Promise<
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
     });
 
-    return employees.map((e) => ({
-      employeeId: e.id,
-      employeeName: `${e.preferredName || e.firstName} ${e.lastName}`,
-      jobTitle: e.jobTitle,
-      onboardingId: e.onboarding?.id ?? null,
-      totalItems: e.onboarding?.items.length ?? 0,
-      completedItems: e.onboarding?.items.filter((i: { status: string }) => i.status === "COMPLETED").length ?? 0,
-      awaitingApprovalCount:
-        e.onboarding?.items.filter((i: { status: string }) => i.status === "AWAITING_APPROVAL").length ?? 0,
-      completedAt: e.onboarding?.completedAt ? e.onboarding.completedAt.toISOString() : null,
-    }));
+    return employees.map((e) => {
+      const awaitingApprovalCount =
+        e.onboarding?.items.filter((i: { status: string }) => i.status === "AWAITING_APPROVAL").length ?? 0;
+      return {
+        employeeId: e.id,
+        employeeName: `${e.preferredName || e.firstName} ${e.lastName}`,
+        jobTitle: e.jobTitle,
+        onboardingId: e.onboarding?.id ?? null,
+        totalItems: e.onboarding?.items.length ?? 0,
+        completedItems: e.onboarding?.items.filter((i: { status: string }) => i.status === "COMPLETED").length ?? 0,
+        awaitingApprovalCount,
+        completedAt: e.onboarding?.completedAt ? e.onboarding.completedAt.toISOString() : null,
+        status: onboardingAdminStatus(e.onboarding, awaitingApprovalCount),
+      };
+    });
   });
+}
+
+/**
+ * The single reason-labeled status the admin/supervisor UI needs to know, at a glance, why a
+ * given employee needs attention (or doesn't) — this is what the ACTION NEEDED / WAITING ON
+ * EMPLOYEE / NOT STARTED / COMPLETED pill (OnboardingStatusPill) renders. Purely derived from
+ * data already on the row; nothing new is stored. Priority order matters: a checklist that's
+ * both "has something awaiting approval" and "not yet fully complete" is ACTION_NEEDED, not
+ * WAITING_ON_EMPLOYEE — the reviewer, not the employee, is the one currently blocking progress.
+ */
+function onboardingAdminStatus(
+  onboarding: { completedAt: Date | null } | null | undefined,
+  awaitingApprovalCount: number
+): OnboardingAdminStatus {
+  if (!onboarding) return "NOT_STARTED";
+  if (onboarding.completedAt) return "COMPLETED";
+  if (awaitingApprovalCount > 0) return "ACTION_NEEDED";
+  return "WAITING_ON_EMPLOYEE";
 }
 
 /**

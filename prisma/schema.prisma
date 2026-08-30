@@ -230,6 +230,12 @@ enum DocumentCategory {
   TRAINING
   EMPLOYEE_FORM
   CONFIDENTIAL_EMPLOYEE_DOCUMENT
+  // Split out from a single combined "NDA + Code of Conduct + Media Release" source packet —
+  // each is a legally distinct agreement with its own acknowledgment, so each gets its own
+  // category rather than being lumped under OTHER/EMPLOYEE_FORM (see gap-analysis discussion).
+  NDA_AGREEMENT
+  CODE_OF_CONDUCT
+  MEDIA_RELEASE
   OTHER
 }
 

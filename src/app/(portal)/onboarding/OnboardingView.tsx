@@ -10,6 +10,7 @@ import {
   LockIcon,
   TrashIcon,
 } from "@/components/icons";
+import OnboardingStatusPill from "@/components/OnboardingStatusPill";
 import type {
   DocumentAdminSummaryDTO,
   EmployeeOnboardingDTO,
@@ -457,11 +458,14 @@ function AdminOnboardingPanel({ canStart }: { canStart: boolean }) {
                     </p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    {row.awaitingApprovalCount > 0 && (
-                      <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-800 px-2.5 py-0.5 text-xs font-medium whitespace-nowrap">
-                        {row.awaitingApprovalCount} awaiting your approval
-                      </span>
-                    )}
+                    <div className="flex flex-col items-end gap-0.5">
+                      <OnboardingStatusPill status={row.status} />
+                      {row.status === "ACTION_NEEDED" && (
+                        <span className="text-[11px] text-muted whitespace-nowrap">
+                          {row.awaitingApprovalCount} step{row.awaitingApprovalCount === 1 ? "" : "s"} awaiting review
+                        </span>
+                      )}
+                    </div>
                     {started ? (
                       <button
                         onClick={() => setSelectedEmployeeId(isSelected ? null : row.employeeId)}

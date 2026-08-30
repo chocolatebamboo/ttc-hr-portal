@@ -133,6 +133,9 @@ export type DocumentCategory =
   | "TRAINING"
   | "EMPLOYEE_FORM"
   | "CONFIDENTIAL_EMPLOYEE_DOCUMENT"
+  | "NDA_AGREEMENT"
+  | "CODE_OF_CONDUCT"
+  | "MEDIA_RELEASE"
   | "OTHER";
 
 export type DocumentVisibility = "GLOBAL" | "DEPARTMENT" | "INDIVIDUAL" | "CONFIDENTIAL_HR";
@@ -226,6 +229,14 @@ export interface EmployeeOnboardingDTO {
   items: OnboardingItemDTO[];
 }
 
+/** One glance-able reason label for the admin/supervisor roster — see OnboardingAdminSummaryDTO.
+ *  Deliberately just these four for now: ACTION_NEEDED (something the reviewer must act on),
+ *  WAITING_ON_EMPLOYEE (checklist started, nothing pending review — the ball is in the
+ *  employee's court), NOT_STARTED (no checklist yet), COMPLETED. A future UPCOMING value (a
+ *  30/60/90-day checkpoint coming due) is intentionally not added until that feature exists —
+ *  no sense reserving a status nothing can ever produce. */
+export type OnboardingAdminStatus = "ACTION_NEEDED" | "WAITING_ON_EMPLOYEE" | "NOT_STARTED" | "COMPLETED";
+
 /** Admin/supervisor roster view — one row per employee the caller may manage (every active
  *  employee for an admin, direct reports only for a supervisor), whether or not their
  *  checklist has been started yet. */
@@ -240,6 +251,8 @@ export interface OnboardingAdminSummaryDTO {
    *  completedItems so "needs your attention" is a glance, not a click into every row. */
   awaitingApprovalCount: number;
   completedAt: string | null;
+  /** Purely derived from the fields above (see listOnboardingForManager) — not stored. */
+  status: OnboardingAdminStatus;
 }
 
 /** A reusable starting checklist HR builds once per role and picks from when starting a new

@@ -9,6 +9,9 @@ export const DOCUMENT_CATEGORY_LABEL: Record<DocumentCategory, string> = {
   TRAINING: "Training",
   EMPLOYEE_FORM: "Employee Form",
   CONFIDENTIAL_EMPLOYEE_DOCUMENT: "Confidential Employee Document",
+  NDA_AGREEMENT: "NDA / Non-Compete Agreement",
+  CODE_OF_CONDUCT: "Code of Conduct",
+  MEDIA_RELEASE: "Media Release",
   OTHER: "Other",
 };
 
