@@ -1,3 +1,4 @@
+import type { PrismaClient } from "@prisma/client";
 import { withRlsContext } from "@/lib/db";
 import { isAdmin, ForbiddenError, assertCanReviewOnboarding } from "@/lib/authorization";
 import { acknowledgeDocument, DocumentNotFoundError } from "@/lib/documents";
@@ -5,6 +6,7 @@ import type {
   CurrentEmployee,
   EmployeeOnboardingDTO,
   OnboardingAdminSummaryDTO,
+  OnboardingAttentionDTO,
   OnboardingItemDTO,
   OnboardingItemStatus,
   OnboardingItemType,
@@ -353,19 +355,113 @@ export async function listOnboardingForManager(actor: CurrentEmployee): Promise<
   });
 }
 
-/** Admin starts a new hire's checklist, seeded with the standard starter items. */
-export async function startOnboarding(actor: CurrentEmployee, employeeId: string) {
+/**
+ * Shared by addOnboardingItem below and by applying a template (src/lib/onboarding-templates.ts)
+ * — both create a real DOCUMENT-type OnboardingItem, so both need the same "is this document
+ * actually usable as a step" check: it must exist, not be archived, and not be CONFIDENTIAL_HR
+ * (that visibility tier is never shown to a non-admin at all — prisma/rls.sql — so it could
+ * never be completed as a step no matter what assignment exists). Template AUTHORING
+ * (addOnboardingTemplateItem) also uses just this half of the check — there's no specific
+ * employee yet at that point, so there's nothing to auto-assign.
+ */
+export async function assertDocumentUsableForOnboarding(tx: PrismaClient, documentId: string) {
+  const doc = await tx.document.findUnique({ where: { id: documentId } });
+  if (!doc || doc.archivedAt) throw new InvalidOnboardingError("Choose a valid document.");
+  if (doc.visibility === "CONFIDENTIAL_HR") {
+    throw new InvalidOnboardingError(
+      "Confidential HR documents can't be used as an onboarding step — the employee would never be able to see it."
+    );
+  }
+  return doc;
+}
+
+/**
+ * The other half of the DOCUMENT-item safety check, once a real target employee is known: an
+ * INDIVIDUAL-visibility document with no assignment to them yet gets one created automatically,
+ * rather than silently shipping a step the employee's own Document visibility rules would block
+ * them from ever completing.
+ */
+async function ensureDocumentAssigned(
+  tx: PrismaClient,
+  employeeId: string,
+  documentId: string,
+  visibility: string
+) {
+  if (visibility !== "INDIVIDUAL") return;
+  const assigned = await tx.documentAssignment.findFirst({ where: { documentId, employeeId } });
+  if (!assigned) {
+    await tx.documentAssignment.create({ data: { documentId, employeeId } });
+  }
+}
+
+/**
+ * Admin starts a new hire's checklist — either seeded with the standard starter items (no
+ * `templateId`), or copied from a named OnboardingTemplate (src/lib/onboarding-templates.ts).
+ * Applying a template just copies its items in at this moment; the template itself is never
+ * referenced again afterward, so editing or deleting it later never touches a checklist someone
+ * already started from it. Every DOCUMENT-type template item is re-validated here (not just
+ * trusted from when the template was built) since the document's own state — archived,
+ * visibility changed — may have moved on since.
+ */
+export async function startOnboarding(actor: CurrentEmployee, employeeId: string, templateId?: string) {
   if (!isAdmin(actor)) throw new ForbiddenError();
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const existing = await tx.employeeOnboarding.findUnique({ where: { employeeId } });
     if (existing) throw new InvalidOnboardingError("This employee's checklist has already been started.");
 
+    if (!templateId) {
+      return tx.employeeOnboarding.create({
+        data: {
+          employeeId,
+          items: {
+            create: DEFAULT_CHECKLIST_ITEMS.map((label, index) => ({ label, itemType: "TASK", sortOrder: index })),
+          },
+        },
+        include: { items: true },
+      });
+    }
+
+    const template = await tx.onboardingTemplate.findUnique({
+      where: { id: templateId },
+      include: { items: { orderBy: { sortOrder: "asc" } } },
+    });
+    if (!template) throw new InvalidOnboardingError("That template no longer exists.");
+    if (template.items.length === 0) {
+      throw new InvalidOnboardingError("That template has no steps yet — add some before using it.");
+    }
+
+    const startedAt = new Date();
+
+    // Validate every distinct document up front, before creating anything, so one bad template
+    // item fails the whole start rather than leaving a half-built checklist behind.
+    const visibilityByDocumentId = new Map<string, string>();
+    for (const item of template.items) {
+      if (item.itemType === "DOCUMENT" && item.documentId && !visibilityByDocumentId.has(item.documentId)) {
+        const doc = await assertDocumentUsableForOnboarding(tx, item.documentId);
+        visibilityByDocumentId.set(item.documentId, doc.visibility);
+      }
+    }
+    for (const [documentId, visibility] of visibilityByDocumentId) {
+      await ensureDocumentAssigned(tx, employeeId, documentId, visibility);
+    }
+
     return tx.employeeOnboarding.create({
       data: {
         employeeId,
+        startedAt,
         items: {
-          create: DEFAULT_CHECKLIST_ITEMS.map((label, index) => ({ label, itemType: "TASK", sortOrder: index })),
+          create: template.items.map((item, index) => ({
+            label: item.label,
+            description: item.description,
+            itemType: item.itemType,
+            documentId: item.itemType === "DOCUMENT" ? item.documentId : null,
+            dueDate:
+              item.dueOffsetDays != null
+                ? new Date(startedAt.getTime() + item.dueOffsetDays * 24 * 60 * 60 * 1000)
+                : null,
+            sortOrder: index,
+          })),
         },
       },
       include: { items: true },
@@ -382,13 +478,8 @@ export interface AddOnboardingItemInput {
 }
 
 /**
- * Admin adds one item to an already-started checklist. For a DOCUMENT-type item, this also
- * makes sure the target employee will actually be ABLE to see and acknowledge the document —
- * an INDIVIDUAL-visibility document with no assignment to them yet gets one created
- * automatically, rather than silently shipping a step the employee's own Document visibility
- * rules would block them from ever completing. A CONFIDENTIAL_HR document is refused outright:
- * that visibility tier is never shown to a non-admin at all (prisma/rls.sql), so it could never
- * be completed as an onboarding step no matter what assignment exists.
+ * Admin adds one item to an already-started checklist. See assertDocumentUsableForOnboarding
+ * above for the DOCUMENT-type safety checks this reuses.
  */
 export async function addOnboardingItem(
   actor: CurrentEmployee,
@@ -409,23 +500,8 @@ export async function addOnboardingItem(
     if (!onboarding) throw new OnboardingNotFoundError();
 
     if (input.itemType === "DOCUMENT" && input.documentId) {
-      const doc = await tx.document.findUnique({ where: { id: input.documentId } });
-      if (!doc || doc.archivedAt) throw new InvalidOnboardingError("Choose a valid document.");
-      if (doc.visibility === "CONFIDENTIAL_HR") {
-        throw new InvalidOnboardingError(
-          "Confidential HR documents can't be used as an onboarding step — the employee would never be able to see it."
-        );
-      }
-      if (doc.visibility === "INDIVIDUAL") {
-        const assigned = await tx.documentAssignment.findFirst({
-          where: { documentId: input.documentId, employeeId: onboarding.employeeId },
-        });
-        if (!assigned) {
-          await tx.documentAssignment.create({
-            data: { documentId: input.documentId, employeeId: onboarding.employeeId },
-          });
-        }
-      }
+      const doc = await assertDocumentUsableForOnboarding(tx, input.documentId);
+      await ensureDocumentAssigned(tx, onboarding.employeeId, input.documentId, doc.visibility);
     }
 
     const nextSortOrder = onboarding.items.length;
@@ -447,4 +523,39 @@ export async function addOnboardingItem(
 
     return created;
   });
+}
+
+/**
+ * Live "does anything need this person's attention right now" summary — powers the small nav
+ * badge (RoleNav/BottomNav) and the Dashboard's "Needs your attention" list. Deliberately NOT a
+ * persisted notification/read-tracking system (no new table, nothing to mark read): it's always
+ * exactly the truth of the current state, recomputed on every page load, the same way the
+ * Documents page's "pending acknowledgment" list already works. An employee's own actionable or
+ * returned step takes priority; admins/supervisors additionally see whether anyone they manage
+ * has something awaiting their approval.
+ */
+export async function getOnboardingAttention(actor: CurrentEmployee): Promise<OnboardingAttentionDTO> {
+  const mine = await getMyOnboarding(actor);
+  if (mine && !mine.completedAt) {
+    const current = mine.items.find((i) => i.id === mine.currentItemId);
+    if (current && (current.status === "NOT_STARTED" || current.status === "RETURNED")) {
+      return {
+        needsAttention: true,
+        label: current.status === "RETURNED" ? `Returned: ${current.label}` : current.label,
+      };
+    }
+  }
+
+  if (isAdmin(actor) || actor.role === "SUPERVISOR") {
+    const roster = await listOnboardingForManager(actor);
+    const pending = roster.reduce((sum, r) => sum + r.awaitingApprovalCount, 0);
+    if (pending > 0) {
+      return {
+        needsAttention: true,
+        label: `${pending} onboarding step${pending === 1 ? "" : "s"} awaiting your approval`,
+      };
+    }
+  }
+
+  return { needsAttention: false, label: null };
 }

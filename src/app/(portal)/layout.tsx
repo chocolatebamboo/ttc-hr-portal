@@ -1,6 +1,7 @@
 import Image from "next/image";
 import { redirect } from "next/navigation";
 import { getCurrentEmployee } from "@/lib/auth";
+import { getOnboardingAttention } from "@/lib/onboarding";
 import RoleNav from "@/components/RoleNav";
 import BottomNav from "@/components/BottomNav";
 import ProfileMenu from "@/components/ProfileMenu";
@@ -14,13 +15,17 @@ export default async function PortalLayout({ children }: { children: React.React
   const displayName = employee.preferredName || employee.firstName;
   const initials = `${employee.firstName[0] ?? ""}${employee.lastName[0] ?? ""}`.toUpperCase();
 
+  // Live, not persisted — see getOnboardingAttention's doc comment in src/lib/onboarding.ts.
+  // Computed on every portal page load, same as the auth check above.
+  const { needsAttention: needsOnboardingAttention } = await getOnboardingAttention(employee);
+
   return (
     <div className="flex-1 flex flex-col md:flex-row">
       {/* RoleNav resolves the nav list itself from `role` — nav items carry icon component
           references, and a Server Component can't pass functions as props into a Client
           Component (RSC serialization boundary), so the computed {primary, extra} arrays
-          can't cross from here. */}
-      <RoleNav role={employee.role} />
+          can't cross from here. needsOnboardingAttention is a plain boolean, so it crosses fine. */}
+      <RoleNav role={employee.role} needsOnboardingAttention={needsOnboardingAttention} />
 
       <div className="flex-1 flex flex-col min-w-0">
         <header className="flex items-center justify-between border-b border-border px-4 md:px-6 py-3">
@@ -39,7 +44,7 @@ export default async function PortalLayout({ children }: { children: React.React
         <main className="flex-1 px-4 md:px-6 py-6 pb-24 md:pb-6">{children}</main>
       </div>
 
-      <BottomNav />
+      <BottomNav needsOnboardingAttention={needsOnboardingAttention} />
     </div>
   );
 }

@@ -74,6 +74,11 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
       one step it shows as current — a plain task completes right away, but a document/training/
       meeting step submits for approval instead, so confirm it correctly shows "Awaiting
       Approval" and stays locked on the next step until your supervisor or HR approves it below.
+- [ ] After your supervisor or HR approves that step (below), confirm — without you doing
+      anything else — that a small dot shows up on the Onboarding nav link (or on "More," on a
+      phone) the next time you load any page, and that your Dashboard's "Needs your attention"
+      list now points at your next step. Then open it and confirm the dot and Dashboard entry
+      both disappear once you act on it.
 - [ ] After your supervisor approves your timesheet and decides your PTO request (below),
       come back and confirm the status updated and looks right from your side.
 - [ ] Ask your supervisor to **Return** (not approve) one timesheet entry with a comment, then
@@ -96,6 +101,9 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
       submitted above; confirm it unlocks their next step immediately. On a different report's
       step, **Return** it with a reason instead, and confirm they see the reason and can
       resubmit.
+- [ ] Before you approve anything above, confirm your own Onboarding nav dot and Dashboard
+      "Needs your attention" list already flagged that a report has a step awaiting your
+      approval — this is the same in-app notification an employee sees, just for reviewers.
 
 ### HR / Super Admin
 
@@ -108,6 +116,12 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
       step of each type beyond the defaults — a plain Task, a Document (pick one that requires
       acknowledgment), and a Training or Meeting step — and confirm the employee only ever sees
       one step "up next" at a time, in order.
+- [ ] Under Onboarding's Manage tab, open **Manage Templates** and build a named template (e.g.
+      "Camp Counselor") with two or three steps of different types. Start a *different* pilot
+      Employee's checklist by picking that template from the dropdown instead of the standard
+      starter, and confirm their checklist comes in with exactly those steps, in order, with any
+      due-date offsets applied correctly. Then delete the template and confirm that employee's
+      already-started checklist is completely unaffected.
 - [ ] Open the Reports page, pick a date range that covers what the Employee testers submitted,
       and download the Payroll Hours CSV. Open it and sanity-check the numbers against what was
       actually clocked and approved. Confirm the "still awaiting approval" warning shows up if

@@ -4,6 +4,7 @@ import { getCurrentEmployee } from "@/lib/auth";
 import { withRlsContext } from "@/lib/db";
 import { listDocumentsForEmployee } from "@/lib/documents";
 import { listAnnouncementsForEmployee } from "@/lib/announcements";
+import { getOnboardingAttention } from "@/lib/onboarding";
 import TimeClockCard from "@/components/TimeClockCard";
 import PtoStatusPill from "@/components/PtoStatusPill";
 import { ClockIcon, CalendarIcon, FolderIcon, ChecklistIcon, MegaphoneIcon } from "@/components/icons";
@@ -34,6 +35,7 @@ export default async function DashboardPage() {
 
   const documents = await listDocumentsForEmployee(employee);
   const pendingAcknowledgments = documents.filter((d) => d.requiresAcknowledgment && !d.acknowledgedAt);
+  const onboardingAttention = await getOnboardingAttention(employee);
   const announcements = (await listAnnouncementsForEmployee(employee)).slice(0, 3);
   const [featuredAnnouncement, ...otherAnnouncements] = announcements;
 
@@ -94,10 +96,19 @@ export default async function DashboardPage() {
 
         {/* Side column: what needs attention, then what's new. */}
         <div className="space-y-5">
-          {pendingAcknowledgments.length > 0 && (
+          {(onboardingAttention.needsAttention || pendingAcknowledgments.length > 0) && (
             <div className="animate-in animate-in-2">
               <h2 className="text-sm font-medium text-muted mb-2">Needs your attention</h2>
               <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
+                {onboardingAttention.needsAttention && (
+                  <Link
+                    href="/onboarding"
+                    className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-black/[0.02] transition-colors"
+                  >
+                    <span className="truncate">{onboardingAttention.label}</span>
+                    <span className="text-accent-ink font-medium whitespace-nowrap shrink-0">Review →</span>
+                  </Link>
+                )}
                 {pendingAcknowledgments.map((doc) => (
                   <Link
                     key={doc.id}

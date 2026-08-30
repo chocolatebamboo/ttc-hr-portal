@@ -256,9 +256,10 @@ model Document {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  assignments     DocumentAssignment[]
-  acknowledgments DocumentAcknowledgment[]
-  onboardingItems OnboardingItem[]
+  assignments             DocumentAssignment[]
+  acknowledgments         DocumentAcknowledgment[]
+  onboardingItems         OnboardingItem[]
+  onboardingTemplateItems OnboardingTemplateItem[]
 }
 
 model DocumentAssignment {
@@ -362,6 +363,48 @@ model OnboardingItem {
   returnReason String?               // required when status is set to RETURNED
 
   @@index([onboardingId])
+  @@index([documentId])
+}
+
+// A reusable starting checklist HR hand-builds once per role ("Camp Counselor," "Front Desk")
+// and picks from when starting a new hire's checklist — instead of typing the same steps in by
+// hand every time. Applying a template just copies its items into a fresh EmployeeOnboarding;
+// the template itself is never referenced again afterward, so editing or deleting a template
+// later never affects a checklist someone already started from it. Admin-only end to end (see
+// prisma/rls.sql) — starting a checklist is already admin-only (src/lib/onboarding.ts), so
+// there's no supervisor-facing template concept to support.
+model OnboardingTemplate {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items OnboardingTemplateItem[]
+}
+
+model OnboardingTemplateItem {
+  id         String             @id @default(uuid())
+  templateId String
+  template   OnboardingTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  label       String
+  description String?
+  itemType    OnboardingItemType @default(TASK)
+  sortOrder   Int                @default(0)
+
+  // Same rules as OnboardingItem.documentId — only set when itemType = DOCUMENT. Applying the
+  // template re-checks visibility/assignment at that moment (src/lib/onboarding.ts), the same
+  // as adding a one-off DOCUMENT step today, since the document's own state may have changed
+  // (archived, visibility changed) since the template was built.
+  documentId String?
+  document   Document? @relation(fields: [documentId], references: [id])
+
+  // Optional: due date = the new checklist's startedAt + this many days. Left null for a step
+  // with no deadline.
+  dueOffsetDays Int?
+
+  @@index([templateId])
   @@index([documentId])
 }
 

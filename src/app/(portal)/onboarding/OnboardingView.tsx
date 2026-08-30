@@ -8,6 +8,7 @@ import {
   GraduationCapIcon,
   UsersIcon,
   LockIcon,
+  TrashIcon,
 } from "@/components/icons";
 import type {
   DocumentAdminSummaryDTO,
@@ -15,6 +16,8 @@ import type {
   OnboardingAdminSummaryDTO,
   OnboardingItemDTO,
   OnboardingItemType,
+  OnboardingTemplateDTO,
+  OnboardingTemplateSummaryDTO,
 } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
@@ -357,7 +360,9 @@ function AdminOnboardingPanel({ canStart }: { canStart: boolean }) {
   const [roster, setRoster] = useState<OnboardingAdminSummaryDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
-  const [startingId, setStartingId] = useState<string | null>(null);
+  const [startPickerId, setStartPickerId] = useState<string | null>(null);
+  const [templates, setTemplates] = useState<OnboardingTemplateSummaryDTO[]>([]);
+  const [showTemplateManager, setShowTemplateManager] = useState(false);
 
   async function loadRoster() {
     setLoadState("loading");
@@ -372,21 +377,24 @@ function AdminOnboardingPanel({ canStart }: { canStart: boolean }) {
     }
   }
 
+  async function loadTemplates() {
+    try {
+      const res = await fetch("/api/onboarding/templates");
+      if (!res.ok) return;
+      const data = await res.json();
+      setTemplates(data.templates);
+    } catch {
+      // The template picker just falls back to "Standard starter only" — starting a
+      // checklist at all still works even if this fetch fails.
+    }
+  }
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadRoster();
+    if (canStart) loadTemplates();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
   }, []);
-
-  async function startChecklist(employeeId: string) {
-    setStartingId(employeeId);
-    try {
-      await fetch(`/api/onboarding/manage/${employeeId}/start`, { method: "POST" });
-      await loadRoster();
-      setSelectedEmployeeId(employeeId);
-    } finally {
-      setStartingId(null);
-    }
-  }
 
   return (
     <div>
@@ -395,6 +403,22 @@ function AdminOnboardingPanel({ canStart }: { canStart: boolean }) {
           ? "Start a new hire's checklist, or manage one already in progress — approve or send back a step, and add more as needed."
           : "Review your direct reports' onboarding — approve or send back a step awaiting your approval."}
       </p>
+
+      {canStart && (
+        <div className="mb-4">
+          <button
+            onClick={() => setShowTemplateManager((v) => !v)}
+            className="btn-neutral text-xs px-3 py-1.5"
+          >
+            {showTemplateManager ? "Close Templates" : "Manage Templates"}
+          </button>
+          {showTemplateManager && (
+            <div className="mt-3">
+              <TemplateManager templates={templates} onChanged={loadTemplates} />
+            </div>
+          )}
+        </div>
+      )}
 
       {loadState === "loading" && (
         <div className="space-y-2">
@@ -421,6 +445,7 @@ function AdminOnboardingPanel({ canStart }: { canStart: boolean }) {
           {roster.map((row) => {
             const started = row.onboardingId !== null;
             const isSelected = selectedEmployeeId === row.employeeId;
+            const isPickingTemplate = startPickerId === row.employeeId;
             return (
               <div key={row.employeeId}>
                 <div className="px-4 py-3.5 flex items-center justify-between gap-3">
@@ -447,18 +472,31 @@ function AdminOnboardingPanel({ canStart }: { canStart: boolean }) {
                       </button>
                     ) : canStart ? (
                       <button
-                        onClick={() => startChecklist(row.employeeId)}
-                        disabled={startingId === row.employeeId}
+                        onClick={() => setStartPickerId(isPickingTemplate ? null : row.employeeId)}
                         aria-label={`Start ${row.employeeName}'s checklist`}
                         className="btn-primary text-xs px-3 py-1.5"
                       >
-                        {startingId === row.employeeId ? "Starting…" : "Start Checklist"}
+                        Start Checklist
                       </button>
                     ) : (
                       <span className="text-xs text-muted">Not started</span>
                     )}
                   </div>
                 </div>
+                {isPickingTemplate && (
+                  <div className="px-4 pb-4">
+                    <StartChecklistForm
+                      employeeId={row.employeeId}
+                      templates={templates}
+                      onStarted={() => {
+                        setStartPickerId(null);
+                        loadRoster();
+                        setSelectedEmployeeId(row.employeeId);
+                      }}
+                      onCancel={() => setStartPickerId(null)}
+                    />
+                  </div>
+                )}
                 {isSelected && (
                   <div className="px-4 pb-4">
                     <EmployeeChecklistDetail employeeId={row.employeeId} canAddItems={canStart} onChanged={loadRoster} />
@@ -470,6 +508,384 @@ function AdminOnboardingPanel({ canStart }: { canStart: boolean }) {
         </div>
       )}
     </div>
+  );
+}
+
+function StartChecklistForm({
+  employeeId,
+  templates,
+  onStarted,
+  onCancel,
+}: {
+  employeeId: string;
+  templates: OnboardingTemplateSummaryDTO[];
+  onStarted: () => void;
+  onCancel: () => void;
+}) {
+  const [templateId, setTemplateId] = useState("");
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState("");
+
+  async function start() {
+    setStarting(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/onboarding/manage/${employeeId}/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ templateId: templateId || undefined }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error ?? "Unable to start this checklist.");
+        return;
+      }
+      onStarted();
+    } catch {
+      setError("Unable to reach the server. Check your connection and try again.");
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-background p-4 flex flex-col sm:flex-row gap-2 sm:items-center">
+      <select
+        value={templateId}
+        onChange={(e) => setTemplateId(e.target.value)}
+        className="flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
+      >
+        <option value="">Standard starter (default 5 tasks)</option>
+        {templates.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.name} ({t.itemCount} step{t.itemCount === 1 ? "" : "s"})
+          </option>
+        ))}
+      </select>
+      <div className="flex gap-2 shrink-0">
+        <button onClick={start} disabled={starting} className="btn-primary text-xs px-3 py-1.5 whitespace-nowrap">
+          {starting ? "Starting…" : "Start"}
+        </button>
+        <button onClick={onCancel} disabled={starting} className="btn-neutral text-xs px-3 py-1.5">
+          Cancel
+        </button>
+      </div>
+      {error && (
+        <p role="alert" className="text-sm text-accent w-full">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Admin: reusable checklist templates
+// ---------------------------------------------------------------------------
+
+function TemplateManager({
+  templates,
+  onChanged,
+}: {
+  templates: OnboardingTemplateSummaryDTO[];
+  onChanged: () => void;
+}) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState("");
+
+  async function createTemplate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setCreating(true);
+    setError("");
+    try {
+      const res = await fetch("/api/onboarding/templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, description: description || undefined }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error ?? "Unable to create this template.");
+        return;
+      }
+      setName("");
+      setDescription("");
+      onChanged();
+      setExpandedId(data.template.id);
+    } catch {
+      setError("Unable to reach the server. Check your connection and try again.");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function removeTemplate(templateId: string) {
+    await fetch(`/api/onboarding/templates/${templateId}`, { method: "DELETE" });
+    if (expandedId === templateId) setExpandedId(null);
+    onChanged();
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-background p-4 space-y-3">
+      <p className="text-xs text-muted">
+        Build a reusable starting checklist once per role, then pick it from the dropdown when
+        starting a new hire&rsquo;s checklist. Editing or deleting a template never changes a checklist
+        someone already started from it.
+      </p>
+
+      {templates.length > 0 && (
+        <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
+          {templates.map((t) => (
+            <div key={t.id}>
+              <div className="px-3.5 py-2.5 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate">{t.name}</p>
+                  <p className="text-xs text-muted">
+                    {t.itemCount} step{t.itemCount === 1 ? "" : "s"}
+                    {t.description ? ` · ${t.description}` : ""}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    onClick={() => setExpandedId(expandedId === t.id ? null : t.id)}
+                    className="btn-neutral text-xs px-2.5 py-1"
+                  >
+                    {expandedId === t.id ? "Close" : "Edit Steps"}
+                  </button>
+                  <button
+                    onClick={() => removeTemplate(t.id)}
+                    aria-label={`Delete ${t.name} template`}
+                    className="text-muted hover:text-accent p-1"
+                  >
+                    <TrashIcon className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+              {expandedId === t.id && (
+                <div className="px-3.5 pb-3.5">
+                  <TemplateEditor templateId={t.id} />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <form onSubmit={createTemplate} className="flex flex-col sm:flex-row gap-2 pt-1">
+        <input
+          type="text"
+          required
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="New template name (e.g. Camp Counselor)"
+          className="flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
+        />
+        <input
+          type="text"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Description (optional)"
+          className="flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
+        />
+        <button type="submit" disabled={creating} className="btn-neutral text-sm px-4 py-2 whitespace-nowrap">
+          {creating ? "Creating…" : "New Template"}
+        </button>
+      </form>
+      {error && (
+        <p role="alert" className="text-sm text-accent">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function TemplateEditor({ templateId }: { templateId: string }) {
+  const [template, setTemplate] = useState<OnboardingTemplateDTO | null>(null);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+
+  async function load() {
+    setLoadState("loading");
+    try {
+      const res = await fetch(`/api/onboarding/templates/${templateId}`);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setTemplate(data.template);
+      setLoadState("ready");
+    } catch {
+      setLoadState("error");
+    }
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-fetch only when the template changes
+  }, [templateId]);
+
+  async function removeItem(itemId: string) {
+    await fetch(`/api/onboarding/templates/${templateId}/items/${itemId}`, { method: "DELETE" });
+    await load();
+  }
+
+  if (loadState === "loading") {
+    return <div className="h-20 rounded-lg border border-border bg-surface animate-pulse" />;
+  }
+  if (loadState === "error" || !template) {
+    return <p className="text-sm text-accent">Unable to load this template&rsquo;s steps.</p>;
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-surface p-3 space-y-2.5">
+      {template.items.length === 0 ? (
+        <p className="text-xs text-muted">No steps yet — add the first one below.</p>
+      ) : (
+        <div className="divide-y divide-border">
+          {template.items.map((item) => {
+            const Icon = TYPE_ICON[item.itemType];
+            return (
+              <div key={item.id} className="flex items-center gap-2.5 py-2">
+                <Icon className="h-4 w-4 text-muted shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm truncate">{item.label}</p>
+                  <p className="text-xs text-muted">
+                    {TYPE_LABEL[item.itemType]}
+                    {item.itemType === "DOCUMENT" && item.documentTitle ? ` · ${item.documentTitle}` : ""}
+                    {item.dueOffsetDays != null ? ` · due ${item.dueOffsetDays}d after start` : ""}
+                  </p>
+                </div>
+                <button
+                  onClick={() => removeItem(item.id)}
+                  aria-label={`Remove ${item.label}`}
+                  className="text-muted hover:text-accent p-1 shrink-0"
+                >
+                  <TrashIcon className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <TemplateAddItemForm templateId={templateId} onAdded={load} />
+    </div>
+  );
+}
+
+function TemplateAddItemForm({ templateId, onAdded }: { templateId: string; onAdded: () => void }) {
+  const [label, setLabel] = useState("");
+  const [itemType, setItemType] = useState<OnboardingItemType>("TASK");
+  const [documentId, setDocumentId] = useState("");
+  const [dueOffsetDays, setDueOffsetDays] = useState("");
+  const [documents, setDocuments] = useState<DocumentAdminSummaryDTO[]>([]);
+  const [adding, setAdding] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (itemType !== "DOCUMENT" || documents.length > 0) return;
+    fetch("/api/documents/manage")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data) setDocuments(data.documents.filter((d: DocumentAdminSummaryDTO) => !d.archivedAt));
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once, the first time Document is selected
+  }, [itemType]);
+
+  async function addItem(e: React.FormEvent) {
+    e.preventDefault();
+    if (!label.trim()) return;
+    if (itemType === "DOCUMENT" && !documentId) {
+      setError("Choose a document for this step.");
+      return;
+    }
+    setAdding(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/onboarding/templates/${templateId}/items`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          label,
+          itemType,
+          documentId: itemType === "DOCUMENT" ? documentId : undefined,
+          dueOffsetDays: dueOffsetDays || undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error ?? "Unable to add this step.");
+        return;
+      }
+      setLabel("");
+      setItemType("TASK");
+      setDocumentId("");
+      setDueOffsetDays("");
+      onAdded();
+    } catch {
+      setError("Unable to reach the server. Check your connection and try again.");
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  return (
+    <form onSubmit={addItem} className="space-y-2 pt-1 border-t border-border">
+      <div className="flex flex-col sm:flex-row gap-2 pt-2">
+        <input
+          type="text"
+          required
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="Add a step…"
+          className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
+        />
+        <select
+          value={itemType}
+          onChange={(e) => setItemType(e.target.value as OnboardingItemType)}
+          className="rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
+        >
+          <option value="TASK">Task</option>
+          <option value="DOCUMENT">Document</option>
+          <option value="TRAINING">Training</option>
+          <option value="MEETING">Meeting</option>
+        </select>
+        <input
+          type="number"
+          min={0}
+          value={dueOffsetDays}
+          onChange={(e) => setDueOffsetDays(e.target.value)}
+          placeholder="Due (days)"
+          title="Due this many days after the checklist starts — leave blank for no deadline"
+          className="w-28 rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
+        />
+        <button type="submit" disabled={adding} className="btn-neutral text-sm px-4 py-2 whitespace-nowrap">
+          {adding ? "Adding…" : "Add Step"}
+        </button>
+      </div>
+      {itemType === "DOCUMENT" && (
+        <select
+          value={documentId}
+          onChange={(e) => setDocumentId(e.target.value)}
+          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
+        >
+          <option value="">— Choose a document —</option>
+          {documents.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.title}
+            </option>
+          ))}
+        </select>
+      )}
+      {error && (
+        <p role="alert" className="text-sm text-accent">
+          {error}
+        </p>
+      )}
+    </form>
   );
 }
 

@@ -48,11 +48,19 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   acknowledgment tracking rather than a second honor-system copy), Training, and Meeting.
   Document/Training/Meeting all route through an AWAITING_APPROVAL state that HR or the
   employee's own supervisor must Approve (unlocks the next step) or Return (with a required
-  reason, sending it back to the employee to redo). HR starts a new hire's checklist (seeded
-  with five standard starter tasks) and adds typed steps beyond those from the Manage tab;
-  supervisors get the same Manage tab scoped to their own direct reports. A checklist's
+  reason, sending it back to the employee to redo). HR starts a new hire's checklist — either
+  the standard five-task starter, or a named, reusable Template ("Camp Counselor," etc.) built
+  from HR's own Manage Templates screen — and adds typed steps beyond those from the Manage
+  tab; supervisors get the same Manage tab scoped to their own direct reports. Applying a
+  template just copies its steps into that one checklist at that moment (each step's own due
+  date is the checklist's start date plus that step's configured offset); editing or deleting
+  the template afterward never touches a checklist already started from it. A checklist's
   completion date is set automatically the moment every step is COMPLETED, and cleared again
-  if any step (including a newly added one) isn't.
+  if any step (including a newly added one) isn't. Whether an employee has an actionable or
+  returned step, or an admin/supervisor has anything awaiting their approval, is surfaced
+  in-app only (no email) as a small dot on the Onboarding nav link and an entry in the
+  Dashboard's "Needs your attention" list — recomputed live on every page load, never a stored
+  notification to mark read.
 - **Directory** — every active employee, to every authenticated employee: name, title,
   department, role, work email, work phone — nothing more. This is the one place in the app
   where RLS's row-level grant is deliberately broader than what any single request needs; see

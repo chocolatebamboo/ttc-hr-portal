@@ -242,6 +242,44 @@ export interface OnboardingAdminSummaryDTO {
   completedAt: string | null;
 }
 
+/** A reusable starting checklist HR builds once per role and picks from when starting a new
+ *  hire's checklist — see src/lib/onboarding-templates.ts. Applying one just copies its items
+ *  into a fresh checklist; the template is never referenced again afterward. */
+export interface OnboardingTemplateSummaryDTO {
+  id: string;
+  name: string;
+  description: string | null;
+  itemCount: number;
+}
+
+export interface OnboardingTemplateItemDTO {
+  id: string;
+  label: string;
+  description: string | null;
+  itemType: OnboardingItemType;
+  sortOrder: number;
+  documentId: string | null;
+  documentTitle: string | null;
+  /** Due date, once applied, = the new checklist's start date + this many days. Null = no
+   *  deadline for this step. */
+  dueOffsetDays: number | null;
+}
+
+export interface OnboardingTemplateDTO {
+  id: string;
+  name: string;
+  description: string | null;
+  items: OnboardingTemplateItemDTO[];
+}
+
+/** Live "does anything need this person's attention right now" summary — see
+ *  getOnboardingAttention in src/lib/onboarding.ts. Not a notification feed: there's nothing to
+ *  mark read, it's always just the current truth, recomputed on every page load. */
+export interface OnboardingAttentionDTO {
+  needsAttention: boolean;
+  label: string | null;
+}
+
 /** One row in the company directory. Deliberately narrow — see src/lib/directory.ts for why
  *  this list of fields is the entire contract: nothing else is ever selected from Employee for
  *  this feature, so there's nothing sensitive to accidentally widen later. */

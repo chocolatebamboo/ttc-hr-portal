@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentEmployee } from "@/lib/auth";
+import { getOnboardingAttention } from "@/lib/onboarding";
 import { navForRole } from "@/lib/nav";
 import { ChevronRightIcon } from "@/components/icons";
 
@@ -13,6 +14,10 @@ export default async function MorePage() {
   // everything past those, plus the admin section for roles that have one.
   const rest = primary.filter((i) => !["/dashboard", "/time", "/time-off", "/documents"].includes(i.href));
 
+  // Same live attention flag BottomNav puts a dot on "More" for — repeated here on the actual
+  // Onboarding row, since this is the screen that dot is pointing at.
+  const { needsAttention: needsOnboardingAttention } = await getOnboardingAttention(employee);
+
   return (
     <div className="max-w-md md:hidden pb-4">
       <h1 className="page-title text-2xl mb-4">More</h1>
@@ -24,6 +29,9 @@ export default async function MorePage() {
               <span className="flex items-center gap-3 text-sm">
                 <Icon className="h-[18px] w-[18px] text-muted shrink-0" />
                 {item.label}
+                {item.href === "/onboarding" && needsOnboardingAttention && (
+                  <span aria-label="Needs attention" className="h-1.5 w-1.5 rounded-full bg-accent" />
+                )}
               </span>
               <ChevronRightIcon className="h-4 w-4 text-muted" />
             </Link>

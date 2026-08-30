@@ -335,6 +335,24 @@ drop policy if exists onboarding_item_insert on "OnboardingItem";
 create policy onboarding_item_insert on "OnboardingItem" for insert with check (is_admin());
 
 
+-- Reusable starting checklists (Aug 2026). Admin-only end to end, unlike EmployeeOnboarding/
+-- OnboardingItem above — starting a checklist is already admin-only in src/lib/onboarding.ts
+-- (a supervisor may review one already in progress, but never starts a new one), so there's no
+-- supervisor-of or self case to add here.
+alter table "OnboardingTemplate" enable row level security;
+alter table "OnboardingTemplate" force row level security;
+
+drop policy if exists onboarding_template_all on "OnboardingTemplate";
+create policy onboarding_template_all on "OnboardingTemplate" for all using (is_admin()) with check (is_admin());
+
+
+alter table "OnboardingTemplateItem" enable row level security;
+alter table "OnboardingTemplateItem" force row level security;
+
+drop policy if exists onboarding_template_item_all on "OnboardingTemplateItem";
+create policy onboarding_template_item_all on "OnboardingTemplateItem" for all using (is_admin()) with check (is_admin());
+
+
 alter table "AuditLog" enable row level security;
 alter table "AuditLog" force row level security;
 

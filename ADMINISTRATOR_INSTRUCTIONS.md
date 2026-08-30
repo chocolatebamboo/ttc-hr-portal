@@ -104,10 +104,12 @@ tab every employee has, since admins have their own documents to read too). From
 Onboarding is a guided, one-step-at-a-time flow, not a flat checklist — an employee only ever
 sees one step as "what you need to do right now"; everything after it is locked until that step
 is truly done, and everything before it stays visible as a completed trail. Start a new hire's
-checklist from the Manage tab — it's seeded with five standard starter tasks automatically —
-then add more steps as needed. A supervisor gets this same Manage tab, scoped to their own
-direct reports only, so they can review and approve their team's steps without needing HR/Super
-Admin access.
+checklist from the Manage tab, choosing either the standard five-task starter or a named
+Template you've built ahead of time (see "Onboarding Templates" below); then add more steps as
+needed on top of whichever you picked. A supervisor gets this same Manage tab, scoped to their
+own direct reports only, so they can review and approve their team's steps without needing
+HR/Super Admin access — supervisors can't start a checklist or manage templates, only HR/Super
+Admin can.
 
 Every step has a type, chosen when it's added:
 
@@ -130,6 +132,27 @@ and unlocks the next one, or **Return** it with a required reason, which sends i
 employee to fix and resubmit. A checklist's completion date is set the moment every step is
 COMPLETED, and clears again automatically if any step — including one added after the fact —
 isn't.
+
+There's no email for any of this — an employee whose step gets approved or returned, or an
+admin/supervisor whose team has a step awaiting approval, sees it in-app the next time they
+visit the portal: a small dot appears on the Onboarding link (or on "More," on a phone, since
+Onboarding lives one tap deeper there), and it's called out in the Dashboard's "Needs your
+attention" list. There's nothing to mark read — it's always just the current truth, so it
+clears itself the moment the underlying step is dealt with.
+
+### Onboarding Templates
+
+From the Manage tab, **Manage Templates** opens a screen for building reusable, named starting
+checklists — one per role you hire for often (Camp Counselor, Front Desk, etc.), each with its
+own ordered list of typed steps, built the same way you'd add steps to a live checklist
+(including linking a Document, and setting how many days after the start date each step is
+due). Building or editing a template doesn't affect anyone: it only takes effect the moment you
+pick it from the dropdown when starting a specific new hire's checklist, at which point its
+steps are copied into that one checklist. HR always picks the template by hand when starting a
+checklist — nothing here is auto-suggested based on the new hire's role or department.
+Deleting a template only removes the reusable definition; it never touches a checklist someone
+already started from it, since applying a template just copies its steps in at that moment and
+the template is never referenced again afterward.
 
 ## Directory (`/directory`)
 
