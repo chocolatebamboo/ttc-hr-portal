@@ -60,7 +60,15 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   returned step, or an admin/supervisor has anything awaiting their approval, is surfaced
   in-app only (no email) as a small dot on the Onboarding nav link and an entry in the
   Dashboard's "Needs your attention" list — recomputed live on every page load, never a stored
-  notification to mark read.
+  notification to mark read. The admin/supervisor roster also shows one glance-able status pill
+  per employee — Action Needed, Upcoming, Waiting on Employee, Not Started, or Completed — so
+  reviewing who needs what never requires opening every row. Starting a checklist also seeds two
+  admin/supervisor-only panels, both explicitly invisible to the employee: an **Internal
+  Readiness** checklist (background check, TTC email/Drive access, equipment, workspace, site
+  tour, welcome meeting, external payroll setup — real Day-1 human tasks the app only tracks,
+  never automates) and three fixed **30/60/90-Day Checkpoints** (due date, freeform notes,
+  optional training-milestone/development-goal fields, a follow-up flag) — deliberately not a
+  performance-management system, just a lightweight, un-gated follow-up record.
 - **Directory** — every active employee, to every authenticated employee: name, title,
   department, role, work email, work phone — nothing more. This is the one place in the app
   where RLS's row-level grant is deliberately broader than what any single request needs; see

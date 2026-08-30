@@ -382,6 +382,33 @@ drop policy if exists onboarding_readiness_insert on "OnboardingReadinessItem";
 create policy onboarding_readiness_insert on "OnboardingReadinessItem" for insert with check (is_admin());
 
 
+-- Lightweight 30/60/90-day follow-ups (Aug 2026 document review) — same shape as
+-- OnboardingReadinessItem immediately above, including the deliberate lack of a self-access
+-- clause: an employee must never be able to see or query their own checkpoint rows.
+alter table "OnboardingCheckpoint" enable row level security;
+alter table "OnboardingCheckpoint" force row level security;
+
+drop policy if exists onboarding_checkpoint_select on "OnboardingCheckpoint";
+create policy onboarding_checkpoint_select on "OnboardingCheckpoint" for select using (
+  is_admin()
+  or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+);
+
+drop policy if exists onboarding_checkpoint_update on "OnboardingCheckpoint";
+create policy onboarding_checkpoint_update on "OnboardingCheckpoint" for update using (
+  is_admin()
+  or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+) with check (
+  is_admin()
+  or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+);
+
+-- Insert only ever happens inside startOnboarding (src/lib/onboarding.ts) — admin-only, same as
+-- the readiness table.
+drop policy if exists onboarding_checkpoint_insert on "OnboardingCheckpoint";
+create policy onboarding_checkpoint_insert on "OnboardingCheckpoint" for insert with check (is_admin());
+
+
 alter table "AuditLog" enable row level security;
 alter table "AuditLog" force row level security;
 

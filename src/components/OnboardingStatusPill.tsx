@@ -4,6 +4,7 @@ import type { OnboardingAdminStatus } from "@/types";
 // toggle; see that component's note on why dark: classes caused problems here).
 const STYLE: Record<OnboardingAdminStatus, string> = {
   ACTION_NEEDED: "bg-rose-100 text-rose-800",
+  UPCOMING: "bg-sky-100 text-sky-800",
   WAITING_ON_EMPLOYEE: "bg-amber-100 text-amber-800",
   NOT_STARTED: "bg-black/5 text-muted",
   COMPLETED: "bg-emerald-100 text-emerald-800",
@@ -11,6 +12,7 @@ const STYLE: Record<OnboardingAdminStatus, string> = {
 
 const LABEL: Record<OnboardingAdminStatus, string> = {
   ACTION_NEEDED: "Action Needed",
+  UPCOMING: "Upcoming",
   WAITING_ON_EMPLOYEE: "Waiting on Employee",
   NOT_STARTED: "Not Started",
   COMPLETED: "Completed",

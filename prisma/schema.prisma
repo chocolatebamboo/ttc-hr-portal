@@ -98,6 +98,7 @@ model Employee {
   acknowledgments      DocumentAcknowledgment[]
   onboarding           EmployeeOnboarding?
   onboardingReadinessItems OnboardingReadinessItem[]
+  onboardingCheckpoints    OnboardingCheckpoint[]
   announcementsWritten Announcement[]        @relation("AnnouncementAuthor")
   announcementAudiences AnnouncementAudience[]
   auditLogEntries      AuditLog[]            @relation("ActorOnAuditLog")
@@ -434,6 +435,43 @@ model OnboardingReadinessItem {
 
   completedAt DateTime?
   completedBy String? // employee.id of the admin/supervisor who checked it off
+
+  createdAt DateTime @default(now())
+
+  @@index([employeeId])
+}
+
+enum OnboardingCheckpointStatus {
+  PENDING
+  COMPLETED
+}
+
+// Lightweight 30/60/90-day onboarding follow-ups (Aug 2026 document gap analysis) — explicitly
+// NOT a performance-management system: three fixed, unordered check-ins seeded alongside an
+// employee's main checklist (see startOnboarding in src/lib/onboarding.ts), each just a due
+// date, a status, and freeform notes. "Supervisor" isn't a separate field here — it's simply
+// whoever Employee.supervisorId already says it is, the same as everywhere else onboarding
+// reuses that relationship rather than duplicating it. Admin/supervisor-only, like
+// OnboardingReadinessItem above (see prisma/rls.sql) — not shown on the employee's own
+// onboarding view, at least for now.
+model OnboardingCheckpoint {
+  id         String   @id @default(uuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  // Plain label ("30-Day Check-In"), not an enum — so a one-off custom checkpoint someday isn't
+  // blocked by a fixed set of exactly three.
+  milestone String
+  dueDate   DateTime
+  status    OnboardingCheckpointStatus @default(PENDING)
+
+  notes              String?
+  followUpNeeded     Boolean @default(false)
+  trainingMilestones String? // freeform — only filled in where applicable, per the source docs
+  developmentGoals   String? // freeform — only filled in where applicable, per the source docs
+
+  completedAt DateTime?
+  completedBy String? // employee.id of the admin/supervisor who completed it
 
   createdAt DateTime @default(now())
 

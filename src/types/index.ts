@@ -230,12 +230,16 @@ export interface EmployeeOnboardingDTO {
 }
 
 /** One glance-able reason label for the admin/supervisor roster — see OnboardingAdminSummaryDTO.
- *  Deliberately just these four for now: ACTION_NEEDED (something the reviewer must act on),
- *  WAITING_ON_EMPLOYEE (checklist started, nothing pending review — the ball is in the
- *  employee's court), NOT_STARTED (no checklist yet), COMPLETED. A future UPCOMING value (a
- *  30/60/90-day checkpoint coming due) is intentionally not added until that feature exists —
- *  no sense reserving a status nothing can ever produce. */
-export type OnboardingAdminStatus = "ACTION_NEEDED" | "WAITING_ON_EMPLOYEE" | "NOT_STARTED" | "COMPLETED";
+ *  Priority order (first match wins, computed in listOnboardingForManager): ACTION_NEEDED
+ *  (something the reviewer must act on) beats UPCOMING (a 30/60/90-day checkpoint due within the
+ *  next week) beats COMPLETED (checklist finished, nothing due soon) beats WAITING_ON_EMPLOYEE
+ *  (checklist started, ball's in the employee's court) beats NOT_STARTED (no checklist yet). */
+export type OnboardingAdminStatus =
+  | "ACTION_NEEDED"
+  | "UPCOMING"
+  | "WAITING_ON_EMPLOYEE"
+  | "NOT_STARTED"
+  | "COMPLETED";
 
 /** Admin/supervisor roster view — one row per employee the caller may manage (every active
  *  employee for an admin, direct reports only for a supervisor), whether or not their
@@ -253,6 +257,24 @@ export interface OnboardingAdminSummaryDTO {
   completedAt: string | null;
   /** Purely derived from the fields above (see listOnboardingForManager) — not stored. */
   status: OnboardingAdminStatus;
+}
+
+export type OnboardingCheckpointStatus = "PENDING" | "COMPLETED";
+
+/** One 30/60/90-day onboarding follow-up — see OnboardingCheckpoint in the schema. Admin/
+ *  supervisor-only, like OnboardingReadinessItemDTO; not shown on the employee's own onboarding
+ *  view. trainingMilestones/developmentGoals are both optional freeform fields, filled in only
+ *  where applicable — this is a lightweight follow-up, not a performance review form. */
+export interface OnboardingCheckpointDTO {
+  id: string;
+  milestone: string;
+  dueDate: string;
+  status: OnboardingCheckpointStatus;
+  notes: string | null;
+  followUpNeeded: boolean;
+  trainingMilestones: string | null;
+  developmentGoals: string | null;
+  completedAt: string | null;
 }
 
 /** A reusable starting checklist HR builds once per role and picks from when starting a new

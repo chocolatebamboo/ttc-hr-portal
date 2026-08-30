@@ -62,6 +62,23 @@ const DEFAULT_READINESS_ITEMS = [
   "Payroll Setup Completed (External)",
 ];
 
+// Also seeded alongside the employee's checklist, into the separate OnboardingCheckpoint table
+// — the three fixed follow-up milestones from the Aug 2026 document review, due dates computed
+// from the checklist's own startedAt so they're never accidentally forgotten. See that model's
+// doc comment in prisma/schema.prisma for why this is deliberately not a performance-management
+// system: no goal-tracking engine, just a due date and freeform notes per milestone.
+const DEFAULT_CHECKPOINT_MILESTONES: { milestone: string; offsetDays: number }[] = [
+  { milestone: "30-Day Check-In", offsetDays: 30 },
+  { milestone: "60-Day Check-In", offsetDays: 60 },
+  { milestone: "90-Day Review", offsetDays: 90 },
+];
+
+// A PENDING checkpoint due within this many days (including already-overdue ones) is what
+// makes an employee's roster row show UPCOMING — see onboardingAdminStatus below. A week gives
+// HR/the supervisor a heads-up without flagging something due a month out as if it needs
+// attention right now.
+const UPCOMING_CHECKPOINT_WINDOW_DAYS = 7;
+
 // TASK auto-completes the instant it's checked — there's no one else who needs to sign off on
 // "I reviewed the staff directory." The other three represent something HR or a supervisor
 // should actually verify happened, so they route through AWAITING_APPROVAL first. This is the
@@ -354,6 +371,7 @@ export async function listOnboardingForManager(actor: CurrentEmployee): Promise<
         preferredName: true,
         jobTitle: true,
         onboarding: { include: { items: true } },
+        onboardingCheckpoints: { where: { status: "PENDING" }, select: { dueDate: true } },
       },
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
     });
@@ -370,27 +388,37 @@ export async function listOnboardingForManager(actor: CurrentEmployee): Promise<
         completedItems: e.onboarding?.items.filter((i: { status: string }) => i.status === "COMPLETED").length ?? 0,
         awaitingApprovalCount,
         completedAt: e.onboarding?.completedAt ? e.onboarding.completedAt.toISOString() : null,
-        status: onboardingAdminStatus(e.onboarding, awaitingApprovalCount),
+        status: onboardingAdminStatus(e.onboarding, awaitingApprovalCount, e.onboardingCheckpoints),
       };
     });
   });
 }
 
+function hasUpcomingCheckpoint(checkpoints: { dueDate: Date }[]): boolean {
+  const cutoff = new Date(Date.now() + UPCOMING_CHECKPOINT_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  // Includes already-overdue PENDING checkpoints (dueDate in the past), not just ones coming up
+  // in the next week — an overdue check-in is at least as worth surfacing as an upcoming one,
+  // and CB's own status set doesn't call for a separate OVERDUE label.
+  return checkpoints.some((c) => c.dueDate <= cutoff);
+}
+
 /**
  * The single reason-labeled status the admin/supervisor UI needs to know, at a glance, why a
- * given employee needs attention (or doesn't) — this is what the ACTION NEEDED / WAITING ON
- * EMPLOYEE / NOT STARTED / COMPLETED pill (OnboardingStatusPill) renders. Purely derived from
- * data already on the row; nothing new is stored. Priority order matters: a checklist that's
- * both "has something awaiting approval" and "not yet fully complete" is ACTION_NEEDED, not
- * WAITING_ON_EMPLOYEE — the reviewer, not the employee, is the one currently blocking progress.
+ * given employee needs attention (or doesn't) — this is what the OnboardingStatusPill renders.
+ * Purely derived from data already on the row; nothing new is stored. Priority order matters
+ * (see OnboardingAdminStatus's doc comment): ACTION_NEEDED beats UPCOMING beats COMPLETED beats
+ * WAITING_ON_EMPLOYEE — e.g. a checklist that finished a month ago but has a 90-Day Review due
+ * this week should still surface as UPCOMING, not silently read as COMPLETED-and-done.
  */
 function onboardingAdminStatus(
   onboarding: { completedAt: Date | null } | null | undefined,
-  awaitingApprovalCount: number
+  awaitingApprovalCount: number,
+  pendingCheckpoints: { dueDate: Date }[]
 ): OnboardingAdminStatus {
   if (!onboarding) return "NOT_STARTED";
-  if (onboarding.completedAt) return "COMPLETED";
   if (awaitingApprovalCount > 0) return "ACTION_NEEDED";
+  if (hasUpcomingCheckpoint(pendingCheckpoints)) return "UPCOMING";
+  if (onboarding.completedAt) return "COMPLETED";
   return "WAITING_ON_EMPLOYEE";
 }
 
@@ -456,6 +484,20 @@ export async function startOnboarding(actor: CurrentEmployee, employeeId: string
     if (readinessCount === 0) {
       await tx.onboardingReadinessItem.createMany({
         data: DEFAULT_READINESS_ITEMS.map((label, index) => ({ employeeId, label, sortOrder: index })),
+      });
+    }
+
+    // Same idea, for the three fixed 30/60/90-day follow-up checkpoints — due dates measured
+    // from today (the checklist's own start), not from a template's dueOffsetDays.
+    const checkpointCount = await tx.onboardingCheckpoint.count({ where: { employeeId } });
+    if (checkpointCount === 0) {
+      const seedStart = new Date();
+      await tx.onboardingCheckpoint.createMany({
+        data: DEFAULT_CHECKPOINT_MILESTONES.map(({ milestone, offsetDays }) => ({
+          employeeId,
+          milestone,
+          dueDate: new Date(seedStart.getTime() + offsetDays * 24 * 60 * 60 * 1000),
+        })),
       });
     }
 

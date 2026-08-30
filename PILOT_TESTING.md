@@ -122,6 +122,12 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
       starter, and confirm their checklist comes in with exactly those steps, in order, with any
       due-date offsets applied correctly. Then delete the template and confirm that employee's
       already-started checklist is completely unaffected.
+- [ ] After starting a checklist above, confirm the Manage tab's roster shows a status pill for
+      that employee (Action Needed / Upcoming / Waiting on Employee / Not Started / Completed),
+      and that opening Manage on them shows an **Internal Readiness** panel (8 fixed tasks) and a
+      **30/60/90-Day Checkpoints** panel (3 fixed milestones) — check one readiness task and one
+      checkpoint off, add a note to a checkpoint, and confirm both save. Ask that employee to
+      confirm neither panel appears anywhere on their own Onboarding page.
 - [ ] Open the Reports page, pick a date range that covers what the Employee testers submitted,
       and download the Payroll Hours CSV. Open it and sanity-check the numbers against what was
       actually clocked and approved. Confirm the "still awaiting approval" warning shows up if

@@ -15,6 +15,7 @@ import type {
   DocumentAdminSummaryDTO,
   EmployeeOnboardingDTO,
   OnboardingAdminSummaryDTO,
+  OnboardingCheckpointDTO,
   OnboardingItemDTO,
   OnboardingItemType,
   OnboardingReadinessItemDTO,
@@ -506,6 +507,7 @@ function AdminOnboardingPanel({ canStart }: { canStart: boolean }) {
                   <div className="px-4 pb-4 space-y-3">
                     <EmployeeChecklistDetail employeeId={row.employeeId} canAddItems={canStart} onChanged={loadRoster} />
                     <ReadinessChecklistPanel employeeId={row.employeeId} />
+                    <CheckpointsPanel employeeId={row.employeeId} />
                   </div>
                 )}
               </div>
@@ -1145,6 +1147,175 @@ function ReadinessChecklistPanel({ employeeId }: { employeeId: string }) {
               >
                 {item.completed ? "Undo" : "Mark Done"}
               </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function formatCheckpointDueDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+// Lightweight 30/60/90-day follow-ups — a plain due date, a done/not-done status, and freeform
+// notes. Explicitly NOT a performance-review form: no ratings, no scoring, just what CB's
+// document review asked for. Same admin/supervisor-only visibility and independent-fetch
+// pattern as ReadinessChecklistPanel above.
+function CheckpointsPanel({ employeeId }: { employeeId: string }) {
+  const [checkpoints, setCheckpoints] = useState<OnboardingCheckpointDTO[]>([]);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, { notes: string; trainingMilestones: string; developmentGoals: string; followUpNeeded: boolean }>>({});
+
+  async function load() {
+    setLoadState("loading");
+    try {
+      const res = await fetch(`/api/onboarding/manage/${employeeId}/checkpoints`);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setCheckpoints(data.checkpoints);
+      setLoadState("ready");
+    } catch {
+      setLoadState("error");
+    }
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-fetch only when the selected employee changes
+  }, [employeeId]);
+
+  function openDraft(cp: OnboardingCheckpointDTO) {
+    setDrafts((d) => ({
+      ...d,
+      [cp.id]: {
+        notes: cp.notes ?? "",
+        trainingMilestones: cp.trainingMilestones ?? "",
+        developmentGoals: cp.developmentGoals ?? "",
+        followUpNeeded: cp.followUpNeeded,
+      },
+    }));
+    setOpenId(openId === cp.id ? null : cp.id);
+  }
+
+  async function toggleComplete(id: string) {
+    setBusyId(id);
+    try {
+      await fetch(`/api/onboarding/checkpoints/${id}/toggle`, { method: "POST" });
+      await load();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function saveDraft(id: string) {
+    const draft = drafts[id];
+    if (!draft) return;
+    setBusyId(id);
+    try {
+      await fetch(`/api/onboarding/checkpoints/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft),
+      });
+      await load();
+      setOpenId(null);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  if (loadState === "loading") {
+    return <div className="h-16 rounded-xl border border-border bg-background animate-pulse" />;
+  }
+  // Not started yet is the common case (nothing seeded until the main checklist begins) — no
+  // need for a loud error state either way.
+  if (loadState === "error" || checkpoints.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-background p-4">
+      <p className="text-xs font-medium text-muted mb-2">30/60/90-Day Checkpoints (not visible to employee)</p>
+      <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
+        {checkpoints.map((cp) => {
+          const isOpen = openId === cp.id;
+          const busy = busyId === cp.id;
+          const draft = drafts[cp.id];
+          return (
+            <div key={cp.id} className="px-4 py-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <button onClick={() => openDraft(cp)} className="min-w-0 flex-1 text-left">
+                  <p className={`text-sm ${cp.status === "COMPLETED" ? "text-muted line-through" : "text-foreground"}`}>
+                    {cp.milestone}
+                  </p>
+                  <p className="text-xs text-muted">
+                    Due {formatCheckpointDueDate(cp.dueDate)}
+                    {cp.followUpNeeded && cp.status !== "COMPLETED" && (
+                      <span className="text-rose-700"> · Follow-up needed</span>
+                    )}
+                  </p>
+                </button>
+                <button
+                  onClick={() => toggleComplete(cp.id)}
+                  disabled={busy}
+                  className="btn-neutral text-xs px-2.5 py-1 shrink-0"
+                >
+                  {cp.status === "COMPLETED" ? "Reopen" : "Mark Complete"}
+                </button>
+              </div>
+              {isOpen && draft && (
+                <div className="mt-2.5 space-y-2">
+                  <textarea
+                    value={draft.notes}
+                    onChange={(e) => setDrafts((d) => ({ ...d, [cp.id]: { ...draft, notes: e.target.value } }))}
+                    placeholder="Notes"
+                    rows={2}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
+                  />
+                  <textarea
+                    value={draft.trainingMilestones}
+                    onChange={(e) =>
+                      setDrafts((d) => ({ ...d, [cp.id]: { ...draft, trainingMilestones: e.target.value } }))
+                    }
+                    placeholder="Training milestones (if applicable)"
+                    rows={2}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
+                  />
+                  <textarea
+                    value={draft.developmentGoals}
+                    onChange={(e) =>
+                      setDrafts((d) => ({ ...d, [cp.id]: { ...draft, developmentGoals: e.target.value } }))
+                    }
+                    placeholder="Development goals (if applicable)"
+                    rows={2}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
+                  />
+                  <label className="flex items-center gap-2 text-xs text-muted">
+                    <input
+                      type="checkbox"
+                      checked={draft.followUpNeeded}
+                      onChange={(e) =>
+                        setDrafts((d) => ({ ...d, [cp.id]: { ...draft, followUpNeeded: e.target.checked } }))
+                      }
+                    />
+                    Needs follow-up
+                  </label>
+                  <div className="flex justify-end">
+                    <button
+                      onClick={() => saveDraft(cp.id)}
+                      disabled={busy}
+                      className="btn-primary text-xs px-3 py-1.5"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}

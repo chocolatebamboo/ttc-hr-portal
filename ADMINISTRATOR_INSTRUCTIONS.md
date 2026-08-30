@@ -154,6 +154,31 @@ Deleting a template only removes the reusable definition; it never touches a che
 already started from it, since applying a template just copies its steps in at that moment and
 the template is never referenced again afterward.
 
+### Roster status, Internal Readiness, and Checkpoints
+
+Each employee's row in the Manage tab's roster carries one glance-able status pill so you never
+have to open every row to know what's going on: **Action Needed** (something's sitting in
+Awaiting Approval), **Upcoming** (a 30/60/90-day checkpoint below is due within a week, including
+an overdue one), **Waiting on Employee** (checklist started, nothing pending your review),
+**Not Started**, or **Completed**. It's computed fresh every time, in that priority order — a
+checklist that finished a month ago but has a 90-Day Review due this week still shows Upcoming,
+not Completed.
+
+Opening **Manage** on an employee also shows two extra panels, both seeded automatically the
+moment you start that employee's checklist and both invisible to the employee themselves — they
+never appear anywhere on the employee's own Onboarding page:
+
+- **Internal Readiness** — eight fixed, unordered tasks for the real Day-1 prep work behind the
+  scenes: Background Check Completed, TTC Email Account Created, Google Drive Access Granted,
+  Equipment/Uniform Issued, Workspace Prepared, Site Tour Completed, Welcome Meeting Completed,
+  and Payroll Setup Completed (External). Check them off as you go — there's no approval step
+  and no particular order.
+- **30/60/90-Day Checkpoints** — three fixed follow-ups (30-Day Check-In, 60-Day Check-In,
+  90-Day Review), due that many days after the checklist started. Click one to add notes,
+  training milestones or development goals where applicable, and flag whether it needs
+  follow-up, then Mark Complete when it's done. This is intentionally lightweight — there's no
+  scoring, rating, or performance-review workflow behind it.
+
 ## Directory (`/directory`)
 
 Read-only for everyone, admins included: name, title, department, role, work email, and work
