@@ -60,6 +60,10 @@ export default function ProfileMenu({
 
   async function handleSignOut() {
     setSigningOut(true);
+    // Harmless no-op if no preview was active — tidy hygiene so a stale preview cookie never
+    // lingers in the browser for whoever signs in next on this device (resolveEffectiveEmployee
+    // in src/lib/preview.ts would ignore it safely either way, but there's no reason to leave it).
+    await fetch("/api/admin/preview/stop", { method: "POST" }).catch(() => {});
     const supabase = createSupabaseBrowserClient();
     await supabase.auth.signOut();
     router.push("/login");

@@ -50,6 +50,11 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
 
 - [ ] Open the invite email, set a password, sign in at the real deployed URL (not localhost).
 - [ ] Sign out and sign back in — confirms the session actually persists correctly.
+- [ ] If Google sign-in is turned on (README "Getting set up" §9), sign out and try "Continue
+      with Google" using the same email the invite went to — it should land you straight on the
+      Dashboard, no separate approval step. If you have a Google account with a *different*
+      email than any invited employee, confirm trying that one bounces back to `/login` with a
+      clear "ask HR" message instead of a broken page.
 - [ ] Check the Directory — find at least one coworker, confirm their listed title/email/phone
       looks right, confirm you do *not* see anyone's personal phone, personal email, or
       emergency contact (those are intentionally admin/self-only).
@@ -151,6 +156,12 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
 - [ ] Deactivate that throwaway account from Employees and confirm they're immediately signed
       out / blocked on their next request — then Reactivate them and confirm they're back in.
       Also confirm you can't deactivate your own account from here.
+- [ ] As a Super Admin, click **View as** on the Employee or Supervisor pilot tester and confirm
+      the nav, dashboard, and their real data all render exactly as that person would see them,
+      with an amber "Previewing as…" bar across the top. Confirm every submit/approve/clock-in
+      type action is genuinely blocked (not just hidden) while previewing, then use **Exit
+      preview** to get back to your own account. Confirm you do NOT see "View as" at all when
+      signed in as the HR Admin pilot tester — it's Super Admin only.
 - [ ] As the HR Admin pilot tester (not a Super Admin), confirm you can edit a Super Admin's
       other fields but the Role field is locked with an explanation when it's already Super
       Admin or you try to set it to Super Admin.

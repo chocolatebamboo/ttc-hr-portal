@@ -18,11 +18,23 @@ alone to keep a non-admin out.
 ## Signing in
 
 Admin accounts sign in the same way as everyone else, at the deployed URL's `/login` page,
-with the email and password Supabase Auth has on file. There's no separate admin login. Once
-signed in, the left sidebar (or the bottom nav on a phone) shows an extra section below the
-regular employee links — Employees, Attendance, PTO Management, Documents' Manage tab,
-Onboarding's Manage tab, Announcements' Manage tab, Reports, and Administration — that a
-non-admin never sees at all, not even as a disabled/greyed-out link.
+with the email and password Supabase Auth has on file, **or** with the "Continue with Google"
+button once Google sign-in is enabled (see README's "Getting set up" §9 — it's a one-time
+setup step in Google Cloud Console and the Supabase dashboard, not something this app can turn
+on by itself). Either way there's no separate admin login. Once signed in, the left sidebar (or
+the bottom nav on a phone) shows an extra section below the regular employee links — Employees,
+Attendance, PTO Management, Documents' Manage tab, Onboarding's Manage tab, Announcements'
+Manage tab, Reports, and Administration — that a non-admin never sees at all, not even as a
+disabled/greyed-out link.
+
+Google sign-in is invite-gated exactly the same way email/password already is — it's a second
+door into the *same* account, not a new one. Someone still has to be added on the Employees page
+first (which creates their invited account under their TTC email); once that exists, clicking
+"Continue with Google" with that same email signs into that same account (Supabase Auth links
+the two automatically by matching verified email — no separate approval step). Someone who
+tries Google sign-in without ever having been added as an employee gets bounced straight back
+to the login page with a clear message telling them to ask HR, never a broken or partial
+dashboard.
 
 If you need to set someone's password directly instead of relying on the invite-email flow
 (useful when a link has expired, or email delivery is unreliable), see
@@ -286,6 +298,16 @@ picture, so it's admin-only end to end.
   naturally expires — there's no session-level caching of this status that would delay it. You
   can't deactivate your own account from here, on purpose, so an admin can never accidentally
   lock themselves out.
+- **View as** — Super Admin only. Click it on any active employee (other than yourself) to see
+  the app exactly as they would: their nav, their dashboard, their real data, top to bottom.
+  A persistent amber bar stays across the top of every page the whole time as a reminder, with
+  an **Exit preview** button that always works no matter where you've navigated to since. It's
+  strictly read-only — every button that would submit, approve, clock in/out, or grade
+  something is disabled at the server level while previewing, not just hidden, so there's no
+  way to accidentally take a real action "as" someone else. Since it switches your nav to that
+  employee's role, most roles can't navigate back to this Employees page themselves while
+  you're previewing them — use the amber bar's Exit preview button to get back, not the
+  browser's back button.
 
 Search filters by name, email, job title, department, or employee code as you type.
 

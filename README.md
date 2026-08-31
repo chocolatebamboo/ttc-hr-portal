@@ -112,6 +112,19 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   form; self-deactivation is blocked outright. Granting or changing anyone's role to/from Super
   Admin is restricted to an actor who is already a Super Admin — an HR Admin can still edit
   every other field on a Super Admin's record, just not that one.
+- **Google sign-in** — an optional second way in alongside email/password on `/login`, invite-
+  gated exactly the same way: it's a faster door into an *already-invited* account, not a new
+  one. Relies on Supabase Auth's own automatic identity linking by verified email, so no extra
+  app-side "pending approval" state is needed — see README "Getting set up" §9 for the one-time
+  Google Cloud Console + Supabase dashboard configuration this needs (not something the app can
+  turn on by itself).
+- **"View as" role preview** — Super Admin only, from the Employees page: temporarily see the
+  app exactly as one specific real employee would (their nav, their dashboard, their data),
+  without creating a throwaway account or changing anyone's real session. Strictly read-only —
+  `src/proxy.ts` refuses every non-GET/HEAD `/api/*` request while a preview is active (except
+  exiting it), so nothing can be submitted, approved, or graded under a previewed identity. A
+  persistent banner names who's being previewed and exits back to your own account from any
+  page. See `src/lib/preview.ts` for the full design.
 - **HR-wide Attendance dashboard** — `/admin/attendance` (HR/Super Admin only) lists every
   active employee for a selected week, not just one supervisor's team, with an
   awaiting-approval count and a missing-clock-out count per person and an optional department
@@ -314,6 +327,42 @@ least one Super Admin exists, that's a chicken-and-egg problem the UI can't solv
 a machine with the real `.env.local` (same one `create-pilot-accounts.mjs` needs) to set any
 existing employee's role directly. Once one real Super Admin account exists, everyone else's
 role can be managed from the Employees page instead.
+
+### 9. Enable Google sign-in (optional)
+
+The "Continue with Google" button on `/login` needs Google configured as an OAuth provider in
+this Supabase project — a one-time setup step in two dashboards this app can't reach on its
+own. Until it's done, the button is harmless: it just shows "Unable to start Google sign-in,"
+and email/password keeps working exactly as before.
+
+1. **Google Cloud Console** (needs a Google account — TTC's own, not a personal one, so
+   whoever leaves the org later doesn't take the OAuth client with them):
+   - Create a project (or reuse an existing TTC one) at
+     [console.cloud.google.com](https://console.cloud.google.com).
+   - **APIs & Services → OAuth consent screen**: set it up for "External" users (TTC staff
+     signing in with their own personal or work Google accounts don't need to be in your
+     Google Workspace, if you have one), fill in the app name ("TTC HR Portal") and support
+     email. Publishing status can stay in "Testing" while you're only using this internally,
+     but Google caps Testing mode at 100 users and test users must be added by email under
+     "Test users" — switch to "In production" once the pilot is past that, which for a basic
+     OAuth consent screen (no sensitive scopes requested) doesn't require Google's review.
+   - **APIs & Services → Credentials → Create Credentials → OAuth client ID**, application
+     type **Web application**. Under "Authorized redirect URIs," add your Supabase project's
+     callback URL — find the exact one in the Supabase dashboard step below (it's shown right
+     on the Google provider settings page); it looks like
+     `https://<your-project-ref>.supabase.co/auth/v1/callback`.
+   - Save the **Client ID** and **Client Secret** it gives you — the next step needs both.
+2. **Supabase dashboard**: Project Settings → Authentication → Sign In / Providers → **Google**.
+   Toggle it on, paste in the Client ID and Client Secret from step 1, save. That's the whole
+   Supabase-side step — this app's login page already calls
+   `supabase.auth.signInWithOAuth({ provider: "google" })`, so nothing else to configure there.
+3. Test it against a real invited account: add yourself (or reuse your existing admin account)
+   on the Employees page with your real Google email if it isn't already, sign out, and click
+   "Continue with Google" on `/login` using that same email. It should land you straight on
+   the dashboard — Supabase links the Google sign-in to your existing invited account
+   automatically by matching the verified email, no separate step needed. Then try it with an
+   email that was never added as an employee — it should bounce back to `/login` with a clear
+   "ask HR" message instead of a broken dashboard.
 
 ## Roadmap (Phase 1 build order)
 

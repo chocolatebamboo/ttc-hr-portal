@@ -1,16 +1,25 @@
 import Image from "next/image";
 import { redirect } from "next/navigation";
 import { getCurrentEmployee } from "@/lib/auth";
+import { resolveEffectiveEmployee } from "@/lib/preview";
 import { getOnboardingAttention } from "@/lib/onboarding";
 import RoleNav from "@/components/RoleNav";
 import BottomNav from "@/components/BottomNav";
 import ProfileMenu from "@/components/ProfileMenu";
+import PreviewBanner from "@/components/PreviewBanner";
 
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
   // Middleware already redirects signed-out visitors, but every server render re-checks —
   // a layout that trusted middleware alone would be a single point of failure for auth.
-  const employee = await getCurrentEmployee();
-  if (!employee) redirect("/login");
+  const real = await getCurrentEmployee();
+  if (!real) redirect("/login");
+
+  // `employee` below is deliberately the EFFECTIVE identity, not `real` — while a Super Admin
+  // has a "View as" preview active (src/lib/preview.ts), everything from here down (nav,
+  // header, the page content children render) renders exactly as the previewed employee would
+  // see it. `real` is only used for the banner itself, which is what makes it possible to
+  // tell the difference and get back out.
+  const { effective: employee, isPreviewing } = await resolveEffectiveEmployee(real);
 
   const displayName = employee.preferredName || employee.firstName;
   const initials = `${employee.firstName[0] ?? ""}${employee.lastName[0] ?? ""}`.toUpperCase();
@@ -28,6 +37,12 @@ export default async function PortalLayout({ children }: { children: React.React
       <RoleNav role={employee.role} needsOnboardingAttention={needsOnboardingAttention} />
 
       <div className="flex-1 flex flex-col min-w-0">
+        {isPreviewing && (
+          <PreviewBanner
+            name={employee.preferredName || `${employee.firstName} ${employee.lastName}`}
+            role={employee.role}
+          />
+        )}
         <header className="flex items-center justify-between border-b border-border px-4 md:px-6 py-3">
           <div className="flex items-center gap-2.5">
             <Image src="/ttc-logo.png" alt="" width={32} height={32} className="h-8 w-8 rounded-full" priority />

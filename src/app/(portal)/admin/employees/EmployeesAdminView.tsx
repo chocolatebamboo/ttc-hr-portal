@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { SearchIcon } from "@/components/icons";
 import AvatarEditor from "@/components/AvatarEditor";
 import type { EmployeeAdminRowDTO, EmploymentStatus, Role } from "@/types";
@@ -114,8 +115,13 @@ export default function EmployeesAdminView({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [formError, setFormError] = useState("");
   const [actionError, setActionError] = useState("");
+  const router = useRouter();
 
   const canGrantSuperAdmin = currentEmployeeRole === "SUPER_ADMIN";
+  // "View as" is deliberately Super Admin only (see src/lib/preview.ts) — an HR Admin
+  // previewing a Supervisor's view isn't a meaningfully different vantage point the way it is
+  // for a Super Admin checking what a Mentor/Supervisor sees compared to their own full access.
+  const canPreview = currentEmployeeRole === "SUPER_ADMIN";
 
   async function load() {
     setLoadState("loading");
@@ -198,6 +204,35 @@ export default function EmployeesAdminView({
     } catch {
       setFormError("Unable to reach the server. Check your connection and try again.");
     } finally {
+      setBusyId(null);
+    }
+  }
+
+  /** Starts a read-only "View as" preview of this employee — see PreviewBanner and
+   *  src/lib/preview.ts. Redirecting to /dashboard (rather than just refreshing in place) is
+   *  deliberate: this page is admin-only, and the moment the preview takes effect the nav and
+   *  every subsequent page render as this employee's role, which for most roles can't reach
+   *  this page at all — better to land somewhere every role can see than on a page about to
+   *  become inaccessible out from under them. */
+  async function viewAs(row: EmployeeAdminRowDTO) {
+    setBusyId(row.id);
+    setActionError("");
+    try {
+      const res = await fetch("/api/admin/preview/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ employeeId: row.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionError(data.error ?? "Unable to start previewing this employee.");
+        setBusyId(null);
+        return;
+      }
+      router.push("/dashboard");
+      router.refresh();
+    } catch {
+      setActionError("Unable to reach the server. Check your connection and try again.");
       setBusyId(null);
     }
   }
@@ -343,6 +378,16 @@ export default function EmployeesAdminView({
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  {canPreview && row.id !== currentEmployeeId && !row.deactivatedAt && (
+                    <button
+                      onClick={() => viewAs(row)}
+                      disabled={busyId === row.id}
+                      title="See exactly what this employee sees — read-only, you can exit any time"
+                      className="btn-neutral text-xs px-3 py-1.5"
+                    >
+                      View as
+                    </button>
+                  )}
                   <button
                     onClick={() => {
                       setEditingId(editingId === row.id ? null : row.id);

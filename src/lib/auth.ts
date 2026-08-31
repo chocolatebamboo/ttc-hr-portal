@@ -1,6 +1,7 @@
 import { withUserIdContext } from "@/lib/db";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getAvatarPublicUrl } from "@/lib/storage";
+import { resolveEffectiveEmployee } from "@/lib/preview";
 import type { CurrentEmployee } from "@/types";
 
 /**
@@ -60,7 +61,24 @@ export class UnauthenticatedError extends Error {
   }
 }
 
+/**
+ * The identity nearly every route/page in this app resolves as "who's asking." Transparently
+ * substitutes in a Super Admin's active "View as" preview target when one is set (see
+ * src/lib/preview.ts for the full design and why this is the one place that substitution
+ * happens) — every existing call site gets preview support for free, no changes needed. Use
+ * requireRealEmployee() below instead, deliberately, anywhere that must always act on the
+ * actual signed-in person regardless of preview state (starting/stopping a preview itself,
+ * or a persistent "who am I really" banner).
+ */
 export async function requireEmployee(): Promise<CurrentEmployee> {
+  const real = await getCurrentEmployee();
+  if (!real) throw new UnauthenticatedError();
+  const { effective } = await resolveEffectiveEmployee(real);
+  return effective;
+}
+
+/** Always the real, actually-signed-in employee — never a "View as" preview target. */
+export async function requireRealEmployee(): Promise<CurrentEmployee> {
   const employee = await getCurrentEmployee();
   if (!employee) throw new UnauthenticatedError();
   return employee;
