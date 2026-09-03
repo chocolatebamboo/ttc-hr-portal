@@ -33,15 +33,24 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   requested" audit action implies but doesn't fully spell out.
 - **PTO request + approval** — folded into the My Time page rather than a separate Time Off
   page, so employees have one place for their calendar and their time-off requests. The
-  primary way to request time off is straight from the calendar, modeled on the Airbnb host
-  calendar CB referenced: click a day with nothing logged yet (today or any day after), or
-  click-then-click a second one to select a whole run of empty days at once, and the panel
-  offers the same form for however many days are selected. That panel is a non-blocking side
-  sheet (bottom sheet on a phone) — no backdrop, so the calendar underneath stays visible and
-  clickable and clicking a different day just changes the selection instead of closing
-  anything. Any day already covered by a request (Pending, Approved, or Denied) shows that on
-  the calendar instead of an hours readout. A "Request for another date" form below the
-  calendar covers anything the calendar can't — a past date, or a date many months out —
+  calendar itself is a single continuously-scrolling list of months, modeled on the Airbnb
+  host calendar CB referenced — it opens on the current month and scrolling down lazily loads
+  and appends earlier months one at a time (there's nothing to click through), the same
+  direction "My Time" already limited navigation to (past months, not future ones). The
+  calendar column is also full-width next to the day panel rather than a fixed-width card with
+  empty page beside it, so it uses the space the page actually has instead of leaving a wide
+  gutter of white space. The primary way to request time off is straight from the calendar:
+  click a day with nothing logged yet (today or any day after), or click-then-click a second
+  one to select a whole run of empty days at once, and the panel offers the same form for
+  however many days are selected. That panel is a non-blocking side panel — no backdrop, so
+  the calendar underneath stays visible and clickable and clicking a different day just changes
+  the selection instead of closing anything. On sm+ screens it's pinned in place (sticky) next
+  to the calendar as the month list scrolls underneath it; on a phone it's a small floating
+  card (not an edge-to-edge sheet) capped at half the screen height and floating clear of the
+  bottom tab bar, so there's always calendar visible and scrollable around it. Any day already
+  covered by a request (Pending, Approved, or Denied) shows that on the calendar instead of an
+  hours readout. A "Request for another date" form below the calendar covers anything the
+  calendar can't — a past date, or a date many months out —
   writing the exact same PtoRequest row as the calendar's own form, so the request list, its
   cancel action, and supervisor approval all just work regardless of which entry point created
   the request. Supervisors decide (Approve / Deny, with an optional note on denial) from the

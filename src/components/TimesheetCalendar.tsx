@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import StatusPill from "@/components/StatusPill";
 import PtoStatusPill from "@/components/PtoStatusPill";
 import type { CorrectionControls } from "@/components/TimesheetTable";
@@ -15,8 +15,10 @@ import {
   todayDateKey,
   toTimeInputValue,
 } from "@/lib/time";
-import type { Month } from "@/lib/month";
+import { getMonth, type Month } from "@/lib/month";
 import type { PtoRequestDTO, PtoStatus, PtoType, TimeEntryDTO, TimeEntryStatus } from "@/types";
+
+type LoadState = "loading" | "ready" | "error" | "empty";
 
 // Small status dot on each day cell — same semantic colors as StatusPill (src/components/
 // StatusPill.tsx), just a dot instead of a full pill since there isn't room for pill text in
@@ -115,6 +117,18 @@ interface Selection {
   end: string; // === start for a single day
 }
 
+interface MonthSlot {
+  offset: number;
+  month: Month;
+  entries: TimeEntryDTO[];
+  loadState: LoadState;
+}
+
+/** How far back the calendar will scroll before it stops offering more — 60 months (5 years)
+ *  is far more history than a pilot company needs, and an outer bound keeps a very determined
+ *  scroller from firing off requests forever. */
+const EARLIEST_OFFSET = -60;
+
 /**
  * The employee's own "My Time" page, as a month calendar (CB's ask, modeled on the Airbnb
  * host calendar: a number per day, click a day to see/edit the detail) rather than one week's
@@ -124,35 +138,130 @@ interface Selection {
  * edit-and-resubmit), and this redesign was scoped to My Time only. TimesheetTable is untouched.
  *
  * Also folds in requesting PTO directly from the calendar. After CB watched an actual
- * screen recording of the Airbnb host calendar, two things about the *first* version of this
+ * screen recording of the Airbnb host calendar, several things about earlier versions of this
  * were wrong relative to that reference and got fixed here:
  *   1. The day panel was a centered/bottom overlay with a dark backdrop that blocked the
- *      calendar underneath it. Airbnb's panel is non-blocking — it docks to the side (bottom
- *      on a phone) and the calendar grid stays fully visible and clickable while it's open.
- *      There is deliberately no backdrop element here for that reason.
+ *      calendar underneath it. Airbnb's panel is non-blocking — it docks to the side (a small
+ *      floating card on a phone) and the calendar grid stays visible and clickable while it's
+ *      open. There is deliberately no backdrop element here for that reason, and on a phone the
+ *      panel is capped at half the viewport height and floats above the bottom tab bar rather
+ *      than covering the whole screen, so there's always calendar left to see and scroll.
  *   2. Airbnb lets you click a second date to extend the first into a multi-day range (the
  *      panel then edits all of it at once) rather than one day at a time. `selection` below
  *      is `{start, end}` rather than a single date for exactly this — clicking a second empty,
  *      future day next to an already-selected one forms a range; the PTO request form then
  *      covers the whole range in one submit, using the exact same startDate/endDate/hours
  *      shape the Time Off page's own multi-day form already sends.
+ *   3. Airbnb's calendar isn't one month with prev/next buttons — it's a single continuously
+ *      scrolling list of months, and you keep scrolling to go further back. This component
+ *      does the same: it starts with just the current month loaded, and scrolling down past it
+ *      lazily fetches and appends one earlier month at a time (via an IntersectionObserver on
+ *      a sentinel at the bottom of the loaded list), same direction "My Time" already limited
+ *      navigation to (an employee can look back through past months but not forward into
+ *      months that haven't happened yet).
+ *   4. The calendar itself is a full-width column, not a fixed narrow card with a wide gutter
+ *      of empty page beside it — the day panel is a fixed-width column docked next to it (and
+ *      pinned in place with `sticky` while the month list scrolls underneath it on sm+), so the
+ *      calendar gets whatever room the page actually has, the way Airbnb's does.
  */
 export default function TimesheetCalendar({
-  month,
-  entries,
+  loadEntries,
+  refreshKey,
   correction,
   ptoRequests,
   pto,
 }: {
-  month: Month;
-  entries: TimeEntryDTO[];
+  /** Fetches one month's entries — owned by the page (it knows the API route), this component
+   *  just decides *which* months to ask for and when. */
+  loadEntries: (month: Month) => Promise<TimeEntryDTO[]>;
+  /** Bump this (e.g. after a correction is resubmitted) to re-fetch every month currently
+   *  loaded, since this component — not the page — now owns which months' data is in memory. */
+  refreshKey: number;
   correction: CorrectionControls;
   ptoRequests: PtoRequestDTO[];
   pto: PtoDayControls;
 }) {
-  const byDate = new Map(entries.map((e) => [e.workDate.slice(0, 10), e]));
-  const ptoMap = ptoByDate(ptoRequests);
-  const monthlyMinutes = entries.reduce((sum, e) => sum + (e.totalMinutes ?? 0), 0);
+  const [months, setMonths] = useState<MonthSlot[]>(() => [
+    { offset: 0, month: getMonth(0), entries: [], loadState: "loading" },
+  ]);
+  const [reachedStart, setReachedStart] = useState(false);
+  // Tracks the latest `months` for the refresh effect below to read without needing `months`
+  // itself in that effect's deps (which would re-run it on every fetch, not just on refreshKey).
+  const monthsRef = useRef(months);
+  useEffect(() => {
+    monthsRef.current = months;
+  }, [months]);
+  const earliestLoadedOffsetRef = useRef(0);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  async function loadMonth(offset: number) {
+    const month = getMonth(offset);
+    try {
+      const entries = await loadEntries(month);
+      setMonths((prev) =>
+        prev.map((s) => (s.offset === offset ? { ...s, entries, loadState: entries.length === 0 ? "empty" : "ready" } : s))
+      );
+    } catch {
+      setMonths((prev) => prev.map((s) => (s.offset === offset ? { ...s, loadState: "error" } : s)));
+    }
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadMonth(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Re-fetch every month already in memory — used after a correction is resubmitted elsewhere
+  // in the tree, since that can change hours on a month that's already loaded here. Skips the
+  // very first render (refreshKey starts at 0 and nothing has been submitted yet).
+  const skipFirstRefresh = useRef(true);
+  useEffect(() => {
+    if (skipFirstRefresh.current) {
+      skipFirstRefresh.current = false;
+      return;
+    }
+    const offsets = monthsRef.current.map((s) => s.offset);
+    setMonths((prev) => prev.map((s) => ({ ...s, loadState: "loading" })));
+    offsets.forEach((offset) => loadMonth(offset));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
+
+  function loadMore() {
+    if (earliestLoadedOffsetRef.current <= EARLIEST_OFFSET) {
+      setReachedStart(true);
+      return;
+    }
+    const nextOffset = earliestLoadedOffsetRef.current - 1;
+    earliestLoadedOffsetRef.current = nextOffset;
+    setMonths((prev) => [...prev, { offset: nextOffset, month: getMonth(nextOffset), entries: [], loadState: "loading" }]);
+    loadMonth(nextOffset);
+    if (nextOffset <= EARLIEST_OFFSET) setReachedStart(true);
+  }
+
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    // rootMargin loads the next month a bit before the sentinel is actually on screen, so
+    // scrolling feels continuous rather than pausing on a spinner every month.
+    const observer = new IntersectionObserver(
+      (observed) => {
+        if (observed[0].isIntersecting) loadMore();
+      },
+      { rootMargin: "800px 0px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Merged across every month currently loaded (not just whichever one is "current"), so a
+  // selected day resolves correctly no matter which loaded month it lives in.
+  const byDateAll = useMemo(
+    () => new Map(months.flatMap((s) => s.entries).map((e) => [e.workDate.slice(0, 10), e])),
+    [months]
+  );
+  const ptoMap = useMemo(() => ptoByDate(ptoRequests), [ptoRequests]);
 
   // A day is "eligible" when there's nothing to show for it yet and it's still ahead of us —
   // exactly the condition under which "Request time off" makes sense. Only eligible days can
@@ -161,7 +270,7 @@ export default function TimesheetCalendar({
   // future) so a same-day request — calling in sick this morning, say — works straight from
   // the calendar rather than needing a separate "any date" form.
   function isEligible(dateKey: string): boolean {
-    return !byDate.has(dateKey) && !ptoMap.has(dateKey) && dateKey >= todayDateKey();
+    return !byDateAll.has(dateKey) && !ptoMap.has(dateKey) && dateKey >= todayDateKey();
   }
 
   function runIsEligible(lo: string, hi: string): boolean {
@@ -175,14 +284,9 @@ export default function TimesheetCalendar({
     return true;
   }
 
-  // Closed by default — opens as a side panel (bottom sheet on a phone) when a day is
-  // clicked, rather than always showing some day's detail. Also closes on prev/next month
-  // rather than trying to carry a selection into a grid that no longer has those cells.
+  // Closed by default — opens as a side panel (floating card on a phone) when a day is
+  // clicked, rather than always showing some day's detail.
   const [selection, setSelection] = useState<Selection | null>(null);
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSelection(null);
-  }, [month]);
 
   function handleDayClick(dateKey: string) {
     if (
@@ -202,107 +306,151 @@ export default function TimesheetCalendar({
   }
 
   const isRange = selection ? selection.start !== selection.end : false;
-  const singleEntry = selection && !isRange ? byDate.get(selection.start) : undefined;
+  const singleEntry = selection && !isRange ? byDateAll.get(selection.start) : undefined;
   const singlePto = selection && !isRange ? ptoMap.get(selection.start) : undefined;
 
   return (
+    // Calendar column is a full-width flex-1 sibling of the (fixed-width, sticky) day panel —
+    // together they take up whatever room the page gives them rather than sitting in a fixed
+    // narrow card with empty page beside it.
+    <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+      <div className="flex-1 min-w-0 space-y-6">
+        {months.map((slot) => (
+          <MonthSection
+            key={slot.offset}
+            slot={slot}
+            selection={selection}
+            ptoMap={ptoMap}
+            onDayClick={handleDayClick}
+          />
+        ))}
+
+        {reachedStart ? (
+          <p className="text-center text-xs text-muted/60 py-2">That&apos;s as far back as your history goes.</p>
+        ) : (
+          <div ref={sentinelRef} className="h-4" aria-hidden />
+        )}
+      </div>
+
+      {selection && (
+        // key resets TimeEntryDetail/RequestTimeOffForm's local edit state whenever the
+        // selection itself changes (a different day, or a day added to/removed from a range).
+        <DayPanel
+          key={`${selection.start}_${selection.end}`}
+          selection={selection}
+          entry={singleEntry}
+          pto={singlePto}
+          correction={correction}
+          ptoControls={pto}
+          onClose={() => setSelection(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function MonthSection({
+  slot,
+  selection,
+  ptoMap,
+  onDayClick,
+}: {
+  slot: MonthSlot;
+  selection: Selection | null;
+  ptoMap: Map<string, PtoRequestDTO>;
+  onDayClick: (dateKey: string) => void;
+}) {
+  const { month, entries, loadState } = slot;
+  const byDate = new Map(entries.map((e) => [e.workDate.slice(0, 10), e]));
+  const monthlyMinutes = entries.reduce((sum, e) => sum + (e.totalMinutes ?? 0), 0);
+  const clickable = loadState === "ready" || loadState === "empty";
+
+  return (
     <div>
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-sm text-muted">
-          {monthlyMinutes > 0 ? `${formatMinutes(monthlyMinutes)} logged this month` : "Nothing logged yet this month"}
+      <div className="flex items-baseline justify-between mb-2">
+        <h2 className="font-serif font-semibold text-lg">{month.label}</h2>
+        <p className="text-xs text-muted">
+          {loadState === "loading"
+            ? "Loading…"
+            : loadState === "error"
+              ? "Unable to load"
+              : monthlyMinutes > 0
+                ? `${formatMinutes(monthlyMinutes)} logged`
+                : "Nothing logged"}
         </p>
       </div>
 
-      {/* Panel sits as a normal flex sibling right next to the calendar on sm+ (a small gap,
-          not pinned to the far edge of the browser window) — matching how close Airbnb's own
-          panel sits next to its calendar. Below sm there's no room beside the grid, so it
-          becomes a bottom sheet instead (DayPanel's own responsive classes handle that). */}
-      <div className="flex flex-col sm:flex-row sm:items-start gap-4">
-        <div className="flex-1 min-w-0 rounded-xl border border-border bg-surface p-3 sm:p-4">
-          <div className="grid grid-cols-7 gap-1.5 mb-1.5">
-            {WEEKDAY_LABELS.map((label, i) => (
-              <div key={i} className="text-center text-xs font-medium text-muted/70 py-1">
-                {label}
-              </div>
-            ))}
-          </div>
-          <div className="grid grid-cols-7 gap-1.5">
-            {month.weeks.flatMap((week) =>
-              week.map((day) => {
-                const entry = byDate.get(day.date);
-                const dayPto = ptoMap.get(day.date);
-                const status: TimeEntryStatus = entry?.status ?? "MISSING_ENTRY";
-                const isSelected = day.inMonth && !!selection && day.date >= selection.start && day.date <= selection.end;
-                const dayNumber = Number(day.date.slice(8, 10));
-
-                if (!day.inMonth) {
-                  return (
-                    <div key={day.date} className="h-14 sm:h-18 rounded-lg flex items-start justify-start p-2">
-                      <span className="text-xs text-muted/30 tabular-nums">{dayNumber}</span>
-                    </div>
-                  );
-                }
-
-                return (
-                  <button
-                    key={day.date}
-                    type="button"
-                    onClick={() => handleDayClick(day.date)}
-                    className={`relative h-14 sm:h-18 rounded-lg border p-2 flex flex-col items-start justify-between text-left transition-colors ${
-                      isSelected
-                        ? "bg-accent-ink border-accent-ink text-white"
-                        : day.isToday
-                          ? "border-accent-ink/50 bg-surface hover:bg-black/[0.02]"
-                          : "border-border bg-surface hover:bg-black/[0.02]"
-                    }`}
-                  >
-                    <span
-                      className={`text-xs tabular-nums ${isSelected ? "text-white" : day.isFuture && !dayPto ? "text-muted/60" : ""}`}
-                    >
-                      {dayNumber}
-                    </span>
-
-                    {dayPto ? (
-                      <span
-                        className={`text-[10px] sm:text-xs font-semibold rounded px-1 py-0.5 ${
-                          isSelected ? "bg-white/20 text-white" : PTO_CHIP[dayPto.status]
-                        }`}
-                      >
-                        {PTO_TYPE_SHORT[dayPto.type]}
-                      </span>
-                    ) : (
-                      <span className={`text-xs sm:text-sm font-semibold tabular-nums ${isSelected ? "text-white" : ""}`}>
-                        {formatHoursCompact(entry?.totalMinutes ?? null)}
-                      </span>
-                    )}
-
-                    {!dayPto && (
-                      <span
-                        className={`absolute top-1.5 right-1.5 h-1.5 w-1.5 rounded-full ${
-                          isSelected ? "bg-white" : STATUS_DOT[status]
-                        }`}
-                      />
-                    )}
-                  </button>
-                );
-              })
-            )}
-          </div>
+      <div className="rounded-xl border border-border bg-surface p-3 sm:p-4">
+        <div className="grid grid-cols-7 gap-1.5 mb-1.5">
+          {WEEKDAY_LABELS.map((label, i) => (
+            <div key={i} className="text-center text-xs font-medium text-muted/70 py-1">
+              {label}
+            </div>
+          ))}
         </div>
+        <div className="grid grid-cols-7 gap-1.5">
+          {month.weeks.flatMap((week) =>
+            week.map((day) => {
+              const entry = byDate.get(day.date);
+              const dayPto = ptoMap.get(day.date);
+              const status: TimeEntryStatus = entry?.status ?? "MISSING_ENTRY";
+              const isSelected = day.inMonth && !!selection && day.date >= selection.start && day.date <= selection.end;
+              const dayNumber = Number(day.date.slice(8, 10));
 
-        {selection && (
-          // key resets TimeEntryDetail/RequestTimeOffForm's local edit state whenever the
-          // selection itself changes (a different day, or a day added to/removed from a range).
-          <DayPanel
-            key={`${selection.start}_${selection.end}`}
-            selection={selection}
-            entry={singleEntry}
-            pto={singlePto}
-            correction={correction}
-            ptoControls={pto}
-            onClose={() => setSelection(null)}
-          />
-        )}
+              if (!day.inMonth) {
+                return (
+                  <div key={day.date} className="h-14 sm:h-20 rounded-lg flex items-start justify-start p-2">
+                    <span className="text-xs text-muted/30 tabular-nums">{dayNumber}</span>
+                  </div>
+                );
+              }
+
+              return (
+                <button
+                  key={day.date}
+                  type="button"
+                  onClick={() => onDayClick(day.date)}
+                  disabled={!clickable}
+                  className={`relative h-14 sm:h-20 rounded-lg border p-2 flex flex-col items-start justify-between text-left transition-colors disabled:opacity-40 ${
+                    isSelected
+                      ? "bg-accent-ink border-accent-ink text-white"
+                      : day.isToday
+                        ? "border-accent-ink/50 bg-surface hover:bg-black/[0.02]"
+                        : "border-border bg-surface hover:bg-black/[0.02]"
+                  }`}
+                >
+                  <span
+                    className={`text-xs tabular-nums ${isSelected ? "text-white" : day.isFuture && !dayPto ? "text-muted/60" : ""}`}
+                  >
+                    {dayNumber}
+                  </span>
+
+                  {dayPto ? (
+                    <span
+                      className={`text-[10px] sm:text-xs font-semibold rounded px-1 py-0.5 ${
+                        isSelected ? "bg-white/20 text-white" : PTO_CHIP[dayPto.status]
+                      }`}
+                    >
+                      {PTO_TYPE_SHORT[dayPto.type]}
+                    </span>
+                  ) : (
+                    <span className={`text-xs sm:text-sm font-semibold tabular-nums ${isSelected ? "text-white" : ""}`}>
+                      {formatHoursCompact(entry?.totalMinutes ?? null)}
+                    </span>
+                  )}
+
+                  {!dayPto && (
+                    <span
+                      className={`absolute top-1.5 right-1.5 h-1.5 w-1.5 rounded-full ${
+                        isSelected ? "bg-white" : STATUS_DOT[status]
+                      }`}
+                    />
+                  )}
+                </button>
+              );
+            })
+          )}
+        </div>
       </div>
     </div>
   );
@@ -342,14 +490,17 @@ function DayPanel({
     : fullDateLabel(selection.start);
 
   return (
-    // Fixed bottom sheet on a phone (no room beside the grid there); at sm+, `sm:static`
-    // cancels that and it becomes a normal flex sibling sitting right next to the calendar
-    // card (see the flex row in TimesheetCalendar above) — close to the grid the way Airbnb's
-    // panel is, not pinned to the outer edge of the browser window.
+    // On a phone: a small floating card (margin on every side, capped at half the viewport
+    // height, fully rounded) rather than an edge-to-edge sheet — the calendar underneath stays
+    // mostly visible and still scrolls, and it floats clear of the bottom tab bar (BottomNav is
+    // ~fixed bottom-0, so this sits at bottom-24 rather than bottom-0). At sm+, `sm:sticky
+    // sm:top-4` cancels all of that and docks it as a normal-width column next to the calendar
+    // that stays pinned near the top of the viewport while the month list scrolls underneath it
+    // — close to the grid and always in view, the way Airbnb's own panel behaves.
     <div
       className="fixed z-50 bg-neutral-900 text-white shadow-2xl overflow-y-auto p-4
-        inset-x-0 bottom-0 max-h-[75vh] rounded-t-2xl w-full
-        sm:static sm:z-auto sm:max-h-none sm:w-[320px] sm:shrink-0 sm:rounded-2xl"
+        inset-x-3 bottom-24 max-h-[50vh] rounded-3xl
+        sm:sticky sm:top-4 sm:inset-auto sm:z-auto sm:max-h-none sm:w-[320px] sm:shrink-0 sm:rounded-2xl"
     >
       <div className="flex items-center justify-between gap-3 mb-3">
         <p className="text-sm font-medium">{headerLabel}</p>

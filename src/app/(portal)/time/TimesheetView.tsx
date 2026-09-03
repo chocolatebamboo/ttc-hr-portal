@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getMonth } from "@/lib/month";
+import type { Month } from "@/lib/month";
 import TimesheetCalendar, { type PtoQuickRequestValues } from "@/components/TimesheetCalendar";
 import type { CorrectionValues } from "@/components/TimesheetTable";
 import PtoStatusPill from "@/components/PtoStatusPill";
@@ -13,11 +13,20 @@ type LoadState = "loading" | "ready" | "error" | "empty";
 const PTO_TYPE_OPTIONS: PtoType[] = ["VACATION", "SICK", "PERSONAL", "OTHER_APPROVED_LEAVE"];
 
 export default function TimesheetView() {
-  const [offset, setOffset] = useState(0);
-  const [entries, setEntries] = useState<TimeEntryDTO[]>([]);
-  const [loadState, setLoadState] = useState<LoadState>("loading");
   const [busyEntryId, setBusyEntryId] = useState<string | null>(null);
   const [correctionError, setCorrectionError] = useState<string | undefined>();
+  // Bumped after a correction is resubmitted so TimesheetCalendar (which now owns which months'
+  // entries are loaded) re-fetches everything it already has in memory — see its own comment.
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  // TimesheetCalendar decides which months to ask for (it owns the infinite-scroll list); this
+  // page only knows how to fetch one, since it's the one that knows the API route.
+  async function loadEntriesForMonth(month: Month): Promise<TimeEntryDTO[]> {
+    const res = await fetch(`/api/time/timesheet?start=${month.start}&end=${month.end}`);
+    if (!res.ok) throw new Error("Failed to load timesheet");
+    const data = await res.json();
+    return data.entries as TimeEntryDTO[];
+  }
 
   // PTO requests aren't month-scoped on the server (GET /api/pto/requests returns the whole
   // history, same as the old separate Time Off page did) — loaded once on mount and refreshed
@@ -31,21 +40,6 @@ export default function TimesheetView() {
   const [ptoError, setPtoError] = useState<string | undefined>();
   const [standaloneFormOpen, setStandaloneFormOpen] = useState(false);
 
-  const month = getMonth(offset);
-
-  async function load() {
-    setLoadState("loading");
-    try {
-      const res = await fetch(`/api/time/timesheet?start=${month.start}&end=${month.end}`);
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      setEntries(data.entries);
-      setLoadState(data.entries.length === 0 ? "empty" : "ready");
-    } catch {
-      setLoadState("error");
-    }
-  }
-
   async function loadPto() {
     setPtoLoadState("loading");
     try {
@@ -58,14 +52,6 @@ export default function TimesheetView() {
       setPtoLoadState("error");
     }
   }
-
-  useEffect(() => {
-    // Fetch-on-mount / on-month-change: this widget has no server-rendered initial state,
-    // so it has to ask the API whenever `offset` changes.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offset]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -88,7 +74,7 @@ export default function TimesheetView() {
         setCorrectionError(data.error ?? "Unable to submit your correction. Please try again.");
         return;
       }
-      await load();
+      setRefreshKey((k) => k + 1);
     } catch {
       setCorrectionError("Unable to reach the server. Check your connection and try again.");
     } finally {
@@ -139,58 +125,34 @@ export default function TimesheetView() {
   }
 
   return (
-    <div className="max-w-3xl">
+    // Wider than a plain reading-width column (CB: the calendar had a huge dead gutter of
+    // white space next to it) — the calendar column below is flex-1, so it now actually uses
+    // this width instead of sitting in a fixed-width card floating in the middle of the page.
+    <div className="max-w-6xl">
       <div className="flex items-center justify-between mb-4">
         <h1 className="page-title text-2xl">My Time</h1>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setOffset((o) => o - 1)}
-            className="btn-neutral h-8 w-8 text-sm"
-            aria-label="Previous month"
-          >
-            ←
-          </button>
-          <span className="text-sm text-muted min-w-[150px] text-center tabular-nums">{month.label}</span>
-          <button
-            onClick={() => setOffset((o) => Math.min(0, o + 1))}
-            disabled={offset === 0}
-            className="btn-neutral h-8 w-8 text-sm"
-            aria-label="Next month"
-          >
-            →
-          </button>
-        </div>
       </div>
 
-      {loadState === "loading" && (
-        <div className="rounded-xl border border-border bg-surface p-6 animate-pulse h-64" />
-      )}
-
-      {loadState === "error" && (
-        <div className="rounded-xl border border-border bg-surface p-6 text-sm text-accent">
-          Unable to load your timesheet. Please try again or contact HR.
-        </div>
-      )}
-
-      {(loadState === "ready" || loadState === "empty") && (
-        <TimesheetCalendar
-          month={month}
-          entries={entries}
-          correction={{ onSubmit: submitCorrection, busyEntryId, error: correctionError }}
-          ptoRequests={ptoRequests}
-          pto={{
-            onSubmit: submitPtoRequest,
-            onCancel: cancelPtoRequest,
-            submitting: ptoSubmitting,
-            cancellingId: ptoCancellingId,
-            error: ptoError,
-          }}
-        />
-      )}
+      {/* Month navigation is scroll, not click — see TimesheetCalendar's own doc comment.
+          Loading/error states are per-month now (each month section shows its own), so there's
+          no page-level loading/error block here anymore. */}
+      <TimesheetCalendar
+        loadEntries={loadEntriesForMonth}
+        refreshKey={refreshKey}
+        correction={{ onSubmit: submitCorrection, busyEntryId, error: correctionError }}
+        ptoRequests={ptoRequests}
+        pto={{
+          onSubmit: submitPtoRequest,
+          onCancel: cancelPtoRequest,
+          submitting: ptoSubmitting,
+          cancellingId: ptoCancellingId,
+          error: ptoError,
+        }}
+      />
 
       {/* Time Off, folded in here rather than living on its own page — clicking a day above
-          covers most requests, but a date outside the month currently showing (or several
-          months out) is faster to type than to click through month by month to reach. */}
+          covers most requests, but a date outside the month currently showing (or scrolled
+          past) is faster to type than to scroll back to reach. */}
       <div className="mt-8">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-sm font-medium text-muted">Your time-off requests</h2>

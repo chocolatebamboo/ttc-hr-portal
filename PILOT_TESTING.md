@@ -72,6 +72,10 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
       shows up in the running list and "Hours today" adds them together. Do this for at least two
       different days. Then check My Time (now a month calendar) — click on one of those days and
       confirm every session and the total hours match what you just did.
+- [ ] On My Time, scroll down past the bottom of the current month — confirm the previous month
+      loads in and appends automatically (no button or arrow to click), and keep scrolling to
+      confirm it keeps loading further back. On a laptop, also confirm the calendar itself fills
+      most of the page width rather than sitting in a narrow column with empty space beside it.
 - [ ] Submit the week's timesheet.
 - [ ] On My Time, click a day (today or any day after) that has nothing logged and submit a
       one-day time-off request right from there — confirm it shows up both on that calendar
@@ -81,7 +85,9 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
       it to select the whole run between them — confirm the panel updates to cover every day
       in between and submitting creates one multi-day request (not several). Also confirm you
       can still see and click days elsewhere on the calendar while the panel is open (it
-      shouldn't block or dim the calendar underneath it).
+      shouldn't block or dim the calendar underneath it) — on a phone specifically, confirm the
+      panel is a small floating card (not a sheet covering most of the screen) and that it
+      doesn't cover the bottom tab bar.
 - [ ] Use "Request for another date" below the calendar to submit a PTO request for a past
       date (or a date several months out) — confirm it shows up in the list the same way.
 - [ ] Cancel a *different* PTO request you haven't submitted for approval yet, to confirm
