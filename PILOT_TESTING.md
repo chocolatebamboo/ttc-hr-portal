@@ -71,9 +71,13 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
       two different days. Then check My Time (now a month calendar) — click on one of those days
       and confirm the hours and status match what you just did.
 - [ ] Submit the week's timesheet.
-- [ ] Submit a PTO request (any type — vacation, sick, personal).
+- [ ] Submit a PTO request (any type — vacation, sick, personal) from the Time Off page.
+- [ ] On My Time, click a future day that has nothing logged and submit a one-day time-off
+      request right from there instead — confirm it shows up both on that calendar day (in
+      place of an hours readout) and in your list on the Time Off page.
 - [ ] Cancel a *different* PTO request you haven't submitted for approval yet, to confirm
-      cancel works before a supervisor acts on it.
+      cancel works before a supervisor acts on it — try this once from Time Off and once from
+      clicking the day on My Time, since both lead to the same cancel action.
 - [ ] Open Documents — acknowledge anything that requires it, confirm you can view/download
       anything assigned to you or company-wide, and confirm nothing marked confidential-HR-only
       is visible to you.
@@ -100,7 +104,8 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
 - [ ] Review and Return at least one report's timesheet entry with a comment (coordinate with
       that employee so they know to check for it and correct/resubmit).
 - [ ] Approve one PTO request and Deny a different one with a comment; confirm both requesters
-      can see the outcome and your comment.
+      can see the outcome and your comment — including on My Time itself, where that day's
+      calendar marker should update to match (green for Approved, red for Denied).
 - [ ] Confirm you can NOT see or act on an employee who is not your report (ask HR to point you
       at someone outside your team, or try guessing a URL for someone else's review page — it
       should refuse you, not show their data).

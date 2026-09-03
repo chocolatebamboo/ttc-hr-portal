@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { getMonth } from "@/lib/month";
-import TimesheetCalendar from "@/components/TimesheetCalendar";
+import TimesheetCalendar, { type PtoQuickRequestValues } from "@/components/TimesheetCalendar";
 import type { CorrectionValues } from "@/components/TimesheetTable";
-import type { TimeEntryDTO } from "@/types";
+import type { PtoRequestDTO, TimeEntryDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error" | "empty";
 
@@ -14,6 +14,14 @@ export default function TimesheetView() {
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [busyEntryId, setBusyEntryId] = useState<string | null>(null);
   const [correctionError, setCorrectionError] = useState<string | undefined>();
+
+  // PTO requests aren't month-scoped on the server (GET /api/pto/requests returns the whole
+  // history, same as the Time Off page) — loaded once on mount and refreshed after any
+  // request/cancel, independent of which month is currently displayed.
+  const [ptoRequests, setPtoRequests] = useState<PtoRequestDTO[]>([]);
+  const [ptoSubmitting, setPtoSubmitting] = useState(false);
+  const [ptoCancellingId, setPtoCancellingId] = useState<string | null>(null);
+  const [ptoError, setPtoError] = useState<string | undefined>();
 
   const month = getMonth(offset);
 
@@ -30,6 +38,18 @@ export default function TimesheetView() {
     }
   }
 
+  async function loadPto() {
+    try {
+      const res = await fetch("/api/pto/requests");
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setPtoRequests(data.requests);
+    } catch {
+      // Silent: the calendar still works for time entries without PTO data, and a real
+      // outage will already be visible from the timesheet fetch's own error state above.
+    }
+  }
+
   useEffect(() => {
     // Fetch-on-mount / on-month-change: this widget has no server-rendered initial state,
     // so it has to ask the API whenever `offset` changes.
@@ -37,6 +57,11 @@ export default function TimesheetView() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [offset]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadPto();
+  }, []);
 
   async function submitCorrection(entryId: string, values: CorrectionValues) {
     setBusyEntryId(entryId);
@@ -62,6 +87,44 @@ export default function TimesheetView() {
       setCorrectionError("Unable to reach the server. Check your connection and try again.");
     } finally {
       setBusyEntryId(null);
+    }
+  }
+
+  async function submitQuickPtoRequest(dateKey: string, values: PtoQuickRequestValues) {
+    setPtoSubmitting(true);
+    setPtoError(undefined);
+    try {
+      const res = await fetch("/api/pto/requests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: values.type,
+          startDate: dateKey,
+          endDate: dateKey,
+          hours: values.hours,
+          reason: values.reason,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setPtoError(data.error ?? "Unable to submit your request. Please try again.");
+        return;
+      }
+      await loadPto();
+    } catch {
+      setPtoError("Unable to reach the server. Check your connection and try again.");
+    } finally {
+      setPtoSubmitting(false);
+    }
+  }
+
+  async function cancelPtoRequest(requestId: string) {
+    setPtoCancellingId(requestId);
+    try {
+      await fetch(`/api/pto/requests/${requestId}/cancel`, { method: "POST" });
+      await loadPto();
+    } finally {
+      setPtoCancellingId(null);
     }
   }
 
@@ -104,6 +167,14 @@ export default function TimesheetView() {
           month={month}
           entries={entries}
           correction={{ onSubmit: submitCorrection, busyEntryId, error: correctionError }}
+          ptoRequests={ptoRequests}
+          pto={{
+            onSubmit: submitQuickPtoRequest,
+            onCancel: cancelPtoRequest,
+            submitting: ptoSubmitting,
+            cancellingId: ptoCancellingId,
+            error: ptoError,
+          }}
         />
       )}
     </div>

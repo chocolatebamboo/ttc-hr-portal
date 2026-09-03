@@ -16,9 +16,9 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
 - **Role-aware app shell** — four roles (Super Admin, HR Admin, Supervisor, Employee),
   desktop sidebar + mobile bottom nav, admin-only sections hidden from employees.
 - **Time & Attendance** — the full clock-in → lunch → clock-out flow, a month-calendar "My
-  Time" view (click a day to see or correct it), and an audit trail that records every clock
-  event. This is the one module built and intended to be *solid* before anything else — per
-  the brief, it's what employees touch every day.
+  Time" view (click a day to see or correct it, or request that day off), and an audit trail
+  that records every clock event. This is the one module built and intended to be *solid*
+  before anything else — per the brief, it's what employees touch every day.
 - **Supervisor timesheet approval** — a supervisor's "My Team" page lists their direct
   reports (queried from the actual `supervisorId` relationship, not a client-supplied list)
   with an awaiting-approval count, drilling into a per-employee weekly timesheet with
@@ -28,10 +28,15 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   requested" audit action implies but doesn't fully spell out.
 - **PTO request + approval** — employees submit time-off requests (type, dates, hours,
   reason) from Time Off, see their own request history, and can cancel a still-Pending one.
-  Supervisors decide (Approve / Deny, with an optional note on denial) from the same
-  employee page as timesheet review — it's the same supervisor relationship, so it lives in
-  the same place rather than a second parallel "team" screen. Denied requests show the
-  reviewer's note to the employee. No payroll math is derived from PTO, per the brief.
+  A single day can also be requested straight from My Time: clicking a future day with
+  nothing logged offers a one-day version of the same form, and any day already covered by a
+  request (Pending, Approved, or Denied) shows that on the calendar instead of an hours
+  readout. Both entry points write the same PtoRequest row, so Time Off's own list, cancel,
+  and approval flow all just work on requests created either way. Supervisors decide
+  (Approve / Deny, with an optional note on denial) from the same employee page as timesheet
+  review — it's the same supervisor relationship, so it lives in the same place rather than a
+  second parallel "team" screen. Denied requests show the reviewer's note to the employee. No
+  payroll math is derived from PTO, per the brief.
 - **Document Center + acknowledgments** — HR/Super Admin uploads a document (title, category,
   and who it's visible to: everyone, one department, one employee, or confidential
   HR/Admin-only) to private Supabase Storage; every employee sees only what RLS says they may

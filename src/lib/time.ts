@@ -7,6 +7,16 @@ export const PTO_TYPE_LABEL: Record<PtoType, string> = {
   OTHER_APPROVED_LEAVE: "Other Approved Leave",
 };
 
+/** Short form of PTO_TYPE_LABEL for the My Time calendar's day cells (src/components/
+ *  TimesheetCalendar.tsx) — a 7-across grid cell, as narrow as ~45px on a small phone,
+ *  can't fit "Other Approved Leave" or even "Vacation" legibly. */
+export const PTO_TYPE_SHORT: Record<PtoType, string> = {
+  VACATION: "Vac",
+  SICK: "Sick",
+  PERSONAL: "Pers",
+  OTHER_APPROVED_LEAVE: "Leave",
+};
+
 export function formatDateRange(startIso: string, endIso: string): string {
   const s = new Date(`${startIso.slice(0, 10)}T00:00:00`);
   const e = new Date(`${endIso.slice(0, 10)}T00:00:00`);
