@@ -90,7 +90,7 @@ export default function TimesheetView() {
     }
   }
 
-  async function submitQuickPtoRequest(dateKey: string, values: PtoQuickRequestValues) {
+  async function submitQuickPtoRequest(range: { startDate: string; endDate: string }, values: PtoQuickRequestValues) {
     setPtoSubmitting(true);
     setPtoError(undefined);
     try {
@@ -99,8 +99,8 @@ export default function TimesheetView() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type: values.type,
-          startDate: dateKey,
-          endDate: dateKey,
+          startDate: range.startDate,
+          endDate: range.endDate,
           hours: values.hours,
           reason: values.reason,
         }),

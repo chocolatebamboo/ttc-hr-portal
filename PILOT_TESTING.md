@@ -75,6 +75,11 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
 - [ ] On My Time, click a future day that has nothing logged and submit a one-day time-off
       request right from there instead — confirm it shows up both on that calendar day (in
       place of an hours readout) and in your list on the Time Off page.
+- [ ] On My Time, click one empty future day, then click a different empty future day near it
+      to select the whole run between them — confirm the panel updates to cover every day in
+      between and submitting creates one multi-day request (not several). Also confirm you can
+      still see and click days elsewhere on the calendar while the panel is open (it shouldn't
+      block or dim the calendar underneath it).
 - [ ] Cancel a *different* PTO request you haven't submitted for approval yet, to confirm
       cancel works before a supervisor acts on it — try this once from Time Off and once from
       clicking the day on My Time, since both lead to the same cancel action.

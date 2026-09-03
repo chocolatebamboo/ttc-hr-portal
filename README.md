@@ -28,11 +28,15 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   requested" audit action implies but doesn't fully spell out.
 - **PTO request + approval** — employees submit time-off requests (type, dates, hours,
   reason) from Time Off, see their own request history, and can cancel a still-Pending one.
-  A single day can also be requested straight from My Time: clicking a future day with
-  nothing logged offers a one-day version of the same form, and any day already covered by a
-  request (Pending, Approved, or Denied) shows that on the calendar instead of an hours
-  readout. Both entry points write the same PtoRequest row, so Time Off's own list, cancel,
-  and approval flow all just work on requests created either way. Supervisors decide
+  Requests can also be made straight from My Time, modeled on the Airbnb host calendar CB
+  referenced: click a future day with nothing logged, or click-then-click a second one to
+  select a whole run of empty future days at once, and the panel offers the same form for
+  however many days are selected. That panel is a non-blocking side sheet (bottom sheet on a
+  phone) — no backdrop, so the calendar underneath stays visible and clickable and clicking a
+  different day just changes the selection instead of closing anything. Any day already
+  covered by a request (Pending, Approved, or Denied) shows that on the calendar instead of an
+  hours readout. Both entry points write the same PtoRequest row, so Time Off's own list,
+  cancel, and approval flow all just work on requests created either way. Supervisors decide
   (Approve / Deny, with an optional note on denial) from the same employee page as timesheet
   review — it's the same supervisor relationship, so it lives in the same place rather than a
   second parallel "team" screen. Denied requests show the reviewer's note to the employee. No

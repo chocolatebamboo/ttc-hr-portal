@@ -32,8 +32,8 @@ const STATUS_DOT: Record<TimeEntryStatus, string> = {
 };
 
 // Same status colors PtoStatusPill uses, as a solid chip background for the day cell — a
-// full-day (or partial-day) PTO request replaces the hours readout on that cell entirely,
-// since there's normally no separate time entry to show alongside it.
+// PTO request replaces the hours readout on that cell entirely, since there's normally no
+// separate time entry to show alongside it.
 const PTO_CHIP: Record<PtoStatus, string> = {
   PENDING: "bg-amber-100 text-amber-800",
   APPROVED: "bg-emerald-100 text-emerald-800",
@@ -53,6 +53,20 @@ function nextDateKey(dateKey: string): string {
   const d = new Date(`${dateKey}T00:00:00`);
   d.setDate(d.getDate() + 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** Inclusive day count between two date keys — used to default the hours field on a
+ *  multi-day request and to pluralize the sheet's copy. */
+function dayCount(start: string, end: string): number {
+  let n = 0;
+  let cursor = start;
+  let guard = 0;
+  while (cursor <= end && guard < 400) {
+    n++;
+    cursor = nextDateKey(cursor);
+    guard++;
+  }
+  return n;
 }
 
 /** Every calendar day a still-active (non-Cancelled) PTO request covers, keyed by date. When
@@ -85,8 +99,8 @@ export interface PtoQuickRequestValues {
 }
 
 export interface PtoDayControls {
-  /** POST a new single-day PTO request for `dateKey` (startDate === endDate === dateKey). */
-  onSubmit: (dateKey: string, values: PtoQuickRequestValues) => void;
+  /** POST a new PTO request covering [startDate, endDate] (a single day when they're equal). */
+  onSubmit: (range: { startDate: string; endDate: string }, values: PtoQuickRequestValues) => void;
   /** Cancel a still-Pending request by id — same rule as the Time Off page: only Pending
    *  requests can be cancelled. */
   onCancel: (requestId: string) => void;
@@ -96,19 +110,32 @@ export interface PtoDayControls {
   error?: string;
 }
 
+interface Selection {
+  start: string;
+  end: string; // === start for a single day
+}
+
 /**
- * The employee's own "My Time" page, as a month calendar (CB's ask, modeled on an Airbnb-style
+ * The employee's own "My Time" page, as a month calendar (CB's ask, modeled on the Airbnb
  * host calendar: a number per day, click a day to see/edit the detail) rather than one week's
  * table at a time. Deliberately a NEW component rather than a rework of TimesheetTable — that
  * component is also used by the supervisor/HR review page (src/app/(portal)/team/[employeeId]/
  * ReviewTimesheetView.tsx) with a completely different action set (Approve/Return, not
  * edit-and-resubmit), and this redesign was scoped to My Time only. TimesheetTable is untouched.
  *
- * Also folds in requesting PTO directly from a day (CB's second ask): a future day with
- * nothing logged offers "Request time off" right in the day panel, and any day already
- * covered by a PTO request shows that instead of an hours readout, mirroring how the Airbnb
- * calendar marks a day's status at a glance — same visual idea, TTC's own fields (leave type,
- * hours, HR's decision) rather than Airbnb's price/availability.
+ * Also folds in requesting PTO directly from the calendar. After CB watched an actual
+ * screen recording of the Airbnb host calendar, two things about the *first* version of this
+ * were wrong relative to that reference and got fixed here:
+ *   1. The day panel was a centered/bottom overlay with a dark backdrop that blocked the
+ *      calendar underneath it. Airbnb's panel is non-blocking — it docks to the side (bottom
+ *      on a phone) and the calendar grid stays fully visible and clickable while it's open.
+ *      There is deliberately no backdrop element here for that reason.
+ *   2. Airbnb lets you click a second date to extend the first into a multi-day range (the
+ *      panel then edits all of it at once) rather than one day at a time. `selection` below
+ *      is `{start, end}` rather than a single date for exactly this — clicking a second empty,
+ *      future day next to an already-selected one forms a range; the PTO request form then
+ *      covers the whole range in one submit, using the exact same startDate/endDate/hours
+ *      shape the Time Off page's own multi-day form already sends.
  */
 export default function TimesheetCalendar({
   month,
@@ -127,20 +154,59 @@ export default function TimesheetCalendar({
   const ptoMap = ptoByDate(ptoRequests);
   const monthlyMinutes = entries.reduce((sum, e) => sum + (e.totalMinutes ?? 0), 0);
 
-  // Closed by default — opens as a bottom sheet when a day is clicked, rather than always
-  // showing some day's detail inline. Also closes on prev/next month rather than trying to
-  // re-pick a sensible day in the new grid.
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  // A day is "eligible" when there's nothing to show for it yet and it's still ahead of us —
+  // exactly the condition under which "Request time off" makes sense. Only eligible days can
+  // be chained into a multi-day range; clicking any other kind of day always resets the
+  // selection to that single day instead.
+  function isEligible(dateKey: string): boolean {
+    return !byDate.has(dateKey) && !ptoMap.has(dateKey) && dateKey > todayDateKey();
+  }
+
+  function runIsEligible(lo: string, hi: string): boolean {
+    let cursor = lo;
+    let guard = 0;
+    while (cursor <= hi && guard < 400) {
+      if (!isEligible(cursor)) return false;
+      cursor = nextDateKey(cursor);
+      guard++;
+    }
+    return true;
+  }
+
+  // Closed by default — opens as a side panel (bottom sheet on a phone) when a day is
+  // clicked, rather than always showing some day's detail. Also closes on prev/next month
+  // rather than trying to carry a selection into a grid that no longer has those cells.
+  const [selection, setSelection] = useState<Selection | null>(null);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSelectedDate(null);
+    setSelection(null);
   }, [month]);
 
-  const selectedEntry = selectedDate ? byDate.get(selectedDate) : undefined;
-  const selectedPto = selectedDate ? ptoMap.get(selectedDate) : undefined;
+  function handleDayClick(dateKey: string) {
+    if (
+      isEligible(dateKey) &&
+      selection &&
+      selection.start === selection.end &&
+      selection.start !== dateKey &&
+      isEligible(selection.start)
+    ) {
+      const [lo, hi] = selection.start < dateKey ? [selection.start, dateKey] : [dateKey, selection.start];
+      if (runIsEligible(lo, hi)) {
+        setSelection({ start: lo, end: hi });
+        return;
+      }
+    }
+    setSelection({ start: dateKey, end: dateKey });
+  }
+
+  const isRange = selection ? selection.start !== selection.end : false;
+  const singleEntry = selection && !isRange ? byDate.get(selection.start) : undefined;
+  const singlePto = selection && !isRange ? ptoMap.get(selection.start) : undefined;
 
   return (
-    <div>
+    // Room for the side panel on larger screens so it doesn't sit on top of the calendar —
+    // Airbnb's own page reflows the same way rather than covering the grid.
+    <div className={selection ? "sm:pr-[380px] transition-[padding] duration-200" : ""}>
       <div className="flex items-center justify-between mb-3">
         <p className="text-sm text-muted">
           {monthlyMinutes > 0 ? `${formatMinutes(monthlyMinutes)} logged this month` : "Nothing logged yet this month"}
@@ -161,7 +227,7 @@ export default function TimesheetCalendar({
               const entry = byDate.get(day.date);
               const dayPto = ptoMap.get(day.date);
               const status: TimeEntryStatus = entry?.status ?? "MISSING_ENTRY";
-              const isSelected = day.inMonth && day.date === selectedDate;
+              const isSelected = day.inMonth && !!selection && day.date >= selection.start && day.date <= selection.end;
               const dayNumber = Number(day.date.slice(8, 10));
 
               if (!day.inMonth) {
@@ -176,7 +242,7 @@ export default function TimesheetCalendar({
                 <button
                   key={day.date}
                   type="button"
-                  onClick={() => setSelectedDate(day.date)}
+                  onClick={() => handleDayClick(day.date)}
                   className={`relative h-14 sm:h-18 rounded-lg border p-2 flex flex-col items-start justify-between text-left transition-colors ${
                     isSelected
                       ? "bg-accent-ink border-accent-ink text-white"
@@ -219,37 +285,42 @@ export default function TimesheetCalendar({
         </div>
       </div>
 
-      {selectedDate && (
-        <DaySheet
-          date={selectedDate}
-          entry={selectedEntry}
-          pto={selectedPto}
+      {selection && (
+        // key resets TimeEntryDetail/RequestTimeOffForm's local edit state whenever the
+        // selection itself changes (a different day, or a day added to/removed from a range).
+        <DayPanel
+          key={`${selection.start}_${selection.end}`}
+          selection={selection}
+          entry={singleEntry}
+          pto={singlePto}
           correction={correction}
           ptoControls={pto}
-          onClose={() => setSelectedDate(null)}
-          key={selectedDate /* fresh local edit/form state per day selected */}
+          onClose={() => setSelection(null)}
         />
       )}
     </div>
   );
 }
 
-function DaySheet({
-  date,
+function DayPanel({
+  selection,
   entry,
   pto,
   correction,
   ptoControls,
   onClose,
 }: {
-  date: string;
+  selection: Selection;
   entry: TimeEntryDTO | undefined;
   pto: PtoRequestDTO | undefined;
   correction: CorrectionControls;
   ptoControls: PtoDayControls;
   onClose: () => void;
 }) {
-  // Close on Escape, same as tapping the backdrop or the X — standard modal behavior.
+  // Close on Escape, same as the X — there's deliberately no backdrop to tap, since the whole
+  // point (matching Airbnb) is that the calendar underneath stays visible and clickable while
+  // this is open, so clicking another day changes the selection instead of being swallowed by
+  // a backdrop.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -258,34 +329,38 @@ function DaySheet({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
 
-  const isFutureDay = date > todayDateKey();
-  const canRequestTimeOff = !entry && !pto && isFutureDay;
+  const isRange = selection.start !== selection.end;
+  const canRequest = !entry && !pto && (isRange || selection.start > todayDateKey());
+  const headerLabel = isRange
+    ? `${formatDateRange(selection.start, selection.end)} · ${dayCount(selection.start, selection.end)} days`
+    : fullDateLabel(selection.start);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
-      <div className="relative w-full sm:max-w-md sm:mx-4 max-h-[85vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl bg-neutral-900 text-white p-5 shadow-2xl">
-        <div className="flex items-center justify-between gap-3 mb-4">
-          <p className="text-base font-medium">{fullDateLabel(date)}</p>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="h-8 w-8 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-lg leading-none"
-          >
-            ×
-          </button>
-        </div>
-
-        {pto ? (
-          <PtoDetail pto={pto} entry={entry} controls={ptoControls} />
-        ) : entry ? (
-          <TimeEntryDetail entry={entry} correction={correction} />
-        ) : canRequestTimeOff ? (
-          <RequestTimeOffForm date={date} controls={ptoControls} />
-        ) : (
-          <p className="text-sm text-white/60">No time recorded for this day.</p>
-        )}
+    <div
+      className="fixed z-50 bg-neutral-900 text-white shadow-2xl overflow-y-auto p-5
+        inset-x-0 bottom-0 max-h-[75vh] rounded-t-2xl
+        sm:inset-y-0 sm:right-0 sm:left-auto sm:bottom-auto sm:w-[380px] sm:max-h-none sm:rounded-none sm:rounded-l-2xl"
+    >
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <p className="text-base font-medium">{headerLabel}</p>
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          className="h-8 w-8 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-lg leading-none shrink-0"
+        >
+          ×
+        </button>
       </div>
+
+      {pto ? (
+        <PtoDetail pto={pto} entry={entry} controls={ptoControls} />
+      ) : entry ? (
+        <TimeEntryDetail entry={entry} correction={correction} />
+      ) : canRequest ? (
+        <RequestTimeOffForm startDate={selection.start} endDate={selection.end} controls={ptoControls} />
+      ) : (
+        <p className="text-sm text-white/60">No time recorded for this day.</p>
+      )}
     </div>
   );
 }
@@ -374,7 +449,7 @@ function TimeEntryDetail({ entry, correction }: { entry: TimeEntryDTO; correctio
         <StatusPill status={entry.status} />
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+      <div className="grid grid-cols-2 gap-3 text-sm">
         <Stat label="Clock In" value={formatClockTime(entry.clockIn)} />
         <Stat
           label="Lunch"
@@ -439,19 +514,31 @@ function TimeEntryDetail({ entry, correction }: { entry: TimeEntryDTO; correctio
 
 const TYPE_OPTIONS: PtoType[] = ["VACATION", "SICK", "PERSONAL", "OTHER_APPROVED_LEAVE"];
 
-function RequestTimeOffForm({ date, controls }: { date: string; controls: PtoDayControls }) {
+function RequestTimeOffForm({
+  startDate,
+  endDate,
+  controls,
+}: {
+  startDate: string;
+  endDate: string;
+  controls: PtoDayControls;
+}) {
+  const n = dayCount(startDate, endDate);
   const [type, setType] = useState<PtoType>("VACATION");
-  const [hours, setHours] = useState("8");
+  const [hours, setHours] = useState(String(8 * n));
   const [reason, setReason] = useState("");
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    controls.onSubmit(date, { type, hours: Number(hours), reason: reason.trim() || undefined });
+    controls.onSubmit({ startDate, endDate }, { type, hours: Number(hours), reason: reason.trim() || undefined });
   }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <p className="text-sm text-white/60">Nothing logged for this day yet. Request it off instead?</p>
+      <p className="text-sm text-white/60">
+        Nothing logged for {n === 1 ? "this day" : `these ${n} days`} yet. Request{" "}
+        {n === 1 ? "it" : "them"} off instead?
+      </p>
 
       <div>
         <label className="block text-xs text-white/60 mb-1.5">Type of leave</label>
@@ -469,7 +556,7 @@ function RequestTimeOffForm({ date, controls }: { date: string; controls: PtoDay
       </div>
 
       <div>
-        <label className="block text-xs text-white/60 mb-1.5">Number of hours</label>
+        <label className="block text-xs text-white/60 mb-1.5">Number of hours{n > 1 ? " (total)" : ""}</label>
         <input
           type="number"
           required
