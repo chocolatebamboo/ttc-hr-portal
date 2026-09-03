@@ -23,7 +23,6 @@ export interface NavItem {
 export const EMPLOYEE_NAV: NavItem[] = [
   { label: "Home", href: "/dashboard", icon: HomeIcon },
   { label: "My Time", href: "/time", icon: ClockIcon },
-  { label: "Time Off", href: "/time-off", icon: CalendarIcon },
   { label: "Documents", href: "/documents", icon: FolderIcon },
   { label: "Onboarding", href: "/onboarding", icon: ChecklistIcon },
   { label: "Directory", href: "/directory", icon: UsersIcon },

@@ -157,9 +157,11 @@ export default function TimesheetCalendar({
   // A day is "eligible" when there's nothing to show for it yet and it's still ahead of us —
   // exactly the condition under which "Request time off" makes sense. Only eligible days can
   // be chained into a multi-day range; clicking any other kind of day always resets the
-  // selection to that single day instead.
+  // selection to that single day instead. Today counts as eligible too (not just strictly
+  // future) so a same-day request — calling in sick this morning, say — works straight from
+  // the calendar rather than needing a separate "any date" form.
   function isEligible(dateKey: string): boolean {
-    return !byDate.has(dateKey) && !ptoMap.has(dateKey) && dateKey > todayDateKey();
+    return !byDate.has(dateKey) && !ptoMap.has(dateKey) && dateKey >= todayDateKey();
   }
 
   function runIsEligible(lo: string, hi: string): boolean {
@@ -334,7 +336,7 @@ function DayPanel({
   }, [onClose]);
 
   const isRange = selection.start !== selection.end;
-  const canRequest = !entry && !pto && (isRange || selection.start > todayDateKey());
+  const canRequest = !entry && !pto && (isRange || selection.start >= todayDateKey());
   const headerLabel = isRange
     ? `${formatDateRange(selection.start, selection.end)} · ${dayCount(selection.start, selection.end)} days`
     : fullDateLabel(selection.start);

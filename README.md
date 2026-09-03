@@ -26,21 +26,23 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   sees exactly why on their own timesheet (as a red dot on that day in the My Time calendar),
   and can edit and resubmit that one day — closing the loop the brief's "Employee correction
   requested" audit action implies but doesn't fully spell out.
-- **PTO request + approval** — employees submit time-off requests (type, dates, hours,
-  reason) from Time Off, see their own request history, and can cancel a still-Pending one.
-  Requests can also be made straight from My Time, modeled on the Airbnb host calendar CB
-  referenced: click a future day with nothing logged, or click-then-click a second one to
-  select a whole run of empty future days at once, and the panel offers the same form for
-  however many days are selected. That panel is a non-blocking side sheet (bottom sheet on a
-  phone) — no backdrop, so the calendar underneath stays visible and clickable and clicking a
-  different day just changes the selection instead of closing anything. Any day already
-  covered by a request (Pending, Approved, or Denied) shows that on the calendar instead of an
-  hours readout. Both entry points write the same PtoRequest row, so Time Off's own list,
-  cancel, and approval flow all just work on requests created either way. Supervisors decide
-  (Approve / Deny, with an optional note on denial) from the same employee page as timesheet
-  review — it's the same supervisor relationship, so it lives in the same place rather than a
-  second parallel "team" screen. Denied requests show the reviewer's note to the employee. No
-  payroll math is derived from PTO, per the brief.
+- **PTO request + approval** — folded into the My Time page rather than a separate Time Off
+  page, so employees have one place for their calendar and their time-off requests. The
+  primary way to request time off is straight from the calendar, modeled on the Airbnb host
+  calendar CB referenced: click a day with nothing logged yet (today or any day after), or
+  click-then-click a second one to select a whole run of empty days at once, and the panel
+  offers the same form for however many days are selected. That panel is a non-blocking side
+  sheet (bottom sheet on a phone) — no backdrop, so the calendar underneath stays visible and
+  clickable and clicking a different day just changes the selection instead of closing
+  anything. Any day already covered by a request (Pending, Approved, or Denied) shows that on
+  the calendar instead of an hours readout. A "Request for another date" form below the
+  calendar covers anything the calendar can't — a past date, or a date many months out —
+  writing the exact same PtoRequest row as the calendar's own form, so the request list, its
+  cancel action, and supervisor approval all just work regardless of which entry point created
+  the request. Supervisors decide (Approve / Deny, with an optional note on denial) from the
+  same employee page as timesheet review — it's the same supervisor relationship, so it lives
+  in the same place rather than a second parallel "team" screen. Denied requests show the
+  reviewer's note to the employee. No payroll math is derived from PTO, per the brief.
 - **Document Center + acknowledgments** — HR/Super Admin uploads a document (title, category,
   and who it's visible to: everyone, one department, one employee, or confidential
   HR/Admin-only) to private Supabase Storage; every employee sees only what RLS says they may

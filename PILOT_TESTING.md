@@ -61,9 +61,9 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
       emergency contact (those are intentionally admin/self-only).
 - [ ] Check Announcements — read anything already posted (see the HR Admin section below for
       posting one first).
-- [ ] Try this on your phone, not just a laptop — at least the Dashboard, My Time, and Time Off
-      pages. This app is meant to work well on a phone; a pilot that's only ever run on a
-      laptop won't catch what a phone catches.
+- [ ] Try this on your phone, not just a laptop — at least the Dashboard and My Time pages.
+      This app is meant to work well on a phone; a pilot that's only ever run on a laptop
+      won't catch what a phone catches.
 
 ### Employee(s)
 
@@ -71,18 +71,21 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
       two different days. Then check My Time (now a month calendar) — click on one of those days
       and confirm the hours and status match what you just did.
 - [ ] Submit the week's timesheet.
-- [ ] Submit a PTO request (any type — vacation, sick, personal) from the Time Off page.
-- [ ] On My Time, click a future day that has nothing logged and submit a one-day time-off
-      request right from there instead — confirm it shows up both on that calendar day (in
-      place of an hours readout) and in your list on the Time Off page.
-- [ ] On My Time, click one empty future day, then click a different empty future day near it
-      to select the whole run between them — confirm the panel updates to cover every day in
-      between and submitting creates one multi-day request (not several). Also confirm you can
-      still see and click days elsewhere on the calendar while the panel is open (it shouldn't
-      block or dim the calendar underneath it).
+- [ ] On My Time, click a day (today or any day after) that has nothing logged and submit a
+      one-day time-off request right from there — confirm it shows up both on that calendar
+      day (in place of an hours readout) and in the "Your time-off requests" list below the
+      calendar on the same page.
+- [ ] On My Time, click one empty eligible day, then click a different empty eligible day near
+      it to select the whole run between them — confirm the panel updates to cover every day
+      in between and submitting creates one multi-day request (not several). Also confirm you
+      can still see and click days elsewhere on the calendar while the panel is open (it
+      shouldn't block or dim the calendar underneath it).
+- [ ] Use "Request for another date" below the calendar to submit a PTO request for a past
+      date (or a date several months out) — confirm it shows up in the list the same way.
 - [ ] Cancel a *different* PTO request you haven't submitted for approval yet, to confirm
-      cancel works before a supervisor acts on it — try this once from Time Off and once from
-      clicking the day on My Time, since both lead to the same cancel action.
+      cancel works before a supervisor acts on it — try this once from the request list and
+      once from clicking that day on the My Time calendar, since both lead to the same cancel
+      action.
 - [ ] Open Documents — acknowledge anything that requires it, confirm you can view/download
       anything assigned to you or company-wide, and confirm nothing marked confidential-HR-only
       is visible to you.

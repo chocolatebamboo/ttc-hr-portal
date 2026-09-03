@@ -11,7 +11,7 @@ import { ClockIcon, CalendarIcon, FolderIcon, ChecklistIcon, MegaphoneIcon } fro
 import { PTO_TYPE_LABEL, formatDateRange } from "@/lib/time";
 
 const QUICK_ACTIONS = [
-  { label: "Request Time Off", href: "/time-off", icon: CalendarIcon },
+  { label: "Request Time Off", href: "/time", icon: CalendarIcon },
   { label: "View Timesheet", href: "/time", icon: ClockIcon },
   { label: "View Documents", href: "/documents", icon: FolderIcon },
   { label: "View Onboarding", href: "/onboarding", icon: ChecklistIcon },

@@ -2,12 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { HomeIcon, ClockIcon, CalendarIcon, FolderIcon, MoreIcon } from "@/components/icons";
+import { HomeIcon, ClockIcon, FolderIcon, MoreIcon } from "@/components/icons";
 
 const ITEMS = [
   { label: "Home", href: "/dashboard", Icon: HomeIcon },
   { label: "My Time", href: "/time", Icon: ClockIcon },
-  { label: "Time Off", href: "/time-off", Icon: CalendarIcon },
   { label: "Documents", href: "/documents", Icon: FolderIcon },
   { label: "More", href: "/more", Icon: MoreIcon },
 ];
@@ -25,7 +24,7 @@ export default function BottomNav({ needsOnboardingAttention = false }: { needsO
   const pathname = usePathname();
   return (
     <nav className="animate-in md:hidden fixed bottom-0 inset-x-0 z-20 border-t border-border bg-surface/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
-      <div className="grid grid-cols-5">
+      <div className="grid grid-cols-4">
         {ITEMS.map(({ label, href, Icon }) => {
           const active = pathname === href || (href === "/more" && pathname.startsWith("/more"));
           return (
