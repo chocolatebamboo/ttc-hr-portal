@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import StatusPill from "@/components/StatusPill";
 import PtoStatusPill from "@/components/PtoStatusPill";
+import { ChevronDownIcon } from "@/components/icons";
 import type { CorrectionControls } from "@/components/TimesheetTable";
 import {
   PTO_TYPE_LABEL,
@@ -734,17 +735,26 @@ function RequestTimeOffForm({
           Pricing / Custom settings rows in the Airbnb host calendar's day panel. */}
       <div className="rounded-2xl bg-white/5 p-4">
         <label className="block text-xs text-white/50 mb-1">Type of leave</label>
-        <select
-          value={type}
-          onChange={(e) => setType(e.target.value as PtoType)}
-          className="w-full bg-transparent text-base font-medium outline-none appearance-none cursor-pointer"
-        >
-          {TYPE_OPTIONS.map((t) => (
-            <option key={t} value={t} className="text-neutral-900">
-              {PTO_TYPE_LABEL[t]}
-            </option>
-          ))}
-        </select>
+        {/* relative wrapper + appearance-none select + our own chevron: appearance-none drops
+            the browser's native arrow (needed to strip the rest of the native chrome this field
+            doesn't want), so without a stand-in it just looks like plain text, not a dropdown.
+            The option list itself is still browser-native chrome we can't fully restyle, but
+            giving each <option> a dark bg/light text at least keeps it from popping up as a
+            stark white box against this dark panel. */}
+        <div className="relative">
+          <select
+            value={type}
+            onChange={(e) => setType(e.target.value as PtoType)}
+            className="w-full bg-transparent text-base font-medium outline-none appearance-none cursor-pointer pr-6"
+          >
+            {TYPE_OPTIONS.map((t) => (
+              <option key={t} value={t} className="bg-neutral-900 text-white">
+                {PTO_TYPE_LABEL[t]}
+              </option>
+            ))}
+          </select>
+          <ChevronDownIcon className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 h-4 w-4 text-white/50" />
+        </div>
       </div>
 
       <div className="rounded-2xl bg-white/5 p-4">
