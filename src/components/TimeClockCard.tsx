@@ -7,6 +7,11 @@ import type { TimeClockState, TimeEntryDTO } from "@/types";
 type LoadState = "loading" | "ready" | "error";
 type ActionState = "idle" | "submitting";
 
+// CB: "after three hours... should get a notification to remind them to clock out" — the
+// in-app half of that (the email half is src/lib/clockout-reminders.ts, run on a schedule
+// server-side, since this banner only helps while the tab happens to be open).
+const REMINDER_THRESHOLD_MS = 3 * 60 * 60 * 1000;
+
 // Just two actions now — clock in or clock out — since there's no lunch step and no cap on
 // how many times a day either can happen. CLOCKED_OUT isn't a terminal "workday complete"
 // state anymore; it just means "no open session right now," so Clock In is offered from there
@@ -48,6 +53,15 @@ export default function TimeClockCard() {
     // paths below, not just here.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     refresh();
+  }, []);
+
+  // Forces a re-render once a minute so the 3-hour reminder banner below can appear on its own
+  // — without this, "clocked in for 3+ hours" would only get re-checked the next time `entry`
+  // happens to change (a clock-in/out action or a manual refresh), not just from time passing.
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => tick((n) => n + 1), 60_000);
+    return () => clearInterval(id);
   }, []);
 
   async function performAction(endpoint: string) {
@@ -94,6 +108,12 @@ export default function TimeClockCard() {
   const state = deriveClockState(entry);
   const action = ACTION_BY_STATE[state];
 
+  const openSession = entry?.sessions.find((s) => s.clockOut === null);
+  const openMinutes = openSession
+    ? Math.floor((new Date().getTime() - new Date(openSession.clockIn).getTime()) / 60000)
+    : 0;
+  const showReminder = state === "CLOCKED_IN" && openSession != null && openMinutes * 60000 >= REMINDER_THRESHOLD_MS;
+
   return (
     <div className="rounded-2xl border border-border bg-surface p-6 shadow-sm">
       <div className="flex items-center justify-between mb-5">
@@ -108,6 +128,13 @@ export default function TimeClockCard() {
           </div>
         )}
       </div>
+
+      {showReminder && (
+        <div role="status" className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          You&apos;ve been clocked in for {formatMinutes(openMinutes)} — don&apos;t forget to clock out when
+          you&apos;re done.
+        </div>
+      )}
 
       <button
         onClick={() => performAction(action.endpoint)}

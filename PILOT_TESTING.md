@@ -76,6 +76,13 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
       loads in and appends automatically (no button or arrow to click), and keep scrolling to
       confirm it keeps loading further back. On a laptop, also confirm the calendar itself fills
       most of the page width rather than sitting in a narrow column with empty space beside it.
+- [ ] Clock-out reminder (needs RESEND_API_KEY/CRON_SECRET set and the Render Cron Job running —
+      skip this one if that setup hasn't happened yet): clock in, then either wait 3+ hours or,
+      faster, edit the row's `clockIn` directly in Supabase to something 3+ hours in the past.
+      Within one cron interval, confirm the reminder email arrives, and reload the Dashboard to
+      confirm the amber "you've been clocked in for..." banner shows on the time clock card.
+      Clock out and confirm the banner disappears; re-running the cron job again for the same
+      session should NOT send a second email.
 - [ ] Submit the week's timesheet.
 - [ ] On My Time, click a day (today or any day after) that has nothing logged and submit a
       one-day time-off request right from there — confirm it shows up both on that calendar

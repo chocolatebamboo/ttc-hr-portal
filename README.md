@@ -188,6 +188,17 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   narrows the preview/CSV to one person (sourced from the same active-employee list the
   Documents/Announcements assignee pickers use) or leaves it on "All employees" for the full
   company view — either way the CSV filename and download stay in sync with the current pick.
+- **Clock-out reminders** — since there's no fixed schedule (everyone just clocks in/out
+  whenever), a forgotten clock-out otherwise sits silently open until someone notices. Once a
+  session's been open 3+ hours, the employee gets both an in-app banner on the Home page's time
+  clock card (`src/components/TimeClockCard.tsx`, re-checks every minute so it appears on its
+  own without a page reload) and an email (`src/lib/clockout-reminders.ts`, sent via Resend —
+  see `.env.example`'s "Clock-out reminder emails" section for the setup that needs). It's a
+  one-time nudge per open session, not a repeating one, and there's no automatic clock-out —
+  the employee still closes it themselves. The email side runs from
+  `POST /api/cron/clockout-reminders`, meant to be called on a schedule (every 10-15 minutes)
+  by a Render Cron Job rather than any user-facing flow — protected by a shared `CRON_SECRET`
+  instead of a signed-in session, since the caller has no employee identity of its own.
 - **Data model** — the full schema for every Phase 1 module (`prisma/schema.prisma`), even
   though only Time & Attendance, PTO, Documents, Onboarding, Directory, Announcements, and the
   payroll hours export have UI/API built on top of it yet.

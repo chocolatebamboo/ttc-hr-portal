@@ -163,6 +163,11 @@ model TimeSession {
   clockIn  DateTime
   clockOut DateTime?
 
+  // Set once a "you're still clocked in" reminder email has gone out for this session, so the
+  // reminder job (src/lib/clockout-reminders.ts) never sends a second one for the same open
+  // session — cleared implicitly by clocking out (a closed session is never eligible again).
+  reminderSentAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
