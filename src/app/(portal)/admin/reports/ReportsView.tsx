@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { getWeek } from "@/lib/week";
 import type { PayrollHoursReportDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error" | "empty";
@@ -13,6 +14,14 @@ function firstOfMonth(): string {
 function todayDateKey(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** "This week"/"This month" presets — CB's own framing for this report ("at the end of the
+ *  week... a full report", "at the end of the month... tallies") is calendar-week/calendar-
+ *  month, not an arbitrary range, so those are one click instead of two manual date pickers. */
+function thisWeekRange(): { start: string; end: string } {
+  const week = getWeek(0);
+  return { start: week.start, end: todayDateKey() < week.end ? todayDateKey() : week.end };
 }
 
 /**
@@ -59,6 +68,21 @@ export default function ReportsView() {
     generate(start, end);
   }
 
+  function useThisWeek() {
+    const week = thisWeekRange();
+    setStart(week.start);
+    setEnd(week.end);
+    generate(week.start, week.end);
+  }
+
+  function useThisMonth() {
+    const s = firstOfMonth();
+    const e = todayDateKey();
+    setStart(s);
+    setEnd(e);
+    generate(s, e);
+  }
+
   const rangeInvalid = end < start;
 
   return (
@@ -68,6 +92,15 @@ export default function ReportsView() {
         Approved hours for a pay period, ready to hand to your payroll company. This is hours only
         — no pay rate, overtime, or tax math happens here.
       </p>
+
+      <div className="flex items-center gap-2 mb-3">
+        <button type="button" onClick={useThisWeek} disabled={loadState === "loading"} className="btn-neutral text-xs px-3 py-1.5">
+          This week
+        </button>
+        <button type="button" onClick={useThisMonth} disabled={loadState === "loading"} className="btn-neutral text-xs px-3 py-1.5">
+          This month
+        </button>
+      </div>
 
       <form onSubmit={handleSubmit} className="bg-surface border border-border rounded-xl p-4 mb-5 flex flex-wrap items-end gap-3">
         <div>

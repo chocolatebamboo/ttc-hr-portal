@@ -67,9 +67,11 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
 
 ### Employee(s)
 
-- [ ] Clock in, take a lunch break, clock out from the Dashboard's time clock card, for at least
-      two different days. Then check My Time (now a month calendar) — click on one of those days
-      and confirm the hours and status match what you just did.
+- [ ] Clock in and out more than once in the same day from the Dashboard's time clock card (e.g.
+      clock in, clock out for a break, clock back in, clock out again) — confirm each session
+      shows up in the running list and "Hours today" adds them together. Do this for at least two
+      different days. Then check My Time (now a month calendar) — click on one of those days and
+      confirm every session and the total hours match what you just did.
 - [ ] Submit the week's timesheet.
 - [ ] On My Time, click a day (today or any day after) that has nothing logged and submit a
       one-day time-off request right from there — confirm it shows up both on that calendar
@@ -159,10 +161,12 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
       under Review Test as history). Finally, open **Manage Certification Test**, edit one
       question's answer key (e.g. add a program name to "Name three TTC programs"), and confirm
       it saves without a code change or redeploy.
-- [ ] Open the Reports page, pick a date range that covers what the Employee testers submitted,
-      and download the Payroll Hours CSV. Open it and sanity-check the numbers against what was
-      actually clocked and approved. Confirm the "still awaiting approval" warning shows up if
-      anything in range hasn't been approved yet.
+- [ ] Open the Reports page and click "This week" or "This month," or pick a date range that
+      covers what the Employee testers submitted, then download the Payroll Hours CSV. Open it
+      and sanity-check the numbers against what was actually clocked and approved (including any
+      day with multiple clock-in/out sessions — the hours should be the sum of all of them).
+      Confirm the "still awaiting approval" warning shows up if anything in range hasn't been
+      approved yet.
 - [ ] Open Employees — confirm every pilot tester shows up with the right role, department, and
       supervisor. Edit one person's job title or department and confirm it saves.
 - [ ] From Employees, add one more person (a throwaway test account you control) with **Add

@@ -7,20 +7,20 @@ import type { TimeClockState, TimeEntryDTO } from "@/types";
 type LoadState = "loading" | "ready" | "error";
 type ActionState = "idle" | "submitting";
 
-const ACTION_BY_STATE: Record<TimeClockState, { label: string; endpoint: string } | null> = {
+// Just two actions now — clock in or clock out — since there's no lunch step and no cap on
+// how many times a day either can happen. CLOCKED_OUT isn't a terminal "workday complete"
+// state anymore; it just means "no open session right now," so Clock In is offered from there
+// exactly like BEFORE_WORK.
+const ACTION_BY_STATE: Record<TimeClockState, { label: string; endpoint: string }> = {
   BEFORE_WORK: { label: "Clock In", endpoint: "/api/time/clock-in" },
-  CLOCKED_IN: { label: "Start Lunch", endpoint: "/api/time/lunch-start" },
-  ON_LUNCH: { label: "End Lunch", endpoint: "/api/time/lunch-end" },
-  AFTER_LUNCH: { label: "Clock Out", endpoint: "/api/time/clock-out" },
-  CLOCKED_OUT: null,
+  CLOCKED_IN: { label: "Clock Out", endpoint: "/api/time/clock-out" },
+  CLOCKED_OUT: { label: "Clock In", endpoint: "/api/time/clock-in" },
 };
 
 const STATUS_LABEL: Record<TimeClockState, string> = {
   BEFORE_WORK: "Not clocked in",
   CLOCKED_IN: "Clocked in",
-  ON_LUNCH: "On lunch",
-  AFTER_LUNCH: "Back from lunch",
-  CLOCKED_OUT: "Workday complete",
+  CLOCKED_OUT: "Clocked out",
 };
 
 export default function TimeClockCard() {
@@ -92,10 +92,7 @@ export default function TimeClockCard() {
   }
 
   const state = deriveClockState(entry);
-  const primaryAction = ACTION_BY_STATE[state];
-  // Matches the brief exactly: right after clocking in, both "Start Lunch" (primary) and
-  // "Clock Out" (secondary) are valid — an employee working straight through skips lunch.
-  const showSecondaryClockOut = state === "CLOCKED_IN";
+  const action = ACTION_BY_STATE[state];
 
   return (
     <div className="rounded-2xl border border-border bg-surface p-6 shadow-sm">
@@ -112,44 +109,13 @@ export default function TimeClockCard() {
         )}
       </div>
 
-      {state === "CLOCKED_OUT" ? (
-        <div className="rounded-xl bg-black/[0.03] p-4 text-sm">
-          <p className="font-medium mb-2">Workday summary</p>
-          <dl className="grid grid-cols-2 gap-y-1 text-muted">
-            <dt>Clocked in</dt>
-            <dd className="text-foreground">{formatClockTime(entry?.clockIn ?? null)}</dd>
-            <dt>Lunch</dt>
-            <dd className="text-foreground">
-              {formatClockTime(entry?.lunchStart ?? null)} – {formatClockTime(entry?.lunchEnd ?? null)}
-            </dd>
-            <dt>Clocked out</dt>
-            <dd className="text-foreground">{formatClockTime(entry?.clockOut ?? null)}</dd>
-            <dt>Total</dt>
-            <dd className="text-foreground font-medium">{formatMinutes(entry?.totalMinutes ?? null)}</dd>
-          </dl>
-        </div>
-      ) : (
-        <div className="flex flex-col sm:flex-row gap-3">
-          {primaryAction && (
-            <button
-              onClick={() => performAction(primaryAction.endpoint)}
-              disabled={actionState === "submitting"}
-              className="btn-primary flex-1 min-h-[56px] text-base"
-            >
-              {actionState === "submitting" ? "Updating…" : primaryAction.label}
-            </button>
-          )}
-          {showSecondaryClockOut && (
-            <button
-              onClick={() => performAction("/api/time/clock-out")}
-              disabled={actionState === "submitting"}
-              className="btn-neutral min-h-[56px] px-5 text-sm"
-            >
-              Clock Out
-            </button>
-          )}
-        </div>
-      )}
+      <button
+        onClick={() => performAction(action.endpoint)}
+        disabled={actionState === "submitting"}
+        className="btn-primary w-full min-h-[56px] text-base"
+      >
+        {actionState === "submitting" ? "Updating…" : action.label}
+      </button>
 
       {errorMessage && (
         <p role="alert" className="mt-3 text-sm text-accent">
@@ -157,11 +123,19 @@ export default function TimeClockCard() {
         </p>
       )}
 
-      {entry?.clockIn && state !== "CLOCKED_OUT" && (
-        <div className="mt-4 flex gap-4 text-xs text-muted">
-          <span>In: {formatClockTime(entry.clockIn)}</span>
-          {entry.lunchStart && <span>Lunch start: {formatClockTime(entry.lunchStart)}</span>}
-          {entry.lunchEnd && <span>Lunch end: {formatClockTime(entry.lunchEnd)}</span>}
+      {/* Every session logged today, most recent last — so clocking in and out several times
+          (a break, an errand, whatever) shows up as a plain running list rather than only ever
+          showing one in/out pair. */}
+      {entry && entry.sessions.length > 0 && (
+        <div className="mt-4 space-y-1.5">
+          {entry.sessions.map((s) => (
+            <div key={s.id} className="flex items-center justify-between text-xs text-muted">
+              <span>
+                {formatClockTime(s.clockIn)} – {s.clockOut ? formatClockTime(s.clockOut) : "now"}
+              </span>
+              {!s.clockOut && <span className="text-accent-ink font-medium">In progress</span>}
+            </div>
+          ))}
         </div>
       )}
     </div>

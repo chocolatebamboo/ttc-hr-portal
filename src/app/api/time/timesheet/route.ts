@@ -30,6 +30,7 @@ export async function GET(request: NextRequest) {
           employeeId: targetEmployeeId,
           workDate: { gte: new Date(`${start}T00:00:00.000Z`), lte: new Date(`${end}T23:59:59.999Z`) },
         },
+        include: { sessions: { orderBy: { clockIn: "asc" } } },
         orderBy: { workDate: "asc" },
       });
 

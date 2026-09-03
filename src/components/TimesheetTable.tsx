@@ -12,18 +12,24 @@ export interface ReviewControls {
   busyEntryId: string | null;
 }
 
-export interface CorrectionValues {
-  clockIn: Date | null;
-  lunchStart: Date | null;
-  lunchEnd: Date | null;
-  clockOut: Date | null;
-}
+/** A day's edited session list, as Dates ready to send to the API — see
+ *  submitEmployeeCorrection in src/lib/time-actions.ts, which replaces the whole list rather
+ *  than diffing field-by-field (sessions can be added or removed, not just retimed). */
+export type CorrectionValues = { clockIn: Date; clockOut: Date }[];
 
 export interface CorrectionControls {
-  onSubmit: (entryId: string, values: CorrectionValues) => void;
+  onSubmit: (entryId: string, sessions: CorrectionValues) => void;
   busyEntryId: string | null;
-  /** Server-reported validation message from the last attempt, e.g. "Clock out must be after clock in." */
+  /** Server-reported validation message from the last attempt, e.g. "Each session's clock out
+   *  must be after its clock in." */
   error?: string;
+}
+
+/** One row of the session-editing form — kept as HH:MM strings from the <input type="time">
+ *  elements until submit, same as the rest of this app's time-editing forms. */
+interface SessionRow {
+  clockIn: string;
+  clockOut: string;
 }
 
 /** Every calendar day in the week, filled in from `entries` where an entry exists — a day
@@ -51,9 +57,7 @@ export default function TimesheetTable({
         <thead>
           <tr className="bg-black/[0.02] text-left text-xs uppercase tracking-wide text-muted/70">
             <th className="px-4 py-2.5 font-medium">Date</th>
-            <th className="px-4 py-2.5 font-medium">Clock In</th>
-            <th className="px-4 py-2.5 font-medium">Lunch</th>
-            <th className="px-4 py-2.5 font-medium">Clock Out</th>
+            <th className="px-4 py-2.5 font-medium">Sessions</th>
             <th className="px-4 py-2.5 font-medium">Hours</th>
             <th className="px-4 py-2.5 font-medium">Status</th>
             {(review || correction) && <th className="px-4 py-2.5 font-medium">Actions</th>}
@@ -74,7 +78,7 @@ export default function TimesheetTable({
         </tbody>
         <tfoot>
           <tr className="border-t border-border bg-black/[0.02] font-medium">
-            <td className="px-4 py-2.5" colSpan={4}>
+            <td className="px-4 py-2.5" colSpan={2}>
               Weekly total
             </td>
             <td className="px-4 py-2.5 tabular-nums">{formatMinutes(weeklyMinutes)}</td>
@@ -102,49 +106,58 @@ function TimesheetRow({
   const [returning, setReturning] = useState(false);
   const [comment, setComment] = useState("");
   const [editing, setEditing] = useState(false);
-  const [times, setTimes] = useState({ clockIn: "", lunchStart: "", lunchEnd: "", clockOut: "" });
+  const [rows, setRows] = useState<SessionRow[]>([]);
 
-  const colSpan = review || correction ? 7 : 6;
+  const colSpan = review || correction ? 5 : 4;
   const isReviewBusy = review?.busyEntryId === entry?.id;
   const isCorrectionBusy = correction?.busyEntryId === entry?.id;
   const isActionable = review && entry?.status === "AWAITING_APPROVAL";
   const isCorrectable = correction && entry?.status === "RETURNED";
 
   function startEditing() {
-    setTimes({
-      clockIn: toTimeInputValue(entry?.clockIn ?? null),
-      lunchStart: toTimeInputValue(entry?.lunchStart ?? null),
-      lunchEnd: toTimeInputValue(entry?.lunchEnd ?? null),
-      clockOut: toTimeInputValue(entry?.clockOut ?? null),
-    });
+    setRows(
+      entry && entry.sessions.length > 0
+        ? entry.sessions.map((s) => ({ clockIn: toTimeInputValue(s.clockIn), clockOut: toTimeInputValue(s.clockOut) }))
+        : [{ clockIn: "", clockOut: "" }]
+    );
     setEditing(true);
+  }
+
+  function updateRow(index: number, field: keyof SessionRow, value: string) {
+    setRows((r) => r.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
   }
 
   function submitCorrection() {
     if (!entry || !correction) return;
-    correction.onSubmit(entry.id, {
-      clockIn: combineDateAndTime(day, times.clockIn),
-      lunchStart: combineDateAndTime(day, times.lunchStart),
-      lunchEnd: combineDateAndTime(day, times.lunchEnd),
-      clockOut: combineDateAndTime(day, times.clockOut),
-    });
+    const sessions = rows
+      .map((r) => ({ clockIn: combineDateAndTime(day, r.clockIn), clockOut: combineDateAndTime(day, r.clockOut) }))
+      .filter((s): s is { clockIn: Date; clockOut: Date } => s.clockIn !== null && s.clockOut !== null);
+    correction.onSubmit(entry.id, sessions);
   }
 
   return (
     <>
       <tr>
-        <td className="px-4 py-2.5 whitespace-nowrap">{label}</td>
-        <td className="px-4 py-2.5 tabular-nums">{formatClockTime(entry?.clockIn ?? null)}</td>
-        <td className="px-4 py-2.5 tabular-nums whitespace-nowrap">
-          {entry?.lunchStart ? `${formatClockTime(entry.lunchStart)} – ${formatClockTime(entry.lunchEnd)}` : "—"}
+        <td className="px-4 py-2.5 whitespace-nowrap align-top">{label}</td>
+        <td className="px-4 py-2.5 align-top">
+          {entry && entry.sessions.length > 0 ? (
+            <div className="space-y-0.5">
+              {entry.sessions.map((s) => (
+                <div key={s.id} className="tabular-nums whitespace-nowrap text-xs">
+                  {formatClockTime(s.clockIn)} – {s.clockOut ? formatClockTime(s.clockOut) : "in progress"}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <span className="text-muted">—</span>
+          )}
         </td>
-        <td className="px-4 py-2.5 tabular-nums">{formatClockTime(entry?.clockOut ?? null)}</td>
-        <td className="px-4 py-2.5 tabular-nums">{formatMinutes(entry?.totalMinutes ?? null)}</td>
-        <td className="px-4 py-2.5">
+        <td className="px-4 py-2.5 tabular-nums align-top">{formatMinutes(entry?.totalMinutes ?? null)}</td>
+        <td className="px-4 py-2.5 align-top">
           <StatusPill status={entry?.status ?? "MISSING_ENTRY"} />
         </td>
         {review && (
-          <td className="px-4 py-2.5">
+          <td className="px-4 py-2.5 align-top">
             {isActionable ? (
               <div className="flex flex-col gap-1 items-start">
                 <button
@@ -168,7 +181,7 @@ function TimesheetRow({
           </td>
         )}
         {correction && (
-          <td className="px-4 py-2.5">
+          <td className="px-4 py-2.5 align-top">
             {isCorrectable ? (
               <button
                 onClick={() => (editing ? setEditing(false) : startEditing())}
@@ -232,11 +245,30 @@ function TimesheetRow({
         <tr>
           <td colSpan={colSpan} className="px-4 pb-3">
             <div className="bg-black/[0.02] rounded-lg p-3 space-y-3">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <TimeField label="Clock in" value={times.clockIn} onChange={(v) => setTimes((t) => ({ ...t, clockIn: v }))} />
-                <TimeField label="Lunch start" value={times.lunchStart} onChange={(v) => setTimes((t) => ({ ...t, lunchStart: v }))} />
-                <TimeField label="Lunch end" value={times.lunchEnd} onChange={(v) => setTimes((t) => ({ ...t, lunchEnd: v }))} />
-                <TimeField label="Clock out" value={times.clockOut} onChange={(v) => setTimes((t) => ({ ...t, clockOut: v }))} />
+              <div className="space-y-2">
+                {rows.map((row, i) => (
+                  <div key={i} className="flex items-end gap-2">
+                    <TimeField label="Clock in" value={row.clockIn} onChange={(v) => updateRow(i, "clockIn", v)} />
+                    <TimeField label="Clock out" value={row.clockOut} onChange={(v) => updateRow(i, "clockOut", v)} />
+                    {rows.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setRows((r) => r.filter((_, j) => j !== i))}
+                        aria-label="Remove this session"
+                        className="h-8 w-8 shrink-0 rounded-full border border-border bg-surface hover:bg-black/[0.03] text-sm leading-none"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setRows((r) => [...r, { clockIn: "", clockOut: "" }])}
+                  className="text-xs text-accent-ink font-medium hover:underline"
+                >
+                  + Add another session
+                </button>
               </div>
               {correction?.error && <p className="text-xs text-accent">{correction.error}</p>}
               <div className="flex gap-2">

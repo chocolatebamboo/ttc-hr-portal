@@ -11,8 +11,11 @@ export type TimeEntryStatus =
   | "RETURNED"
   | "MISSING_ENTRY";
 
-/** The four buttons on the time clock card, derived from what timestamps are already set. */
-export type TimeClockState = "BEFORE_WORK" | "CLOCKED_IN" | "ON_LUNCH" | "AFTER_LUNCH" | "CLOCKED_OUT";
+/** The one button on the time clock card, derived from whether today has an open session
+ *  (a TimeSession with no clockOut yet). Clocking out no longer ends the day for good —
+ *  CLOCKED_OUT just means "no open session right now," and Clock In is offered again from
+ *  there, same as BEFORE_WORK. */
+export type TimeClockState = "BEFORE_WORK" | "CLOCKED_IN" | "CLOCKED_OUT";
 
 export interface CurrentEmployee {
   id: string;
@@ -28,13 +31,21 @@ export interface CurrentEmployee {
   avatarUrl: string | null;
 }
 
+/** One clock-in/clock-out pair. clockOut is null exactly while this is the day's currently
+ *  open session — see TimeSession in schema.prisma. */
+export interface TimeSessionDTO {
+  id: string;
+  clockIn: string; // ISO datetime
+  clockOut: string | null;
+}
+
 export interface TimeEntryDTO {
   id: string;
   workDate: string; // ISO date, e.g. "2026-08-28"
-  clockIn: string | null;
-  lunchStart: string | null;
-  lunchEnd: string | null;
-  clockOut: string | null;
+  /** Every clock-in/clock-out pair logged this day, oldest first. Any number of these,
+   *  including zero (a day that exists only because it's being displayed, not because
+   *  anything was clocked). */
+  sessions: TimeSessionDTO[];
   totalMinutes: number | null;
   status: TimeEntryStatus;
   /** Set only when status is RETURNED — the supervisor/HR comment explaining the issue. */

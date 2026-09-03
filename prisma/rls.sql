@@ -163,6 +163,37 @@ create policy time_entry_write_own on "TimeEntry" for all using (
 );
 
 
+-- Same three-way shape as TimeEntry itself (owner, their supervisor, or an admin) — every
+-- policy here is keyed off the parent TimeEntry's employeeId via timeEntryId, since TimeSession
+-- carries no employeeId of its own.
+alter table "TimeSession" enable row level security;
+alter table "TimeSession" force row level security;
+
+drop policy if exists time_session_select on "TimeSession";
+create policy time_session_select on "TimeSession" for select using (
+  is_admin()
+  or "timeEntryId" in (
+    select id from "TimeEntry" where "employeeId" = current_employee_id()
+      or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+  )
+);
+
+drop policy if exists time_session_write on "TimeSession";
+create policy time_session_write on "TimeSession" for all using (
+  is_admin()
+  or "timeEntryId" in (
+    select id from "TimeEntry" where "employeeId" = current_employee_id()
+      or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+  )
+) with check (
+  is_admin()
+  or "timeEntryId" in (
+    select id from "TimeEntry" where "employeeId" = current_employee_id()
+      or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+  )
+);
+
+
 alter table "TimeEntryAuditEvent" enable row level security;
 alter table "TimeEntryAuditEvent" force row level security;
 

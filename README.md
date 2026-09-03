@@ -15,10 +15,15 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   Sign in, forgot/reset password all work end-to-end.
 - **Role-aware app shell** — four roles (Super Admin, HR Admin, Supervisor, Employee),
   desktop sidebar + mobile bottom nav, admin-only sections hidden from employees.
-- **Time & Attendance** — the full clock-in → lunch → clock-out flow, a month-calendar "My
-  Time" view (click a day to see or correct it, or request that day off), and an audit trail
-  that records every clock event. This is the one module built and intended to be *solid*
-  before anything else — per the brief, it's what employees touch every day.
+- **Time & Attendance** — clock in and out any number of times a day (no lunch step — a break
+  is just an ordinary clock-out/clock-in, same as any other gap in the day), a month-calendar
+  "My Time" view (click a day to see every session logged, correct a returned one, or request
+  that day off), and an audit trail that records every clock event. A day's status only moves
+  to Awaiting Approval once the current session is closed — clocking back in later the same day
+  (even on an already-Approved day) reopens it as In Progress until it's closed again, so a
+  supervisor is never asked to approve hours that are still being added to. This is the one
+  module built and intended to be *solid* before anything else — per the brief, it's what
+  employees touch every day.
 - **Supervisor timesheet approval** — a supervisor's "My Team" page lists their direct
   reports (queried from the actual `supervisorId` relationship, not a client-supplied list)
   with an awaiting-approval count, drilling into a per-employee weekly timesheet with
@@ -163,13 +168,14 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   (`DocumentAcknowledgment`'s unique constraint), bumping the version is by itself what makes
   every employee's prior acknowledgment stale again — no separate "clear acknowledgments" step
   exists or is needed.
-- **Payroll hours export** — HR/Super Admin picks a date range on the Reports page and gets a
-  preview table, or downloads it straight as a CSV, of approved hours per employee: regular
-  hours (from Time & Attendance) plus vacation/sick/personal/other-leave hours (from approved
-  PTO requests), and a total. Genuinely just hours — no pay rate, overtime multiplier, or tax
-  withholding anywhere in this feature, per the brief's payroll-handoff boundary. Only
-  `APPROVED` time entries count; if anything in the chosen period is still awaiting review, the
-  page says so before HR downloads a number that's quietly missing hours.
+- **Payroll hours export** — HR/Super Admin picks a date range on the Reports page (or clicks
+  "This week" / "This month" for the current calendar period in one click) and gets a preview
+  table, or downloads it straight as a CSV, of approved hours per employee: regular hours (from
+  Time & Attendance) plus vacation/sick/personal/other-leave hours (from approved PTO requests),
+  and a total. Genuinely just hours — no pay rate, overtime multiplier, or tax withholding
+  anywhere in this feature, per the brief's payroll-handoff boundary. Only `APPROVED` time
+  entries count; if anything in the chosen period is still awaiting review, the page says so
+  before HR downloads a number that's quietly missing hours.
 - **Data model** — the full schema for every Phase 1 module (`prisma/schema.prisma`), even
   though only Time & Attendance, PTO, Documents, Onboarding, Directory, Announcements, and the
   payroll hours export have UI/API built on top of it yet.
@@ -383,7 +389,7 @@ starts:
 1. ~~Infrastructure~~ ✅
 2. ~~Data model + RLS~~ ✅
 3. ~~Auth + role-aware shell~~ ✅
-4. ~~Time & Attendance~~ ✅ (clock in/lunch/out, timesheet, audit trail)
+4. ~~Time & Attendance~~ ✅ (clock in/out, any number of sessions a day, timesheet, audit trail)
 5. ~~Supervisor timesheet approval~~ ✅ (My Team, review + approve/return, employee correction + resubmit)
 6. ~~PTO request + approval~~ ✅ (submit, cancel, supervisor approve/deny with a note)
 7. ~~Document center + acknowledgments~~ ✅ (upload, per-role visibility via RLS, view via

@@ -1,35 +1,25 @@
 import { withRlsContext } from "@/lib/db";
-import { computeTotalMinutes, deriveClockState, todayDateKey } from "@/lib/time";
+import { computeTotalMinutes, todayDateKey } from "@/lib/time";
 import type { CurrentEmployee, TimeClockState } from "@/types";
 
 export class InvalidClockActionError extends Error {
-  constructor(action: string, currentState: TimeClockState) {
-    super(`Can't ${action} — today's status is ${currentState}.`);
+  constructor(action: "CLOCK_IN" | "CLOCK_OUT", currentState: TimeClockState) {
+    const readable =
+      currentState === "CLOCKED_IN" ? "already clocked in" : currentState === "CLOCKED_OUT" ? "clocked out" : "not clocked in yet";
+    const verb = action === "CLOCK_IN" ? "clock in" : "clock out";
+    super(`Can't ${verb} — you're ${readable}.`);
     this.name = "InvalidClockActionError";
   }
 }
 
-type ClockAction = "CLOCK_IN" | "LUNCH_START" | "LUNCH_END" | "CLOCK_OUT";
-
-const ALLOWED_FROM: Record<ClockAction, TimeClockState[]> = {
-  CLOCK_IN: ["BEFORE_WORK"],
-  LUNCH_START: ["CLOCKED_IN"],
-  LUNCH_END: ["ON_LUNCH"],
-  CLOCK_OUT: ["CLOCKED_IN", "AFTER_LUNCH"],
-};
-
-const AUDIT_ACTION: Record<ClockAction, "CLOCK_IN" | "LUNCH_STARTED" | "LUNCH_ENDED" | "CLOCK_OUT"> = {
-  CLOCK_IN: "CLOCK_IN",
-  LUNCH_START: "LUNCH_STARTED",
-  LUNCH_END: "LUNCH_ENDED",
-  CLOCK_OUT: "CLOCK_OUT",
-};
+type ClockAction = "CLOCK_IN" | "CLOCK_OUT";
 
 /**
- * The one function every time-clock API route calls. It re-derives the current state from
- * the database (never trusts what the client thinks the state is), rejects anything that
- * isn't the single legal next action, and appends an audit event alongside the update —
- * an entry's history is never silently overwritten, per the brief's audit-trail requirement.
+ * The one function every time-clock API route calls. Re-derives the current state from the
+ * database (never trusts what the client thinks the state is) and rejects anything but the
+ * single legal next action: Clock In only while there's no open session, Clock Out only while
+ * there is one. Any number of clock-in/clock-out pairs are allowed per day now — no lunch step,
+ * no cap — so this is deliberately just two states rather than the old four-stage flow.
  */
 export async function applyClockAction(actor: CurrentEmployee, action: ClockAction) {
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
@@ -38,61 +28,32 @@ export async function applyClockAction(actor: CurrentEmployee, action: ClockActi
 
     let entry = await tx.timeEntry.findUnique({
       where: { employeeId_workDate: { employeeId: actor.id, workDate } },
+      include: { sessions: true },
     });
 
-    const currentState = deriveClockState(
-      entry
-        ? {
-            id: entry.id,
-            workDate: entry.workDate.toISOString(),
-            clockIn: entry.clockIn?.toISOString() ?? null,
-            lunchStart: entry.lunchStart?.toISOString() ?? null,
-            lunchEnd: entry.lunchEnd?.toISOString() ?? null,
-            clockOut: entry.clockOut?.toISOString() ?? null,
-            totalMinutes: entry.totalMinutes,
-            status: entry.status,
-          }
-        : null
-    );
+    const openSession = entry?.sessions.find((s) => s.clockOut === null) ?? null;
 
-    if (!ALLOWED_FROM[action].includes(currentState)) {
-      throw new InvalidClockActionError(action, currentState);
+    if (action === "CLOCK_IN" && openSession) {
+      throw new InvalidClockActionError("CLOCK_IN", "CLOCKED_IN");
+    }
+    if (action === "CLOCK_OUT" && !openSession) {
+      throw new InvalidClockActionError("CLOCK_OUT", entry ? "CLOCKED_OUT" : "BEFORE_WORK");
     }
 
     let createdNew = false;
     if (!entry) {
       entry = await tx.timeEntry.create({
         data: { employeeId: actor.id, workDate, status: "IN_PROGRESS" },
+        include: { sessions: true },
       });
       createdNew = true;
     }
 
-    const fieldByAction: Record<ClockAction, "clockIn" | "lunchStart" | "lunchEnd" | "clockOut"> = {
-      CLOCK_IN: "clockIn",
-      LUNCH_START: "lunchStart",
-      LUNCH_END: "lunchEnd",
-      CLOCK_OUT: "clockOut",
-    };
-    const field = fieldByAction[action];
-
-    const totalMinutes =
-      action === "CLOCK_OUT"
-        ? computeTotalMinutes({
-            clockIn: entry.clockIn,
-            lunchStart: entry.lunchStart,
-            lunchEnd: entry.lunchEnd,
-            clockOut: now,
-          })
-        : entry.totalMinutes;
-
-    const updated = await tx.timeEntry.update({
-      where: { id: entry.id },
-      data: {
-        [field]: now,
-        totalMinutes,
-        status: action === "CLOCK_OUT" ? "AWAITING_APPROVAL" : "IN_PROGRESS",
-      },
-    });
+    if (action === "CLOCK_IN") {
+      await tx.timeSession.create({ data: { timeEntryId: entry.id, clockIn: now } });
+    } else {
+      await tx.timeSession.update({ where: { id: openSession!.id }, data: { clockOut: now } });
+    }
 
     if (createdNew) {
       await tx.timeEntryAuditEvent.create({
@@ -102,14 +63,33 @@ export async function applyClockAction(actor: CurrentEmployee, action: ClockActi
     await tx.timeEntryAuditEvent.create({
       data: {
         timeEntryId: entry.id,
-        action: AUDIT_ACTION[action],
+        action,
         actorId: actor.id,
-        fieldName: field,
+        fieldName: action === "CLOCK_IN" ? "clockIn" : "clockOut",
         newValue: now.toISOString(),
       },
     });
 
-    return updated;
+    const sessions = await tx.timeSession.findMany({
+      where: { timeEntryId: entry.id },
+      orderBy: { clockIn: "asc" },
+    });
+    const totalMinutes = computeTotalMinutes(sessions);
+
+    return tx.timeEntry.update({
+      where: { id: entry.id },
+      data: {
+        totalMinutes,
+        // Any clock-in — even reopening a day that was already Awaiting Approval, Approved, or
+        // Returned — puts the day back "in progress" until it's clocked out again; any clock-out
+        // makes it ready for review. This is what lets someone clock in a second (or third...)
+        // time the same day with no separate "reopen" step, and it also means adding time to an
+        // already-Approved day correctly asks the supervisor to look again rather than silently
+        // leaving a stale approval on now-changed hours.
+        status: action === "CLOCK_IN" ? "IN_PROGRESS" : "AWAITING_APPROVAL",
+      },
+      include: { sessions: { orderBy: { clockIn: "asc" } } },
+    });
   });
 }
 
@@ -155,6 +135,7 @@ export async function reviewTimeEntry(
     const updated = await tx.timeEntry.update({
       where: { id: entryId },
       data: { status: decision === "APPROVE" ? "APPROVED" : "RETURNED" },
+      include: { sessions: { orderBy: { clockIn: "asc" } } },
     });
 
     await tx.timeEntryAuditEvent.create({
@@ -215,45 +196,42 @@ export class InvalidCorrectionError extends Error {
   }
 }
 
-export interface CorrectionInput {
-  clockIn: Date | null;
-  lunchStart: Date | null;
-  lunchEnd: Date | null;
-  clockOut: Date | null;
+export interface CorrectionSessionInput {
+  clockIn: Date;
+  clockOut: Date;
 }
 
 /**
  * Closes the loop a supervisor's Return opens: the employee edits their own returned day
- * and resubmits it. Only reachable on the employee's OWN entry, and only while its status
- * is RETURNED — an approved or in-progress day can't be quietly edited through this path.
- * Every changed field is logged individually (old → new) so the correction is visible in
- * the same audit trail as everything else, never a silent overwrite.
+ * (now a list of sessions, not four fixed fields) and resubmits it. Only reachable on the
+ * employee's OWN entry, and only while its status is RETURNED — an approved or in-progress day
+ * can't be quietly edited through this path. The whole session list is replaced in one shot
+ * (delete-then-recreate) rather than diffed field-by-field, since sessions can be added or
+ * removed, not just retimed; the audit trail still records a single before/after summary so the
+ * correction is visible in the same audit trail as everything else, never a silent overwrite.
  */
 export async function submitEmployeeCorrection(
   actor: CurrentEmployee,
   entryId: string,
-  input: CorrectionInput
+  sessions: CorrectionSessionInput[]
 ) {
-  if (!input.clockIn || !input.clockOut) {
-    throw new InvalidCorrectionError("Clock in and clock out times are both required.");
+  if (sessions.length === 0) {
+    throw new InvalidCorrectionError("At least one clock-in/clock-out pair is required.");
   }
-  if (input.clockOut <= input.clockIn) {
-    throw new InvalidCorrectionError("Clock out must be after clock in.");
-  }
-  if ((input.lunchStart && !input.lunchEnd) || (!input.lunchStart && input.lunchEnd)) {
-    throw new InvalidCorrectionError("Lunch needs both a start and an end time, or neither.");
-  }
-  if (input.lunchStart && input.lunchEnd) {
-    if (input.lunchEnd <= input.lunchStart) {
-      throw new InvalidCorrectionError("Lunch end must be after lunch start.");
+  for (const s of sessions) {
+    if (s.clockOut <= s.clockIn) {
+      throw new InvalidCorrectionError("Each session's clock out must be after its clock in.");
     }
-    if (input.lunchStart < input.clockIn || input.lunchEnd > input.clockOut) {
-      throw new InvalidCorrectionError("Lunch must fall between clock in and clock out.");
+  }
+  const sorted = [...sessions].sort((a, b) => a.clockIn.getTime() - b.clockIn.getTime());
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].clockIn < sorted[i - 1].clockOut) {
+      throw new InvalidCorrectionError("Sessions can't overlap each other.");
     }
   }
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
-    const entry = await tx.timeEntry.findUnique({ where: { id: entryId } });
+    const entry = await tx.timeEntry.findUnique({ where: { id: entryId }, include: { sessions: true } });
     if (!entry || entry.employeeId !== actor.id) {
       throw new InvalidCorrectionError("Time entry not found.");
     }
@@ -261,40 +239,38 @@ export async function submitEmployeeCorrection(
       throw new InvalidCorrectionError('Only a "Returned" day can be corrected.');
     }
 
-    const totalMinutes = computeTotalMinutes(input);
+    const describe = (list: { clockIn: Date; clockOut: Date | null }[]) =>
+      list.length === 0
+        ? "none"
+        : list
+            .map((s) => `${s.clockIn.toISOString()}–${s.clockOut?.toISOString() ?? "open"}`)
+            .join(", ");
+    const oldSummary = describe(entry.sessions);
+    const newSummary = describe(sorted);
+
+    await tx.timeSession.deleteMany({ where: { timeEntryId: entryId } });
+    await tx.timeSession.createMany({
+      data: sorted.map((s) => ({ timeEntryId: entryId, clockIn: s.clockIn, clockOut: s.clockOut })),
+    });
+
+    const totalMinutes = computeTotalMinutes(sorted);
 
     const updated = await tx.timeEntry.update({
       where: { id: entryId },
-      data: {
-        clockIn: input.clockIn,
-        lunchStart: input.lunchStart,
-        lunchEnd: input.lunchEnd,
-        clockOut: input.clockOut,
-        totalMinutes,
-        status: "AWAITING_APPROVAL",
-      },
+      data: { totalMinutes, status: "AWAITING_APPROVAL" },
+      include: { sessions: { orderBy: { clockIn: "asc" } } },
     });
 
-    const fields: Array<[string, Date | null, Date | null]> = [
-      ["clockIn", entry.clockIn, input.clockIn],
-      ["lunchStart", entry.lunchStart, input.lunchStart],
-      ["lunchEnd", entry.lunchEnd, input.lunchEnd],
-      ["clockOut", entry.clockOut, input.clockOut],
-    ];
-    for (const [fieldName, oldValue, newValue] of fields) {
-      if (oldValue?.getTime() !== newValue?.getTime()) {
-        await tx.timeEntryAuditEvent.create({
-          data: {
-            timeEntryId: entryId,
-            action: "EMPLOYEE_CORRECTION_REQUESTED",
-            actorId: actor.id,
-            fieldName,
-            oldValue: oldValue?.toISOString() ?? null,
-            newValue: newValue?.toISOString() ?? null,
-          },
-        });
-      }
-    }
+    await tx.timeEntryAuditEvent.create({
+      data: {
+        timeEntryId: entryId,
+        action: "EMPLOYEE_CORRECTION_REQUESTED",
+        actorId: actor.id,
+        fieldName: "sessions",
+        oldValue: oldSummary,
+        newValue: newSummary,
+      },
+    });
 
     return updated;
   });
@@ -305,6 +281,7 @@ export async function getTodayEntry(actor: CurrentEmployee) {
     const workDate = new Date(`${todayDateKey()}T00:00:00.000Z`);
     return tx.timeEntry.findUnique({
       where: { employeeId_workDate: { employeeId: actor.id, workDate } },
+      include: { sessions: { orderBy: { clockIn: "asc" } } },
     });
   });
 }

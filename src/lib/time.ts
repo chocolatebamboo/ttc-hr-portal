@@ -35,38 +35,30 @@ export function todayDateKey(): string {
 }
 
 /**
- * Working minutes = (clock out - clock in) - (lunch end - lunch start). Explicitly not
- * payroll: no rates, no overtime multiplier, no tax math — see brief §13. Returns null
- * until the day is complete (clockIn and clockOut both set) so partial days never show a
- * misleadingly-final number.
+ * Working minutes = the sum of every CLOSED session's (clock out - clock in) — explicitly not
+ * payroll: no rates, no overtime multiplier, no tax math — see brief §13. An open session (no
+ * clockOut yet) contributes nothing until it closes. Null only when there are no sessions at
+ * all for the day (nothing logged yet); once an entry exists this is always a real number,
+ * 0 while its only session(s) are still open, so "Hours today" never looks broken mid-shift.
  */
-export function computeTotalMinutes(entry: {
-  clockIn: Date | null;
-  lunchStart: Date | null;
-  lunchEnd: Date | null;
-  clockOut: Date | null;
-}): number | null {
-  if (!entry.clockIn || !entry.clockOut) return null;
-
-  const grossMs = entry.clockOut.getTime() - entry.clockIn.getTime();
-  let lunchMs = 0;
-  if (entry.lunchStart && entry.lunchEnd) {
-    lunchMs = Math.max(0, entry.lunchEnd.getTime() - entry.lunchStart.getTime());
+export function computeTotalMinutes(sessions: { clockIn: Date; clockOut: Date | null }[]): number | null {
+  if (sessions.length === 0) return null;
+  let ms = 0;
+  for (const s of sessions) {
+    if (s.clockOut) ms += Math.max(0, s.clockOut.getTime() - s.clockIn.getTime());
   }
-  return Math.max(0, Math.round((grossMs - lunchMs) / 60000));
+  return Math.round(ms / 60000);
 }
 
 /**
- * Derives which single action is valid right now from what timestamps are already set —
- * this is what makes the time clock card only ever offer a legal next step. Mirrors the
- * brief's four-state flow exactly: Clock In → Start Lunch → End Lunch → Clock Out.
+ * Derives which single action is valid right now — Clock In or Clock Out — from whether
+ * today has an open session (a session with no clockOut yet). There's no "on lunch"/"after
+ * lunch" state anymore: clocking out just closes the current session, and Clock In is offered
+ * again immediately, any number of times a day.
  */
 export function deriveClockState(entry: TimeEntryDTO | null): TimeClockState {
-  if (!entry || !entry.clockIn) return "BEFORE_WORK";
-  if (entry.clockOut) return "CLOCKED_OUT";
-  if (entry.lunchStart && !entry.lunchEnd) return "ON_LUNCH";
-  if (entry.lunchEnd) return "AFTER_LUNCH";
-  return "CLOCKED_IN";
+  if (!entry || entry.sessions.length === 0) return "BEFORE_WORK";
+  return entry.sessions.some((s) => s.clockOut === null) ? "CLOCKED_IN" : "CLOCKED_OUT";
 }
 
 export function formatMinutes(totalMinutes: number | null): string {

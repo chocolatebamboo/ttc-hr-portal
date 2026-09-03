@@ -413,12 +413,13 @@ function PtoDetail({
 
       {entry && (
         <div className="rounded-2xl bg-white/5 p-4">
-          <p className="text-xs text-white/50 uppercase tracking-wide mb-2">Time also logged this day</p>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <Stat label="Clock In" value={formatClockTime(entry.clockIn)} />
-            <Stat label="Clock Out" value={formatClockTime(entry.clockOut)} />
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <p className="text-xs text-white/50 uppercase tracking-wide">Time also logged this day</p>
+            <StatusPill status={entry.status} />
+          </div>
+          <SessionList sessions={entry.sessions} />
+          <div className="mt-2">
             <Stat label="Hours" value={formatMinutes(entry.totalMinutes)} />
-            <Stat label="Status" value={<StatusPill status={entry.status} />} />
           </div>
         </div>
       )}
@@ -426,31 +427,57 @@ function PtoDetail({
   );
 }
 
+/** One clock-in/clock-out pair per line, oldest first — used by both the plain read-only day
+ *  detail (below) and the "time also logged" summary inside PtoDetail above. */
+function SessionList({ sessions }: { sessions: TimeEntryDTO["sessions"] }) {
+  if (sessions.length === 0) {
+    return <p className="text-sm text-white/60">No time logged.</p>;
+  }
+  return (
+    <div className="space-y-1">
+      {sessions.map((s) => (
+        <div key={s.id} className="flex items-center justify-between text-sm">
+          <span>
+            {formatClockTime(s.clockIn)} – {s.clockOut ? formatClockTime(s.clockOut) : "in progress"}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** A day's edited session list, as HH:MM <input type="time"> strings until submit. */
+interface SessionRow {
+  clockIn: string;
+  clockOut: string;
+}
+
 function TimeEntryDetail({ entry, correction }: { entry: TimeEntryDTO; correction: CorrectionControls }) {
   const [editing, setEditing] = useState(false);
-  const [times, setTimes] = useState({ clockIn: "", lunchStart: "", lunchEnd: "", clockOut: "" });
+  const [rows, setRows] = useState<SessionRow[]>([]);
 
   const isBusy = correction.busyEntryId === entry.id;
   const isCorrectable = entry.status === "RETURNED";
   const dateKey = entry.workDate.slice(0, 10);
 
   function startEditing() {
-    setTimes({
-      clockIn: toTimeInputValue(entry.clockIn),
-      lunchStart: toTimeInputValue(entry.lunchStart),
-      lunchEnd: toTimeInputValue(entry.lunchEnd),
-      clockOut: toTimeInputValue(entry.clockOut),
-    });
+    setRows(
+      entry.sessions.length > 0
+        ? entry.sessions.map((s) => ({ clockIn: toTimeInputValue(s.clockIn), clockOut: toTimeInputValue(s.clockOut) }))
+        : [{ clockIn: "", clockOut: "" }]
+    );
     setEditing(true);
   }
 
+  function updateRow(index: number, field: keyof SessionRow, value: string) {
+    setRows((r) => r.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
+  }
+
   function submitCorrection() {
-    correction.onSubmit(entry.id, {
-      clockIn: combineDateAndTime(dateKey, times.clockIn),
-      lunchStart: combineDateAndTime(dateKey, times.lunchStart),
-      lunchEnd: combineDateAndTime(dateKey, times.lunchEnd),
-      clockOut: combineDateAndTime(dateKey, times.clockOut),
-    });
+    const sessions = rows
+      .map((r) => ({ clockIn: combineDateAndTime(dateKey, r.clockIn), clockOut: combineDateAndTime(dateKey, r.clockOut) }))
+      .filter((s): s is { clockIn: Date; clockOut: Date } => s.clockIn !== null && s.clockOut !== null);
+    correction.onSubmit(entry.id, sessions);
   }
 
   return (
@@ -459,13 +486,8 @@ function TimeEntryDetail({ entry, correction }: { entry: TimeEntryDTO; correctio
         <StatusPill status={entry.status} />
       </div>
 
-      <div className="grid grid-cols-2 gap-3 text-sm">
-        <Stat label="Clock In" value={formatClockTime(entry.clockIn)} />
-        <Stat
-          label="Lunch"
-          value={entry.lunchStart ? `${formatClockTime(entry.lunchStart)} – ${formatClockTime(entry.lunchEnd)}` : "—"}
-        />
-        <Stat label="Clock Out" value={formatClockTime(entry.clockOut)} />
+      <SessionList sessions={entry.sessions} />
+      <div className="mt-2">
         <Stat label="Hours" value={formatMinutes(entry.totalMinutes)} />
       </div>
 
@@ -485,23 +507,30 @@ function TimeEntryDetail({ entry, correction }: { entry: TimeEntryDTO; correctio
 
       {isCorrectable && editing && (
         <div className="mt-3 bg-white/5 rounded-lg p-3 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <TimeField label="Clock in" value={times.clockIn} onChange={(v) => setTimes((t) => ({ ...t, clockIn: v }))} />
-            <TimeField
-              label="Lunch start"
-              value={times.lunchStart}
-              onChange={(v) => setTimes((t) => ({ ...t, lunchStart: v }))}
-            />
-            <TimeField
-              label="Lunch end"
-              value={times.lunchEnd}
-              onChange={(v) => setTimes((t) => ({ ...t, lunchEnd: v }))}
-            />
-            <TimeField
-              label="Clock out"
-              value={times.clockOut}
-              onChange={(v) => setTimes((t) => ({ ...t, clockOut: v }))}
-            />
+          <div className="space-y-2">
+            {rows.map((row, i) => (
+              <div key={i} className="flex items-end gap-2">
+                <TimeField label="Clock in" value={row.clockIn} onChange={(v) => updateRow(i, "clockIn", v)} />
+                <TimeField label="Clock out" value={row.clockOut} onChange={(v) => updateRow(i, "clockOut", v)} />
+                {rows.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setRows((r) => r.filter((_, j) => j !== i))}
+                    aria-label="Remove this session"
+                    className="h-8 w-8 shrink-0 rounded-full bg-white/10 hover:bg-white/20 text-sm leading-none"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => setRows((r) => [...r, { clockIn: "", clockOut: "" }])}
+              className="text-xs text-white/70 hover:text-white underline"
+            >
+              + Add another session
+            </button>
           </div>
           {correction.error && <p className="text-xs text-rose-300">{correction.error}</p>}
           <div className="flex gap-2">

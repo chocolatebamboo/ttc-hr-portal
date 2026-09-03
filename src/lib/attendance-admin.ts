@@ -44,11 +44,17 @@ export async function listAdminAttendance(
           lte: new Date(`${weekEnd}T00:00:00.000Z`),
         },
       },
-      select: { employeeId: true, workDate: true, status: true, clockIn: true, clockOut: true },
+      select: {
+        employeeId: true,
+        workDate: true,
+        status: true,
+        sessions: { select: { clockOut: true } },
+      },
     });
 
-    // A day still in progress today isn't "missing" yet — only a past day left with a
-    // clock-in and no clock-out counts, so today's still-open entry doesn't falsely flag.
+    // A day still in progress today isn't "missing" yet — only a PAST day left with an open
+    // session (clocked in, never clocked back out) counts, so today's still-open session
+    // doesn't falsely flag while the employee is simply still working.
     const today = todayDateKey();
 
     const awaitingByEmployee = new Map<string, number>();
@@ -58,7 +64,8 @@ export async function listAdminAttendance(
         awaitingByEmployee.set(entry.employeeId, (awaitingByEmployee.get(entry.employeeId) ?? 0) + 1);
       }
       const workDateKey = entry.workDate.toISOString().slice(0, 10);
-      if (entry.clockIn && !entry.clockOut && workDateKey < today) {
+      const hasOpenSession = entry.sessions.some((s) => s.clockOut === null);
+      if (hasOpenSession && workDateKey < today) {
         missingByEmployee.set(entry.employeeId, (missingByEmployee.get(entry.employeeId) ?? 0) + 1);
       }
     }

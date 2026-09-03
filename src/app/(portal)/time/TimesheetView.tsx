@@ -72,7 +72,7 @@ export default function TimesheetView() {
     loadPto();
   }, []);
 
-  async function submitCorrection(entryId: string, values: CorrectionValues) {
+  async function submitCorrection(entryId: string, sessions: CorrectionValues) {
     setBusyEntryId(entryId);
     setCorrectionError(undefined);
     try {
@@ -80,10 +80,7 @@ export default function TimesheetView() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clockIn: values.clockIn?.toISOString() ?? null,
-          lunchStart: values.lunchStart?.toISOString() ?? null,
-          lunchEnd: values.lunchEnd?.toISOString() ?? null,
-          clockOut: values.clockOut?.toISOString() ?? null,
+          sessions: sessions.map((s) => ({ clockIn: s.clockIn.toISOString(), clockOut: s.clockOut.toISOString() })),
         }),
       });
       const data = await res.json();

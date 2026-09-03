@@ -120,18 +120,23 @@ enum TimeEntryStatus {
   MISSING_ENTRY
 }
 
+// A day is a TimeEntry (status, workDate, the review workflow) plus however many TimeSession
+// rows the employee logged that day — CB asked to be able to clock in and out multiple times
+// (no lunch step anymore, since a break is now just an ordinary clock-out/clock-in pair), so a
+// single fixed clockIn/lunchStart/lunchEnd/clockOut shape on TimeEntry itself no longer fits.
+// See the 2026-09-03 migration for how existing single-session/lunch-split rows were split into
+// TimeSession rows without losing any recorded time.
 model TimeEntry {
   id         String   @id @default(uuid())
   employeeId String
   employee   Employee @relation(fields: [employeeId], references: [id])
 
   workDate     DateTime // date only, stored at midnight UTC for the employee's work day
-  clockIn      DateTime?
-  lunchStart   DateTime?
-  lunchEnd     DateTime?
-  clockOut     DateTime?
 
-  // Computed on write (see src/lib/time.ts): (clockOut - clockIn) - (lunchEnd - lunchStart)
+  // Computed on write (see computeTotalMinutes in src/lib/time.ts): the sum of every closed
+  // session's (clockOut - clockIn) for this day. Never null once an entry exists — 0 while the
+  // day's only session(s) are still open, so "Hours today" always has a real number to show
+  // rather than looking broken mid-shift.
   totalMinutes Int?
 
   status TimeEntryStatus @default(IN_PROGRESS)
@@ -139,15 +144,37 @@ model TimeEntry {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  sessions    TimeSession[]
   auditEvents TimeEntryAuditEvent[]
 
   @@unique([employeeId, workDate]) // one entry per employee per day
   @@index([employeeId, workDate])
 }
 
+// One clock-in/clock-out pair. A day can have any number of these — clock in, clock out for a
+// break or the day, clock back in later, repeat. `clockOut` is null exactly while that session
+// is the currently open one (there is at most one open session per TimeEntry at a time, enforced
+// in src/lib/time-actions.ts, not by the schema).
+model TimeSession {
+  id          String    @id @default(uuid())
+  timeEntryId String
+  timeEntry   TimeEntry @relation(fields: [timeEntryId], references: [id], onDelete: Cascade)
+
+  clockIn  DateTime
+  clockOut DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([timeEntryId])
+}
+
 enum TimeAuditAction {
   ENTRY_CREATED
   CLOCK_IN
+  // LUNCH_STARTED/LUNCH_ENDED are no longer produced (lunch was removed as its own step — see
+  // TimeSession above) but stay in this enum, unremoved, because past audit rows already
+  // reference them; dropping a value a stored row still uses breaks that row, not just the code.
   LUNCH_STARTED
   LUNCH_ENDED
   CLOCK_OUT
