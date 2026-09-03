@@ -173,6 +173,10 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
       day with multiple clock-in/out sessions — the hours should be the sum of all of them).
       Confirm the "still awaiting approval" warning shows up if anything in range hasn't been
       approved yet.
+- [ ] On the same Reports page, use the Employee picker to narrow the report to one pilot
+      tester — confirm the preview table and the CSV both show only that person's row (and the
+      CSV filename reflects it), then switch back to "All employees" and confirm the full table
+      returns.
 - [ ] Open Employees — confirm every pilot tester shows up with the right role, department, and
       supervisor. Edit one person's job title or department and confirm it saves.
 - [ ] From Employees, add one more person (a throwaway test account you control) with **Add

@@ -44,6 +44,9 @@ export function toPayrollCsv(report: PayrollHoursReportDTO): string {
   return lines.join("\r\n") + "\r\n";
 }
 
-export function payrollCsvFilename(report: PayrollHoursReportDTO): string {
-  return `ttc-payroll-hours_${report.startDate}_to_${report.endDate}.csv`;
+/** employeeLabel, when given, is the filtered employee's code — folded into the filename so a
+ *  single-employee export doesn't land in Downloads looking identical to the full-company one. */
+export function payrollCsvFilename(report: PayrollHoursReportDTO, employeeLabel?: string): string {
+  const suffix = employeeLabel ? `_${employeeLabel.replace(/[^a-zA-Z0-9-]+/g, "-")}` : "";
+  return `ttc-payroll-hours_${report.startDate}_to_${report.endDate}${suffix}.csv`;
 }

@@ -28,12 +28,13 @@ export async function GET(request: NextRequest) {
 
     const report = await getPayrollHoursReport(employee, startDate, endDate, employeeId);
     const csv = toPayrollCsv(report);
+    const employeeLabel = employeeId ? report.rows[0]?.employeeCode : undefined;
 
     return new NextResponse(csv, {
       status: 200,
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${payrollCsvFilename(report)}"`,
+        "Content-Disposition": `attachment; filename="${payrollCsvFilename(report, employeeLabel)}"`,
       },
     });
   } catch (err) {

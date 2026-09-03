@@ -184,7 +184,10 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   and a total. Genuinely just hours — no pay rate, overtime multiplier, or tax withholding
   anywhere in this feature, per the brief's payroll-handoff boundary. Only `APPROVED` time
   entries count; if anything in the chosen period is still awaiting review, the page says so
-  before HR downloads a number that's quietly missing hours.
+  before HR downloads a number that's quietly missing hours. An Employee picker on the same page
+  narrows the preview/CSV to one person (sourced from the same active-employee list the
+  Documents/Announcements assignee pickers use) or leaves it on "All employees" for the full
+  company view — either way the CSV filename and download stay in sync with the current pick.
 - **Data model** — the full schema for every Phase 1 module (`prisma/schema.prisma`), even
   though only Time & Attendance, PTO, Documents, Onboarding, Directory, Announcements, and the
   payroll hours export have UI/API built on top of it yet.
