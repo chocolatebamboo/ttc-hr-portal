@@ -115,6 +115,7 @@ export default function EmployeesAdminView({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [formError, setFormError] = useState("");
   const [actionError, setActionError] = useState("");
+  const [actionNotice, setActionNotice] = useState("");
   const router = useRouter();
 
   const canGrantSuperAdmin = currentEmployeeRole === "SUPER_ADMIN";
@@ -217,6 +218,7 @@ export default function EmployeesAdminView({
   async function viewAs(row: EmployeeAdminRowDTO) {
     setBusyId(row.id);
     setActionError("");
+    setActionNotice("");
     try {
       const res = await fetch("/api/admin/preview/start", {
         method: "POST",
@@ -240,6 +242,7 @@ export default function EmployeesAdminView({
   async function toggleActive(row: EmployeeAdminRowDTO) {
     setBusyId(row.id);
     setActionError("");
+    setActionNotice("");
     try {
       const action = row.deactivatedAt ? "reactivate" : "deactivate";
       const res = await fetch(`/api/admin/employees/${row.id}/${action}`, { method: "POST" });
@@ -249,6 +252,30 @@ export default function EmployeesAdminView({
         return;
       }
       await load();
+    } catch {
+      setActionError("Unable to reach the server. Check your connection and try again.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  /** Re-sends the Supabase invite email — for someone whose first one bounced, landed in spam,
+   *  or just got lost. Only ever shown for rows still marked pendingInvite (see
+   *  src/lib/employees-admin.ts), so this shouldn't normally hit the "already confirmed"
+   *  refusal from the API, but that message (surfaced via actionError below) explains what to
+   *  do instead if it ever does. */
+  async function sendResendInvite(row: EmployeeAdminRowDTO) {
+    setBusyId(row.id);
+    setActionError("");
+    setActionNotice("");
+    try {
+      const res = await fetch(`/api/admin/employees/${row.id}/resend-invite`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionError(data.error ?? "Unable to resend the invite. Please try again.");
+        return;
+      }
+      setActionNotice(`Invite resent to ${row.ttcEmail}.`);
     } catch {
       setActionError("Unable to reach the server. Check your connection and try again.");
     } finally {
@@ -296,6 +323,11 @@ export default function EmployeesAdminView({
       {actionError && (
         <p className="mb-3 text-sm text-accent" role="alert">
           {actionError}
+        </p>
+      )}
+      {actionNotice && (
+        <p className="mb-3 text-sm text-muted" role="status">
+          {actionNotice}
         </p>
       )}
 
@@ -364,6 +396,14 @@ export default function EmployeesAdminView({
                           Deactivated
                         </span>
                       )}
+                      {!row.deactivatedAt && row.pendingInvite && (
+                        <span
+                          className="ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-accent/10 text-accent-ink"
+                          title="They haven't opened their invite email and set a password yet."
+                        >
+                          Invite pending
+                        </span>
+                      )}
                     </p>
                     <p className="text-xs text-muted truncate">
                       {row.jobTitle}
@@ -386,6 +426,16 @@ export default function EmployeesAdminView({
                       className="btn-neutral text-xs px-3 py-1.5"
                     >
                       View as
+                    </button>
+                  )}
+                  {row.pendingInvite && !row.deactivatedAt && row.id !== currentEmployeeId && (
+                    <button
+                      onClick={() => sendResendInvite(row)}
+                      disabled={busyId === row.id}
+                      title="Send them a fresh invite email — useful if the first one bounced or landed in spam"
+                      className="btn-neutral text-xs px-3 py-1.5"
+                    >
+                      {busyId === row.id ? "Sending…" : "Resend Invite"}
                     </button>
                   )}
                   <button

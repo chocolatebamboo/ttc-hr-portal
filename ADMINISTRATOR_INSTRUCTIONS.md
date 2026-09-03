@@ -279,6 +279,12 @@ picture, so it's admin-only end to end.
   ever sees or sets the new employee's password; they set it themselves from the invite link.
   If the email already has an Auth account (say, someone deactivated and being re-added), the
   existing account is reused rather than a duplicate invite going out.
+- **Invite pending / Resend Invite** — anyone who hasn't yet opened their invite email and set a
+  password shows a small "Invite pending" badge next to their name, and gets a **Resend Invite**
+  button in their row — use it if the first email bounced, landed in spam, or they lost it. The
+  badge and button both disappear on their own the moment that person actually signs in for the
+  first time (whether by setting a password or by Google sign-in with the same email), since at
+  that point resending an invite isn't the right tool anymore — see the next bullet.
 - **Edit** — change anything about an existing employee except their login email (changing that
   would also require updating their linked Supabase Auth account, which isn't wired up yet —
   ask whoever manages the Supabase project for an email change) and their active/deactivated

@@ -192,7 +192,10 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
       supervisor. Edit one person's job title or department and confirm it saves.
 - [ ] From Employees, add one more person (a throwaway test account you control) with **Add
       Employee** and confirm the invite email arrives — this is now the in-app alternative to
-      running `scripts/create-pilot-accounts.mjs` from a terminal.
+      running `scripts/create-pilot-accounts.mjs` from a terminal. Confirm their row shows an
+      "Invite pending" badge, click **Resend Invite**, and confirm a second invite email
+      arrives. Then set that account's password from the invite link and confirm both the badge
+      and the Resend Invite button are gone the next time you load Employees.
 - [ ] Deactivate that throwaway account from Employees and confirm they're immediately signed
       out / blocked on their next request — then Reactivate them and confirm they're back in.
       Also confirm you can't deactivate your own account from here.

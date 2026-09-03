@@ -3,6 +3,7 @@ import { isAdmin, ForbiddenError } from "@/lib/authorization";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getAvatarPublicUrl, deleteAvatarFile } from "@/lib/storage";
 import type { CurrentEmployee, EmployeeAdminRowDTO, EmploymentStatus, Role } from "@/types";
+import type { User } from "@supabase/supabase-js";
 
 export class InvalidEmployeeError extends Error {
   constructor(message: string) {
@@ -13,6 +14,7 @@ export class InvalidEmployeeError extends Error {
 
 type EmployeeWithRelations = {
   id: string;
+  userId: string;
   employeeCode: string;
   firstName: string;
   lastName: string;
@@ -36,7 +38,7 @@ type EmployeeWithRelations = {
   avatarStorageKey: string | null;
 };
 
-function toDTO(e: EmployeeWithRelations): EmployeeAdminRowDTO {
+function toDTO(e: EmployeeWithRelations, pendingInvite: boolean): EmployeeAdminRowDTO {
   return {
     id: e.id,
     avatarUrl: e.avatarStorageKey ? getAvatarPublicUrl(e.avatarStorageKey) : null,
@@ -62,11 +64,13 @@ function toDTO(e: EmployeeWithRelations): EmployeeAdminRowDTO {
       : null,
     deactivatedAt: e.deactivatedAt ? e.deactivatedAt.toISOString() : null,
     hireDate: e.hireDate.toISOString(),
+    pendingInvite,
   };
 }
 
 const RELATIONS_SELECT = {
   id: true,
+  userId: true,
   employeeCode: true,
   firstName: true,
   lastName: true,
@@ -90,20 +94,70 @@ const RELATIONS_SELECT = {
   avatarStorageKey: true,
 } as const;
 
+/** Fetches every Supabase Auth user (paginating listUsers — there's no direct "get by email" or
+ *  "get all" in the admin SDK, just pages of up to 1000). Shared by every place in this file
+ *  that needs to cross-reference an Employee row against its linked Auth account: looking one
+ *  up by email (ensureAuthUser), or checking whether every employee has actually confirmed
+ *  their invite yet (listEmployeesForAdmin's pendingInvite flag, resendInvite's guard below). */
+async function listAllAuthUsers(supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>) {
+  // Typed directly against the SDK's exported `User`, rather than derived via
+  // Awaited<ReturnType<...>>["data"]["users"] — listUsers()'s return type is a discriminated
+  // union (a success branch typed `User[]` and an error branch typed `[]`), and indexing
+  // through that union to pull out an element type doesn't always resolve cleanly across SDK
+  // versions. Explicit is more robust than clever here.
+  const users: User[] = [];
+  let page = 1;
+  for (;;) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 200 });
+    if (error) throw new InvalidEmployeeError(`Couldn't look up existing accounts: ${error.message}`);
+    users.push(...data.users);
+    if (data.users.length < 200) break;
+    page += 1;
+  }
+  return users;
+}
+
+/** Single, cheap lookup (no pagination needed — Employee.userId already IS the Supabase Auth
+ *  user id) for whether one employee has confirmed their account. Used by every mutation below
+ *  whose response DTO needs an accurate pendingInvite, even though the frontend always
+ *  re-fetches the whole roster right after anyway (see EmployeesAdminView's load() calls) —
+ *  this keeps the API response itself honest, not just what ends up on screen. */
+async function isAccountConfirmed(supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>, userId: string) {
+  const { data, error } = await supabaseAdmin.auth.admin.getUserById(userId);
+  if (error || !data.user) return false;
+  return !!data.user.email_confirmed_at;
+}
+
 /** Admin roster — every employee, active AND deactivated (unlike Directory/roster.ts, which
  *  both deliberately show active employees only), with the full HR record. This is the one
  *  place in the app that reads personalPhone/personalEmail/emergencyContact* and
  *  employeeCode/hireDate/deactivatedAt — fields Directory's own six-column select never asks
- *  the database for at all (see src/lib/directory.ts). */
+ *  the database for at all (see src/lib/directory.ts). Also cross-references Supabase Auth
+ *  (one listAllAuthUsers call, not one lookup per employee) so each row can carry
+ *  pendingInvite — whether this person has ever actually confirmed their invite/set a password
+ *  — which is what the UI uses to decide whether "Resend Invite" makes sense for them. */
 export async function listEmployeesForAdmin(actor: CurrentEmployee): Promise<EmployeeAdminRowDTO[]> {
   if (!isAdmin(actor)) throw new ForbiddenError();
+
+  const authUsers = await listAllAuthUsers(createSupabaseAdminClient());
+  const confirmedByEmail = new Map(authUsers.map((u) => [u.email?.toLowerCase(), !!u.email_confirmed_at]));
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const employees = await tx.employee.findMany({
       select: RELATIONS_SELECT,
       orderBy: [{ deactivatedAt: "asc" }, { lastName: "asc" }, { firstName: "asc" }],
     });
-    return employees.map(toDTO);
+    // Absent from confirmedByEmail entirely (shouldn't normally happen — every Employee row is
+    // created alongside its Auth account) is treated as "not pending" rather than "pending", so
+    // a lookup hiccup fails toward hiding the Resend Invite button rather than showing it for
+    // someone who may already be signed in.
+    // Explicit param type: the previous line was the point-free `employees.map(toDTO)`, which
+    // never needed employees' own inferred element type to check out — toDTO's declared
+    // parameter type carried the checking either way. Passing a second argument here requires
+    // wrapping in an arrow function, which does need employees' element type inferable; annotate
+    // it directly against EmployeeWithRelations (same type toDTO already declares) instead of
+    // relying on that inference.
+    return employees.map((e: EmployeeWithRelations) => toDTO(e, confirmedByEmail.get(e.ttcEmail.toLowerCase()) === false));
   });
 }
 
@@ -111,29 +165,57 @@ function isUniqueConstraintError(err: unknown): boolean {
   return typeof err === "object" && err !== null && "code" in err && err.code === "P2002";
 }
 
-/** Finds an existing Supabase Auth user by email (paginating listUsers — there's no direct
- *  "get by email" in the admin SDK), or invites a new one. Mirrors
+/** Finds an existing Supabase Auth user by email, or invites a new one. Mirrors
  *  scripts/create-pilot-accounts.mjs's ensureAuthUser exactly, just reachable from the app
  *  itself instead of a one-off script — re-adding someone whose Auth account already exists
  *  (e.g. a previously deactivated employee) reuses it rather than erroring or double-inviting. */
 async function ensureAuthUser(email: string, fullName: string) {
   const supabaseAdmin = createSupabaseAdminClient();
 
-  let page = 1;
-  for (;;) {
-    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 200 });
-    if (error) throw new InvalidEmployeeError(`Couldn't look up existing accounts: ${error.message}`);
-    const match = data.users.find((u) => u.email?.toLowerCase() === email.toLowerCase());
-    if (match) return { user: match, invited: false };
-    if (data.users.length < 200) break;
-    page += 1;
-  }
+  const existingUsers = await listAllAuthUsers(supabaseAdmin);
+  const match = existingUsers.find((u) => u.email?.toLowerCase() === email.toLowerCase());
+  if (match) return { user: match, invited: false };
 
   const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
     data: { full_name: fullName },
   });
   if (error) throw new InvalidEmployeeError(`Couldn't send the invite email: ${error.message}`);
   return { user: data.user, invited: true };
+}
+
+/**
+ * Re-sends the Supabase invite email for someone who hasn't set a password yet — their first
+ * invite bounced, landed in spam, or they just lost it. This is deliberately NOT available for
+ * someone who has already confirmed their account (signed in at least once): resending an
+ * "invite" to a returning user isn't the right tool for a lost password, and could be
+ * confusing, so this refuses with a clear pointer to "Forgot your password?" instead — the
+ * UI's Resend Invite button already only shows up for pendingInvite rows (see
+ * listEmployeesForAdmin), but this check protects the API route itself, not just the button.
+ */
+export async function resendInvite(actor: CurrentEmployee, employeeId: string) {
+  if (!isAdmin(actor)) throw new ForbiddenError();
+
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const existing = await tx.employee.findUnique({ where: { id: employeeId } });
+    if (!existing) throw new InvalidEmployeeError("That employee record doesn't exist.");
+
+    const supabaseAdmin = createSupabaseAdminClient();
+    const authUsers = await listAllAuthUsers(supabaseAdmin);
+    const authUser = authUsers.find((u) => u.email?.toLowerCase() === existing.ttcEmail.toLowerCase());
+    if (!authUser) {
+      throw new InvalidEmployeeError("Couldn't find their account to resend an invite to.");
+    }
+    if (authUser.email_confirmed_at) {
+      throw new InvalidEmployeeError(
+        'This person already signed in and set a password. Resending an invite won’t help — if they’re locked out, tell them to use "Forgot your password?" on the login page instead.'
+      );
+    }
+
+    const { error } = await supabaseAdmin.auth.admin.inviteUserByEmail(existing.ttcEmail, {
+      data: { full_name: `${existing.firstName} ${existing.lastName}` },
+    });
+    if (error) throw new InvalidEmployeeError(`Couldn't resend the invite: ${error.message}`);
+  });
 }
 
 export interface CreateEmployeeInput {
@@ -216,7 +298,7 @@ export async function createEmployee(actor: CurrentEmployee, input: CreateEmploy
         },
         select: RELATIONS_SELECT,
       });
-      return toDTO(created);
+      return toDTO(created, !user.email_confirmed_at);
     } catch (err) {
       if (isUniqueConstraintError(err)) {
         throw new InvalidEmployeeError(
@@ -317,7 +399,8 @@ export async function updateEmployee(
       },
       select: RELATIONS_SELECT,
     });
-    return toDTO(updated);
+    const confirmed = await isAccountConfirmed(createSupabaseAdminClient(), updated.userId);
+    return toDTO(updated, !confirmed);
   });
 }
 
@@ -336,7 +419,8 @@ export async function deactivateEmployee(actor: CurrentEmployee, employeeId: str
       data: { deactivatedAt: new Date() },
       select: RELATIONS_SELECT,
     });
-    return toDTO(updated);
+    const confirmed = await isAccountConfirmed(createSupabaseAdminClient(), updated.userId);
+    return toDTO(updated, !confirmed);
   });
 }
 
@@ -351,7 +435,8 @@ export async function reactivateEmployee(actor: CurrentEmployee, employeeId: str
       data: { deactivatedAt: null },
       select: RELATIONS_SELECT,
     });
-    return toDTO(updated);
+    const confirmed = await isAccountConfirmed(createSupabaseAdminClient(), updated.userId);
+    return toDTO(updated, !confirmed);
   });
 }
 
@@ -376,7 +461,8 @@ export async function setEmployeeAvatar(actor: CurrentEmployee, employeeId: stri
     });
 
     if (existing.avatarStorageKey) await deleteAvatarFile(existing.avatarStorageKey);
-    return toDTO(updated);
+    const confirmed = await isAccountConfirmed(createSupabaseAdminClient(), updated.userId);
+    return toDTO(updated, !confirmed);
   });
 }
 
@@ -395,6 +481,7 @@ export async function removeEmployeeAvatar(actor: CurrentEmployee, employeeId: s
     });
 
     if (existing.avatarStorageKey) await deleteAvatarFile(existing.avatarStorageKey);
-    return toDTO(updated);
+    const confirmed = await isAccountConfirmed(createSupabaseAdminClient(), updated.userId);
+    return toDTO(updated, !confirmed);
   });
 }

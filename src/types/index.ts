@@ -91,6 +91,11 @@ export interface EmployeeAdminRowDTO {
   supervisorName: string | null;
   deactivatedAt: string | null;
   hireDate: string;
+  /** True until this person has actually confirmed their Supabase invite (set a password, or
+   *  signed in with Google using the invited email) at least once — see resendInvite in
+   *  employees-admin.ts. Drives the Employees page's "Invite pending" badge and Resend Invite
+   *  button. */
+  pendingInvite: boolean;
 }
 
 /** My Profile (src/app/(portal)/profile) — an employee's own view of their record. Deliberately
