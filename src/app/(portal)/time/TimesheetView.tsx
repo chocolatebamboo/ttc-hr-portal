@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getWeek, formatWeekRange } from "@/lib/week";
-import TimesheetTable, { type CorrectionValues } from "@/components/TimesheetTable";
+import { getMonth } from "@/lib/month";
+import TimesheetCalendar from "@/components/TimesheetCalendar";
+import type { CorrectionValues } from "@/components/TimesheetTable";
 import type { TimeEntryDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error" | "empty";
@@ -14,12 +15,12 @@ export default function TimesheetView() {
   const [busyEntryId, setBusyEntryId] = useState<string | null>(null);
   const [correctionError, setCorrectionError] = useState<string | undefined>();
 
-  const week = getWeek(offset);
+  const month = getMonth(offset);
 
   async function load() {
     setLoadState("loading");
     try {
-      const res = await fetch(`/api/time/timesheet?start=${week.start}&end=${week.end}`);
+      const res = await fetch(`/api/time/timesheet?start=${month.start}&end=${month.end}`);
       if (!res.ok) throw new Error();
       const data = await res.json();
       setEntries(data.entries);
@@ -30,7 +31,7 @@ export default function TimesheetView() {
   }
 
   useEffect(() => {
-    // Fetch-on-mount / on-week-change: this widget has no server-rendered initial state,
+    // Fetch-on-mount / on-month-change: this widget has no server-rendered initial state,
     // so it has to ask the API whenever `offset` changes.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
@@ -72,18 +73,16 @@ export default function TimesheetView() {
           <button
             onClick={() => setOffset((o) => o - 1)}
             className="btn-neutral h-8 w-8 text-sm"
-            aria-label="Previous week"
+            aria-label="Previous month"
           >
             ←
           </button>
-          <span className="text-sm text-muted min-w-[150px] text-center tabular-nums">
-            {formatWeekRange(week.start, week.end)}
-          </span>
+          <span className="text-sm text-muted min-w-[150px] text-center tabular-nums">{month.label}</span>
           <button
             onClick={() => setOffset((o) => Math.min(0, o + 1))}
             disabled={offset === 0}
             className="btn-neutral h-8 w-8 text-sm"
-            aria-label="Next week"
+            aria-label="Next month"
           >
             →
           </button>
@@ -101,8 +100,8 @@ export default function TimesheetView() {
       )}
 
       {(loadState === "ready" || loadState === "empty") && (
-        <TimesheetTable
-          days={week.days}
+        <TimesheetCalendar
+          month={month}
           entries={entries}
           correction={{ onSubmit: submitCorrection, busyEntryId, error: correctionError }}
         />

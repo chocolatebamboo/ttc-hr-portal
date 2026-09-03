@@ -35,8 +35,9 @@ these don't get reported as surprises:
   section (company name, timezone, etc.) because nothing else in the app reads one yet.
 - An employee's login email can't be changed from the Employees page — that needs a matching
   change on their Supabase Auth account, which isn't wired up yet.
-- Tables that scroll sideways on a narrow phone screen (the weekly timesheet, in particular) are
-  an intentional design choice, not a layout bug — the columns are all there if you scroll.
+- Tables that scroll sideways on a narrow phone screen (the supervisor's per-employee timesheet
+  review page, in particular) are an intentional design choice, not a layout bug — the columns
+  are all there if you scroll. My Time itself is a month calendar and doesn't have this tradeoff.
 
 ## Workflow checklist
 
@@ -66,8 +67,9 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
 
 ### Employee(s)
 
-- [ ] Clock in, take a lunch break, clock out on the My Time page, for at least two different
-      days.
+- [ ] Clock in, take a lunch break, clock out from the Dashboard's time clock card, for at least
+      two different days. Then check My Time (now a month calendar) — click on one of those days
+      and confirm the hours and status match what you just did.
 - [ ] Submit the week's timesheet.
 - [ ] Submit a PTO request (any type — vacation, sick, personal).
 - [ ] Cancel a *different* PTO request you haven't submitted for approval yet, to confirm

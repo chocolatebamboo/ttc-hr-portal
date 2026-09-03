@@ -15,17 +15,17 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   Sign in, forgot/reset password all work end-to-end.
 - **Role-aware app shell** — four roles (Super Admin, HR Admin, Supervisor, Employee),
   desktop sidebar + mobile bottom nav, admin-only sections hidden from employees.
-- **Time & Attendance** — the full clock-in → lunch → clock-out flow, a weekly timesheet
-  view, and an audit trail that records every clock event. This is the one module built and
-  intended to be *solid* before anything else — per the brief, it's what employees touch
-  every day.
+- **Time & Attendance** — the full clock-in → lunch → clock-out flow, a month-calendar "My
+  Time" view (click a day to see or correct it), and an audit trail that records every clock
+  event. This is the one module built and intended to be *solid* before anything else — per
+  the brief, it's what employees touch every day.
 - **Supervisor timesheet approval** — a supervisor's "My Team" page lists their direct
   reports (queried from the actual `supervisorId` relationship, not a client-supplied list)
   with an awaiting-approval count, drilling into a per-employee weekly timesheet with
   Approve / Return actions. Returning requires a comment, per the brief. The employee then
-  sees exactly why on their own timesheet, and can edit and resubmit that one day — closing
-  the loop the brief's "Employee correction requested" audit action implies but doesn't
-  fully spell out.
+  sees exactly why on their own timesheet (as a red dot on that day in the My Time calendar),
+  and can edit and resubmit that one day — closing the loop the brief's "Employee correction
+  requested" audit action implies but doesn't fully spell out.
 - **PTO request + approval** — employees submit time-off requests (type, dates, hours,
   reason) from Time Off, see their own request history, and can cancel a still-Pending one.
   Supervisors decide (Approve / Deny, with an optional note on denial) from the same

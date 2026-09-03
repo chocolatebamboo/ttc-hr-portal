@@ -66,6 +66,14 @@ export function formatMinutes(totalMinutes: number | null): string {
   return `${h}h ${String(m).padStart(2, "0")}m`;
 }
 
+/** Same value as formatMinutes, but to one decimal place with no "m" — for the Timesheet
+ *  calendar's day cells (src/components/TimesheetCalendar.tsx), which are too narrow to fit
+ *  "8h 00m" legibly at a glance the way the full detail panel below the grid can. */
+export function formatHoursCompact(totalMinutes: number | null): string {
+  if (totalMinutes === null) return "—";
+  return `${(totalMinutes / 60).toFixed(1)}h`;
+}
+
 export function formatClockTime(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
