@@ -5,6 +5,7 @@ import { getWeek } from "@/lib/week";
 import type { PayrollHoursReportDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error" | "empty";
+type EmployeeOption = { id: string; name: string };
 
 function firstOfMonth(): string {
   const d = new Date();
@@ -32,15 +33,22 @@ function thisWeekRange(): { start: string; end: string } {
 export default function ReportsView() {
   const [start, setStart] = useState(firstOfMonth());
   const [end, setEnd] = useState(todayDateKey());
+  // "" means every employee (the original full-company view) — CB: "I could imagine it would
+  // be nice to... look at somebody's specific hours [without having to] go through the whole
+  // list of people", but also still wants the full view available, so this is additive rather
+  // than a replacement for the no-filter report.
+  const [employeeId, setEmployeeId] = useState("");
+  const [employees, setEmployees] = useState<EmployeeOption[]>([]);
   const [report, setReport] = useState<PayrollHoursReportDTO | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [errorMessage, setErrorMessage] = useState("");
 
-  async function generate(s: string, e: string) {
+  async function generate(s: string, e: string, empId: string) {
     setLoadState("loading");
     setErrorMessage("");
     try {
-      const res = await fetch(`/api/payroll/hours?start=${s}&end=${e}`);
+      const query = `?start=${s}&end=${e}${empId ? `&employeeId=${empId}` : ""}`;
+      const res = await fetch(`/api/payroll/hours${query}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setLoadState("error");
@@ -55,24 +63,41 @@ export default function ReportsView() {
     }
   }
 
+  async function loadEmployees() {
+    try {
+      const res = await fetch("/api/roster/assignable");
+      if (!res.ok) return;
+      const data = await res.json();
+      setEmployees(data.employees ?? []);
+    } catch {
+      // Non-fatal — the picker just stays empty and the report still works unfiltered.
+    }
+  }
+
   // Initial load only — regenerating after this happens via the explicit "Generate" button
   // below, not on every keystroke while someone is still picking dates, so deps stay empty.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    generate(start, end);
+    generate(start, end, employeeId);
+    loadEmployees();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    generate(start, end);
+    generate(start, end, employeeId);
+  }
+
+  function handleEmployeeChange(id: string) {
+    setEmployeeId(id);
+    generate(start, end, id);
   }
 
   function useThisWeek() {
     const week = thisWeekRange();
     setStart(week.start);
     setEnd(week.end);
-    generate(week.start, week.end);
+    generate(week.start, week.end, employeeId);
   }
 
   function useThisMonth() {
@@ -80,10 +105,11 @@ export default function ReportsView() {
     const e = todayDateKey();
     setStart(s);
     setEnd(e);
-    generate(s, e);
+    generate(s, e, employeeId);
   }
 
   const rangeInvalid = end < start;
+  const csvQuery = `?start=${start}&end=${end}${employeeId ? `&employeeId=${employeeId}` : ""}`;
 
   return (
     <div className="max-w-3xl">
@@ -103,6 +129,21 @@ export default function ReportsView() {
       </div>
 
       <form onSubmit={handleSubmit} className="bg-surface border border-border rounded-xl p-4 mb-5 flex flex-wrap items-end gap-3">
+        <div>
+          <label className="block text-sm font-medium mb-1.5">Employee</label>
+          <select
+            value={employeeId}
+            onChange={(ev) => handleEmployeeChange(ev.target.value)}
+            className="rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent min-w-[180px]"
+          >
+            <option value="">All employees</option>
+            {employees.map((emp) => (
+              <option key={emp.id} value={emp.id}>
+                {emp.name}
+              </option>
+            ))}
+          </select>
+        </div>
         <div>
           <label className="block text-sm font-medium mb-1.5">Start date</label>
           <input
@@ -128,7 +169,7 @@ export default function ReportsView() {
         </button>
         {report && loadState !== "error" && (
           <a
-            href={`/api/payroll/hours/csv?start=${start}&end=${end}`}
+            href={`/api/payroll/hours/csv${csvQuery}`}
             className="btn-neutral text-sm px-5 py-2"
           >
             Download CSV

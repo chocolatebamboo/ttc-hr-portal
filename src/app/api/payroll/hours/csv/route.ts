@@ -15,6 +15,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const start = searchParams.get("start");
     const end = searchParams.get("end");
+    const employeeId = searchParams.get("employeeId") || undefined;
     if (!start || !end) {
       throw new InvalidPayrollRangeError("Choose a start and end date.");
     }
@@ -25,7 +26,7 @@ export async function GET(request: NextRequest) {
       throw new InvalidPayrollRangeError("Choose valid start and end dates.");
     }
 
-    const report = await getPayrollHoursReport(employee, startDate, endDate);
+    const report = await getPayrollHoursReport(employee, startDate, endDate, employeeId);
     const csv = toPayrollCsv(report);
 
     return new NextResponse(csv, {

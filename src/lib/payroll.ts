@@ -27,7 +27,8 @@ export class InvalidPayrollRangeError extends Error {
 export async function getPayrollHoursReport(
   actor: CurrentEmployee,
   startDate: Date,
-  endDate: Date
+  endDate: Date,
+  employeeId?: string
 ): Promise<PayrollHoursReportDTO> {
   if (!isAdmin(actor)) throw new ForbiddenError();
   if (endDate < startDate) {
@@ -36,7 +37,7 @@ export async function getPayrollHoursReport(
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const employees = await tx.employee.findMany({
-      where: { deactivatedAt: null },
+      where: employeeId ? { id: employeeId, deactivatedAt: null } : { deactivatedAt: null },
       select: {
         id: true,
         employeeCode: true,
@@ -49,7 +50,10 @@ export async function getPayrollHoursReport(
     });
 
     const timeEntries = await tx.timeEntry.findMany({
-      where: { workDate: { gte: startDate, lte: endDate } },
+      where: {
+        workDate: { gte: startDate, lte: endDate },
+        ...(employeeId ? { employeeId } : {}),
+      },
       select: { employeeId: true, status: true, totalMinutes: true },
     });
 
@@ -58,6 +62,7 @@ export async function getPayrollHoursReport(
         status: "APPROVED",
         startDate: { lte: endDate },
         endDate: { gte: startDate },
+        ...(employeeId ? { employeeId } : {}),
       },
       select: { employeeId: true, type: true, hours: true },
     });
