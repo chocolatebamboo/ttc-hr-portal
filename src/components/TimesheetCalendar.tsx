@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import StatusPill from "@/components/StatusPill";
 import PtoStatusPill from "@/components/PtoStatusPill";
 import { ChevronDownIcon } from "@/components/icons";
@@ -130,6 +130,12 @@ interface MonthSlot {
  *  scroller from firing off requests forever. */
 const EARLIEST_OFFSET = -60;
 
+/** How far ahead the calendar shows, so people can block off PTO in advance rather than only
+ *  being able to see/click days in the current month (CB, Sept 2026: "probably six months
+ *  out"). Unlike the past direction, this is a small, fixed range rather than an infinite
+ *  lazy-loaded scroll — all of it loads up front, no IntersectionObserver needed. */
+const MAX_FUTURE_OFFSET = 6;
+
 /**
  * The employee's own "My Time" page, as a month calendar (CB's ask, modeled on the Airbnb
  * host calendar: a number per day, click a day to see/edit the detail) rather than one week's
@@ -155,11 +161,17 @@ const EARLIEST_OFFSET = -60;
  *      shape the Time Off page's own multi-day form already sends.
  *   3. Airbnb's calendar isn't one month with prev/next buttons — it's a single continuously
  *      scrolling list of months, and you keep scrolling to go further back. This component
- *      does the same: it starts with just the current month loaded, and scrolling down past it
- *      lazily fetches and appends one earlier month at a time (via an IntersectionObserver on
- *      a sentinel at the bottom of the loaded list), same direction "My Time" already limited
- *      navigation to (an employee can look back through past months but not forward into
- *      months that haven't happened yet).
+ *      does the same for the past: scrolling down past the current month lazily fetches and
+ *      appends one earlier month at a time (via an IntersectionObserver on a sentinel at the
+ *      bottom of the loaded list), capped at EARLIEST_OFFSET.
+ *
+ *      Forward is different: rather than an unbounded lazy scroll, the next MAX_FUTURE_OFFSET
+ *      months (6, as of CB's Sept 2026 ask to let people "block off" time in advance) load
+ *      eagerly above the current month, all at once — small and fixed enough that lazy-loading
+ *      would just be extra complexity for no benefit. The list mounts scrolled to the current
+ *      month (see the scrollIntoView effect below) so this doesn't change what's on screen on
+ *      first load; scrolling up reaches the future months, scrolling down still reaches the
+ *      past ones exactly as before.
  *   4. The calendar itself is a full-width column, not a fixed narrow card with a wide gutter
  *      of empty page beside it — the day panel is a fixed-width column docked next to it (and
  *      pinned in place with `sticky` while the month list scrolls underneath it on sm+), so the
@@ -182,9 +194,16 @@ export default function TimesheetCalendar({
   ptoRequests: PtoRequestDTO[];
   pto: PtoDayControls;
 }) {
-  const [months, setMonths] = useState<MonthSlot[]>(() => [
-    { offset: 0, month: getMonth(0), entries: [], loadState: "loading" },
-  ]);
+  // Descending offsets from MAX_FUTURE_OFFSET down to 0 — furthest-future month first, current
+  // month last — so the array is already in top-to-bottom render order with no reordering logic
+  // needed: future months (loaded eagerly, all at once) sit above the current month, and past
+  // months (loaded lazily as you scroll down, unchanged from before) get appended after it.
+  const [months, setMonths] = useState<MonthSlot[]>(() =>
+    Array.from({ length: MAX_FUTURE_OFFSET + 1 }, (_, i) => {
+      const offset = MAX_FUTURE_OFFSET - i;
+      return { offset, month: getMonth(offset), entries: [], loadState: "loading" as LoadState };
+    })
+  );
   const [reachedStart, setReachedStart] = useState(false);
   // Tracks the latest `months` for the refresh effect below to read without needing `months`
   // itself in that effect's deps (which would re-run it on every fetch, not just on refreshKey).
@@ -194,6 +213,9 @@ export default function TimesheetCalendar({
   }, [months]);
   const earliestLoadedOffsetRef = useRef(0);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  // The current month's own wrapper div, so the mount effect below can scroll straight to it —
+  // otherwise the page would land on the topmost (furthest-future) month instead of today's.
+  const currentMonthRef = useRef<HTMLDivElement | null>(null);
 
   async function loadMonth(offset: number) {
     const month = getMonth(offset);
@@ -208,9 +230,22 @@ export default function TimesheetCalendar({
   }
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadMonth(0);
+    // All eagerly-loaded months (0..MAX_FUTURE_OFFSET) fetch in parallel on mount — there's no
+    // reason to serialize them, and it's only ever 7 requests.
+    for (let offset = 0; offset <= MAX_FUTURE_OFFSET; offset++) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      loadMonth(offset);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Lands the page on the current month rather than the furthest-future one now sitting above
+  // it — runs once on mount; the current month's wrapper div already exists in the very first
+  // render (all 0..MAX_FUTURE_OFFSET slots are in initial state, not lazily added), so there's
+  // no need to wait on data actually loading. useLayoutEffect (not useEffect) so this scroll
+  // happens before the browser paints, avoiding a visible flash of the future months first.
+  useLayoutEffect(() => {
+    currentMonthRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
   }, []);
 
   // Re-fetch every month already in memory — used after a correction is resubmitted elsewhere
@@ -316,14 +351,18 @@ export default function TimesheetCalendar({
     // narrow card with empty page beside it.
     <div className="flex flex-col sm:flex-row sm:items-start gap-4">
       <div className="flex-1 min-w-0 space-y-6">
+        {/* Always the topmost thing rendered — months[0] is always the MAX_FUTURE_OFFSET slot,
+            since nothing ever loads or prepends anything ahead of it. */}
+        <p className="text-center text-xs text-muted/60 py-2">
+          You can plan up to {MAX_FUTURE_OFFSET} months ahead — scroll up for future months, or down for past ones.
+        </p>
         {months.map((slot) => (
-          <MonthSection
-            key={slot.offset}
-            slot={slot}
-            selection={selection}
-            ptoMap={ptoMap}
-            onDayClick={handleDayClick}
-          />
+          // The current month gets a ref so the mount effect above can scroll straight to it —
+          // otherwise the page would land on the future months now sitting above it instead of
+          // today's.
+          <div key={slot.offset} ref={slot.offset === 0 ? currentMonthRef : undefined}>
+            <MonthSection slot={slot} selection={selection} ptoMap={ptoMap} onDayClick={handleDayClick} />
+          </div>
         ))}
 
         {reachedStart ? (
