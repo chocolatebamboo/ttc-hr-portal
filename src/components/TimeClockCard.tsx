@@ -138,13 +138,16 @@ export default function TimeClockCard({ variant = "default" }: { variant?: "defa
 
   if (variant === "hero") {
     // Bold color-block treatment for the mobile Dashboard (CB's Sept 2026 aesthetic pass —
-    // the reference screenshots she shared). Solid brand gradient rather than any blur/glass:
-    // see the doc comment on BottomNav's floating pill for why glass specifically stayed out
-    // of this pass (CB rejected a frosted-glass + glow treatment on this same card before).
+    // the reference screenshots she shared). Solid brand pink, NOT a gradient — CB's first-
+    // round feedback was "I don't necessarily like the gradient on that first card," and this
+    // also matches the solid pink stat tile right below it rather than introducing a fourth,
+    // blended treatment. No blur/glass either: see BottomNav's floating-pill doc comment for
+    // why glass specifically stayed out of this pass (CB rejected a frosted-glass + glow
+    // treatment on this same card even earlier).
     return (
       <div
         className="rounded-3xl p-6 text-white shadow-lg"
-        style={{ background: "linear-gradient(135deg, var(--ttc-pink-ink), var(--ttc-pink) 55%, var(--ttc-blue))" }}
+        style={{ background: "var(--ttc-pink)" }}
       >
         <p className="text-xs uppercase tracking-wide text-white/70 mb-1">Today</p>
         <p className="text-xl font-bold mb-4">{STATUS_LABEL[state]}</p>
