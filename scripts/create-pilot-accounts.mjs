@@ -145,8 +145,19 @@ async function ensureAuthUser(supabaseAdmin, tester) {
     return existing;
   }
 
+  // redirectTo mirrors src/lib/employees-admin.ts's inviteRedirectUrl — without it, the
+  // invite falls back to the Supabase project's dashboard-configured Site URL, which is
+  // `http://localhost:3000` by default and breaks the link for every real invitee. See that
+  // file's doc comment for the full story (CB hit this for real, Sept 2026).
+  const siteUrl = process.env.SITE_URL;
+  if (!siteUrl) {
+    throw new Error(
+      "SITE_URL isn't set (see .env.example) — invite links would fall back to Supabase's default Site URL and break for real invitees. Set it and re-run."
+    );
+  }
   const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(tester.email, {
     data: { full_name: `${tester.firstName} ${tester.lastName}` },
+    redirectTo: `${siteUrl.replace(/\/$/, "")}/api/auth/callback?next=/reset-password`,
   });
   if (error) throw new Error(`Inviting ${tester.email} failed: ${error.message}`);
   console.log(`  Invited ${tester.email} — they'll get an email to set their own password.`);

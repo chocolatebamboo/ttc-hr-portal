@@ -36,6 +36,15 @@ tries Google sign-in without ever having been added as a team member gets bounce
 to the login page with a clear message telling them to ask HR, never a broken or partial
 dashboard.
 
+Invite emails (sent automatically when someone's added on the Team Members page, or via that
+page's "Resend invite" button) only work if two things in the Supabase dashboard match the
+app's actual deployed URL: **Authentication → URL Configuration → Site URL**, and that same
+URL present in the **Redirect URLs** list below it. If those are still left at Supabase's
+default (`http://localhost:3000`, from before the project had a real deployed URL), every
+invite link sends the invitee to a page that only ever worked on a developer's own machine —
+see README.md's "Getting set up" §3a for the exact values to set and the `SITE_URL` environment
+variable that has to match them.
+
 If you need to set someone's password directly instead of relying on the invite-email flow
 (useful when a link has expired, or email delivery is unreliable), see
 `scripts/set-password.mjs` — a one-off script that uses the same admin Supabase credentials as

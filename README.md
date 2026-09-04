@@ -308,6 +308,26 @@ Copy `.env.example` to `.env.local` and fill in:
   storage bucket" below) — it bypasses Supabase's own access rules entirely, so the app's own
   authorization check in `src/lib/documents.ts` is the only thing standing between an
   team member and someone else's document.
+- `SITE_URL` — the app's own real deployed URL. See "Site URL (invite emails)" just below —
+  it has to match a Supabase dashboard setting, not just this env var.
+
+### 3a. Site URL (invite emails)
+
+In the Supabase dashboard, go to Authentication → URL Configuration and set **Site URL** to
+your app's real deployed URL (e.g. `https://ttc-hr-portal.onrender.com`) — **not**
+`http://localhost:3000`, which is what a brand-new Supabase project defaults to. Also add that
+same URL (with a trailing `/**`, e.g. `https://ttc-hr-portal.onrender.com/**`) under **Redirect
+URLs** on the same page — Supabase silently ignores any `redirectTo` that isn't on this
+allow-list and falls back to the Site URL default instead, so both settings matter, not just
+one.
+
+Then set the `SITE_URL` environment variable (see step 3 above) to that same URL. The app uses
+it to build the link inside every invite and resend-invite email
+(`src/lib/employees-admin.ts`'s `inviteRedirectUrl`) — skip this step and every invite link
+sends real people to `localhost:3000` on their own machine, which is exactly the bug CB hit in
+production (Sept 2026): the email arrives, looks fine, and the link goes nowhere useful. If
+`SITE_URL` isn't set, invite/resend-invite now fails with a clear error instead of silently
+sending a broken link.
 
 ### 3b. Document storage bucket
 

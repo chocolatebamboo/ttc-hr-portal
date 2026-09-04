@@ -198,6 +198,32 @@ function isUniqueConstraintError(err: unknown): boolean {
   return typeof err === "object" && err !== null && "code" in err && err.code === "P2002";
 }
 
+/**
+ * Where an invite (or resend) email's "Accept the invite" link sends someone after Supabase
+ * confirms it — the SAME /api/auth/callback hop forgot-password already uses, just continuing
+ * on to /reset-password instead of /dashboard, since a brand-new invitee has no password yet
+ * to sign in with; they land on "Choose a new password" (src/app/reset-password/page.tsx,
+ * which is generic — it just calls supabase.auth.updateUser on whatever session already
+ * exists, invite-issued or not) and only reach /dashboard once they've actually set one.
+ *
+ * CB (Sept 2026, screenshot of a real invite email): without an explicit `redirectTo`,
+ * inviteUserByEmail falls back to the Supabase PROJECT's dashboard-configured Site URL — which
+ * was still the default `http://localhost:3000` from when the project was first created, so
+ * every invite/resend email has been sending real invitees to a URL that only ever worked on
+ * this app's own dev machine. Throwing here instead of silently omitting redirectTo (which
+ * would just quietly re-create the exact same bug) means a missing SITE_URL fails loudly at
+ * invite time, not days later when someone can't get in.
+ */
+function inviteRedirectUrl(): string {
+  const siteUrl = process.env.SITE_URL;
+  if (!siteUrl) {
+    throw new InvalidEmployeeError(
+      "SITE_URL isn't set on the server, so an invite link can't be built. Ask whoever manages the Render deploy to add it (see .env.example)."
+    );
+  }
+  return `${siteUrl.replace(/\/$/, "")}/api/auth/callback?next=/reset-password`;
+}
+
 /** Finds an existing Supabase Auth user by email, or invites a new one. Mirrors
  *  scripts/create-pilot-accounts.mjs's ensureAuthUser exactly, just reachable from the app
  *  itself instead of a one-off script — re-adding someone whose Auth account already exists
@@ -211,6 +237,7 @@ async function ensureAuthUser(email: string, fullName: string) {
 
   const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
     data: { full_name: fullName },
+    redirectTo: inviteRedirectUrl(),
   });
   if (error) throw new InvalidEmployeeError(`Couldn't send the invite email: ${error.message}`);
   return { user: data.user, invited: true };
@@ -246,6 +273,7 @@ export async function resendInvite(actor: CurrentEmployee, employeeId: string) {
 
     const { error } = await supabaseAdmin.auth.admin.inviteUserByEmail(existing.ttcEmail, {
       data: { full_name: `${existing.firstName} ${existing.lastName}` },
+      redirectTo: inviteRedirectUrl(),
     });
     if (error) throw new InvalidEmployeeError(`Couldn't resend the invite: ${error.message}`);
   });
