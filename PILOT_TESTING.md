@@ -101,6 +101,10 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
       cancel works before a supervisor acts on it — try this once from the request list and
       once from clicking that day on the My Time calendar, since both lead to the same cancel
       action.
+- [ ] Open My Profile — upload a photo, edit your personal phone/email and emergency contact,
+      and Save; reload the page and confirm everything you entered is still there. Confirm
+      name/title/department/role/hire date are shown but NOT editable (ask HR to change one of
+      these from the Employees admin page instead, then confirm it shows up here too).
 - [ ] Open Documents — acknowledge anything that requires it, confirm you can view/download
       anything assigned to you or company-wide, and confirm nothing marked confidential-HR-only
       is visible to you.

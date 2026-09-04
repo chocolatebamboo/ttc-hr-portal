@@ -113,6 +113,15 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   department, role, work email, work phone — nothing more. This is the one place in the app
   where RLS's row-level grant is deliberately broader than what any single request needs; see
   "Security notes" below for why that's safe and where the real narrowing happens.
+- **My Profile** — `/profile`, every employee's self-service view of their own record: photo,
+  name/title/department/role/hire date read-only (HR-only changes, via the Employees admin
+  page), and an editable contact card (preferred name, work/personal phone, personal email,
+  emergency contact). Enforced at two independent layers, same split as the rest of this app —
+  the API only ever builds an update from that exact field list, and `prisma/rls.sql`'s
+  `employee_self_update` policy plus its `enforce_employee_self_update()` trigger reject a
+  non-admin write at the DATABASE level if it touches anything else (role, department, hire
+  date, etc.), so an app-layer bug couldn't turn this into "edit anything about yourself" even
+  by accident.
 - **Announcements** — HR/Super Admin posts a company-wide, department, or individual
   announcement, with an optional expiration date. Employees see only what's currently published
   and targeted at them; the Manage tab shows every post (including future-dated "Scheduled" and

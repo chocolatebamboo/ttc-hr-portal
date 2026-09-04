@@ -16,6 +16,7 @@ import { OnboardingNotFoundError, InvalidOnboardingError, MissingReturnReasonErr
 import { AnnouncementNotFoundError, InvalidAnnouncementError } from "@/lib/announcements";
 import { InvalidPayrollRangeError } from "@/lib/payroll";
 import { CertificationNotFoundError, InvalidCertificationError } from "@/lib/certification";
+import { InvalidProfileError } from "@/lib/profile";
 
 /** Maps our typed domain errors to the right HTTP status instead of leaking a 500 + stack. */
 export function toErrorResponse(err: unknown) {
@@ -49,7 +50,8 @@ export function toErrorResponse(err: unknown) {
     err instanceof InvalidOnboardingError ||
     err instanceof InvalidAnnouncementError ||
     err instanceof InvalidPayrollRangeError ||
-    err instanceof InvalidCertificationError
+    err instanceof InvalidCertificationError ||
+    err instanceof InvalidProfileError
   ) {
     return NextResponse.json({ error: err.message }, { status: 400 });
   }

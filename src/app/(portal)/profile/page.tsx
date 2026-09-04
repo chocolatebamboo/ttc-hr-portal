@@ -1,5 +1,10 @@
-import ComingSoon from "@/components/ComingSoon";
+import { redirect } from "next/navigation";
+import { getCurrentEmployee } from "@/lib/auth";
+import ProfileView from "./ProfileView";
 
-export default function ProfilePage() {
-  return <ComingSoon title="My Profile" note="Full profile view/edit — the Employee record already exists in the data model; the page hasn't been built yet." />;
+export default async function ProfilePage() {
+  const employee = await getCurrentEmployee();
+  if (!employee) redirect("/login");
+
+  return <ProfileView />;
 }

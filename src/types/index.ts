@@ -93,6 +93,45 @@ export interface EmployeeAdminRowDTO {
   hireDate: string;
 }
 
+/** My Profile (src/app/(portal)/profile) — an employee's own view of their record. Deliberately
+ *  a separate shape from EmployeeAdminRowDTO above rather than reusing it: fields like
+ *  deactivatedAt/pendingInvite are meaningless from your own view (you couldn't be looking at
+ *  this page if either were true), and department/supervisor come through as plain ids-dropped
+ *  display strings here since My Profile never lets you change either. */
+export interface MyProfileDTO {
+  id: string;
+  avatarUrl: string | null;
+  employeeCode: string;
+  firstName: string;
+  lastName: string;
+  preferredName: string | null;
+  ttcEmail: string;
+  workPhone: string | null;
+  personalPhone: string | null;
+  personalEmail: string | null;
+  emergencyContactName: string | null;
+  emergencyContactPhone: string | null;
+  emergencyContactRelation: string | null;
+  jobTitle: string;
+  role: Role;
+  employmentStatus: EmploymentStatus;
+  departmentName: string | null;
+  supervisorName: string | null;
+  hireDate: string;
+}
+
+/** The fields My Profile actually lets you change — see enforce_employee_self_update() in
+ *  prisma/rls.sql for the database-layer enforcement of this exact same field list. */
+export interface UpdateMyProfileInput {
+  preferredName?: string;
+  workPhone?: string;
+  personalPhone?: string;
+  personalEmail?: string;
+  emergencyContactName?: string;
+  emergencyContactPhone?: string;
+  emergencyContactRelation?: string;
+}
+
 export interface DirectReportDTO {
   id: string;
   firstName: string;

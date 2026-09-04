@@ -135,9 +135,65 @@ create policy employee_select on "Employee" for select using (
   or (current_employee_id() is not null and "deactivatedAt" is null)
 );
 
--- Only admins write employee records; supervisors and employees never mutate this table directly.
+-- Only admins write employee records; supervisors and employees never mutate this table directly
+-- through THIS policy. employee_self_update (below) is a second, narrower path: My Profile
+-- (src/app/(portal)/profile) lets an employee edit their own contact info and photo, without
+-- opening up the rest of this table the way a blanket "id = current_employee_id()" policy
+-- would.
 drop policy if exists employee_write on "Employee";
 create policy employee_write on "Employee" for all using (is_admin()) with check (is_admin());
+
+-- Employees may update their OWN row (My Profile) — but WITH CHECK only confirms the row is
+-- still theirs after the write, not which COLUMNS changed; Postgres RLS is row-level, not
+-- column-level. enforce_employee_self_update() below is what actually keeps this from being
+-- "employees can edit anything about themselves" — it runs on every UPDATE to this table
+-- (admin ones included, where it's a no-op) and rejects a non-admin update outright if it
+-- touches anything other than the contact/photo fields My Profile exposes. This is a second
+-- PERMISSIVE policy for UPDATE only; Postgres combines multiple permissive policies for the
+-- same command with OR, so this adds a self-service path alongside — not instead of —
+-- employee_write above (which still covers admin edits to role/title/department/etc.).
+create or replace function enforce_employee_self_update() returns trigger as $$
+begin
+  if is_admin() then
+    return new;
+  end if;
+
+  if new."id" is distinct from old."id"
+    or new."userId" is distinct from old."userId"
+    or new."employeeCode" is distinct from old."employeeCode"
+    or new."firstName" is distinct from old."firstName"
+    or new."lastName" is distinct from old."lastName"
+    or new."jobTitle" is distinct from old."jobTitle"
+    or new."role" is distinct from old."role"
+    or new."employmentStatus" is distinct from old."employmentStatus"
+    or new."hireDate" is distinct from old."hireDate"
+    or new."departmentId" is distinct from old."departmentId"
+    or new."supervisorId" is distinct from old."supervisorId"
+    or new."ttcEmail" is distinct from old."ttcEmail"
+    or new."deactivatedAt" is distinct from old."deactivatedAt"
+    or new."createdAt" is distinct from old."createdAt"
+  then
+    raise exception 'Employees may only update their own contact info and photo from My Profile — role, title, department, status, and hire date changes go through the Employees admin page.';
+  end if;
+
+  return new;
+end;
+$$ language plpgsql;
+
+alter function enforce_employee_self_update() set search_path = 'public';
+
+drop trigger if exists employee_self_update_guard on "Employee";
+create trigger employee_self_update_guard
+  before update on "Employee"
+  for each row
+  execute function enforce_employee_self_update();
+
+drop policy if exists employee_self_update on "Employee";
+create policy employee_self_update on "Employee" for update using (
+  id = current_employee_id()
+) with check (
+  id = current_employee_id()
+);
 
 
 alter table "TimeEntry" enable row level security;

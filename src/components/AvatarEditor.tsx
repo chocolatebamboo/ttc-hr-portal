@@ -8,27 +8,36 @@ function initialsOf(name: string): string {
 }
 
 /**
- * Photo upload/remove control for one employee's Employee.avatarStorageKey, used from the
- * Employees admin edit form. Only meaningful for an EXISTING employee (needs a real id to
- * upload against) — the create form has nowhere to render this until the record exists.
- * Uploads immediately on file selection rather than waiting for the surrounding form's Save,
- * since a photo isn't part of that form's own field state — it's already saved server-side
- * the moment this succeeds.
+ * Photo upload/remove control for an Employee.avatarStorageKey — originally just the Employees
+ * admin edit form's (setting anyone's photo), now also My Profile's (setting your own, via
+ * `endpoint`/`responseKey` pointed at /api/profile/photo instead of the admin route below).
+ * Only meaningful for an EXISTING employee (needs a real id to upload against) — the admin
+ * create form has nowhere to render this until the record exists. Uploads immediately on file
+ * selection rather than waiting for the surrounding form's Save, since a photo isn't part of
+ * that form's own field state — it's already saved server-side the moment this succeeds.
  */
 export default function AvatarEditor({
   employeeId,
   name,
   avatarUrl,
   onChange,
+  endpoint,
+  responseKey = "employee",
 }: {
   employeeId: string;
   name: string;
   avatarUrl: string | null;
   onChange: (avatarUrl: string | null) => void;
+  /** Defaults to the admin route for this employeeId; My Profile passes "/api/profile/photo". */
+  endpoint?: string;
+  /** The JSON body's top-level key holding the updated record — "employee" for the admin
+   *  route's response shape, "profile" for /api/profile/photo's. */
+  responseKey?: "employee" | "profile";
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const url = endpoint ?? `/api/admin/employees/${employeeId}/photo`;
 
   async function handleFile(file: File) {
     setBusy(true);
@@ -36,13 +45,13 @@ export default function AvatarEditor({
     try {
       const body = new FormData();
       body.set("file", file);
-      const res = await fetch(`/api/admin/employees/${employeeId}/photo`, { method: "POST", body });
+      const res = await fetch(url, { method: "POST", body });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(data.error ?? "Unable to upload that photo. Please try again.");
         return;
       }
-      onChange(data.employee.avatarUrl);
+      onChange(data[responseKey].avatarUrl);
     } catch {
       setError("Unable to reach the server. Check your connection and try again.");
     } finally {
@@ -55,13 +64,13 @@ export default function AvatarEditor({
     setBusy(true);
     setError("");
     try {
-      const res = await fetch(`/api/admin/employees/${employeeId}/photo`, { method: "DELETE" });
+      const res = await fetch(url, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(data.error ?? "Unable to remove that photo. Please try again.");
         return;
       }
-      onChange(data.employee.avatarUrl);
+      onChange(data[responseKey].avatarUrl);
     } catch {
       setError("Unable to reach the server. Check your connection and try again.");
     } finally {
