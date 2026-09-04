@@ -59,8 +59,8 @@ export default function AttendanceAdminView() {
     <div>
       <h1 className="page-title text-2xl mb-1">Attendance</h1>
       <p className="text-sm text-muted mb-4">
-        Every active employee&apos;s timesheet status for the selected week. Click a row to review
-        and approve that employee&apos;s time.
+        Every active team member&apos;s timesheet status for the selected week. Click a row to review
+        and approve that team member&apos;s time.
       </p>
 
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
@@ -131,7 +131,7 @@ export default function AttendanceAdminView() {
 
       {loadState === "empty" && (
         <div className="rounded-xl border border-border bg-surface p-6 text-sm text-muted">
-          No active employees{departmentId ? " in this department" : ""} yet.
+          No active team members{departmentId ? " in this department" : ""} yet.
         </div>
       )}
 
@@ -140,7 +140,7 @@ export default function AttendanceAdminView() {
           <table className="w-full text-sm min-w-[640px]">
             <thead>
               <tr className="border-b border-border text-left text-xs text-muted uppercase tracking-wide">
-                <th className="px-4 py-2.5 font-medium">Employee</th>
+                <th className="px-4 py-2.5 font-medium">Team Member</th>
                 <th className="px-4 py-2.5 font-medium">Department</th>
                 <th className="px-4 py-2.5 font-medium text-right">Awaiting Approval</th>
                 <th className="px-4 py-2.5 font-medium text-right">Missing Clock-Outs</th>

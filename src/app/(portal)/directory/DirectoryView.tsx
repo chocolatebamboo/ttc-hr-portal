@@ -10,11 +10,11 @@ const ROLE_LABEL: Record<Role, string> = {
   SUPER_ADMIN: "Super Admin",
   HR_ADMIN: "HR Admin",
   SUPERVISOR: "Supervisor",
-  EMPLOYEE: "Employee",
+  EMPLOYEE: "Team Member",
 };
 
 /**
- * Every active employee, searchable client-side — a company this size (see the eligible-count
+ * Every active team member, searchable client-side — a company this size (see the eligible-count
  * math on the Documents Manage tab, capped at a few dozen people) doesn't need server-side
  * pagination, and a directory people actually use should feel instant while typing.
  */
@@ -81,7 +81,7 @@ export default function DirectoryView() {
 
       {loadState === "empty" && (
         <div className="rounded-xl border border-border bg-surface p-6 text-sm text-muted">
-          No employees to show yet.
+          No team members to show yet.
         </div>
       )}
 

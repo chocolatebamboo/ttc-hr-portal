@@ -18,14 +18,14 @@ const ROLE_LABEL: Record<Role, string> = {
   SUPER_ADMIN: "Super Admin",
   HR_ADMIN: "HR Admin",
   SUPERVISOR: "Supervisor",
-  EMPLOYEE: "Employee",
+  EMPLOYEE: "Team Member",
 };
 
 const STATUS_LABEL: Record<EmploymentStatus, string> = {
   ACTIVE: "Active",
   ON_LEAVE: "On Leave",
   INACTIVE: "Inactive",
-  FORMER_EMPLOYEE: "Former Employee",
+  FORMER_EMPLOYEE: "Former Team Member",
 };
 
 function initialsOf(firstName: string, lastName: string): string {
@@ -279,7 +279,7 @@ export default function ProfileView() {
               <h2 className="text-sm font-semibold mb-1">Job details</h2>
               <p className="text-xs text-muted mb-4">Set by HR — contact them for a change.</p>
               <div className="grid sm:grid-cols-2 gap-4">
-                <ReadOnlyField label="Employee #" value={profile.employeeCode} />
+                <ReadOnlyField label="Team Member #" value={profile.employeeCode} />
                 <ReadOnlyField label="Status" value={STATUS_LABEL[profile.employmentStatus]} />
                 <ReadOnlyField label="Job title" value={profile.jobTitle} />
                 <ReadOnlyField label="Role" value={ROLE_LABEL[profile.role]} />

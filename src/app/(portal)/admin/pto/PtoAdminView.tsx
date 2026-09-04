@@ -60,7 +60,7 @@ export default function PtoAdminView() {
     <div className="max-w-3xl">
       <h1 className="page-title text-2xl mb-1">PTO Management</h1>
       <p className="text-sm text-muted mb-4">
-        Every employee&apos;s time-off requests, org-wide — not just one supervisor&apos;s team.
+        Every team member&apos;s time-off requests, org-wide — not just one supervisor&apos;s team.
       </p>
 
       {loadState === "loading" && (
@@ -188,7 +188,7 @@ function PendingRow({
           <textarea
             value={denyComment}
             onChange={(e) => onDenyCommentChange(e.target.value)}
-            placeholder="Optional note for the employee…"
+            placeholder="Optional note for the team member…"
             rows={2}
             className="flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
           />

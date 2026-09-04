@@ -37,7 +37,7 @@ function GoogleIcon() {
  *  plain static export with no Suspense boundary to satisfy. */
 const OAUTH_ERROR_COPY: Record<string, string> = {
   not_invited:
-    "That Google account isn't linked to a TTC HR Portal invite yet. Ask HR to add you as an employee first (using this same email address), then try again.",
+    "That Google account isn't linked to a TTC HR Portal invite yet. Ask HR to add you as a team member first (using this same email address), then try again.",
   oauth_failed: "Google sign-in didn't complete. Please try again.",
 };
 

@@ -8,18 +8,18 @@ const ROLE_LABEL: Record<Role, string> = {
   SUPER_ADMIN: "Super Admin",
   HR_ADMIN: "HR Admin",
   SUPERVISOR: "Supervisor",
-  EMPLOYEE: "Employee",
+  EMPLOYEE: "Team Member",
 };
 
 /**
  * Persistent, impossible-to-miss bar shown across the top of every portal page while a "View
  * as" preview (src/lib/preview.ts) is active — rendered from the portal layout, which is why
  * it always appears regardless of which page is open or what that page's own content is. The
- * app underneath is genuinely rendering as the previewed employee would see it (their nav,
+ * app underneath is genuinely rendering as the previewed team member would see it (their nav,
  * their dashboard, their data); this banner is what keeps that from being confusing to the
  * Super Admin actually looking at it, and it's also the ONLY way out once the nav itself has
  * changed to a lower role's — everything below this bar shows exactly what that role sees,
- * which for most roles doesn't include a way back to Employees or any admin page.
+ * which for most roles doesn't include a way back to Team Members or any admin page.
  */
 export default function PreviewBanner({
   name,

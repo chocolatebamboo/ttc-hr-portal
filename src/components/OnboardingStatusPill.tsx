@@ -13,7 +13,7 @@ const STYLE: Record<OnboardingAdminStatus, string> = {
 const LABEL: Record<OnboardingAdminStatus, string> = {
   ACTION_NEEDED: "Action Needed",
   UPCOMING: "Upcoming",
-  WAITING_ON_EMPLOYEE: "Waiting on Employee",
+  WAITING_ON_EMPLOYEE: "Waiting on Team Member",
   NOT_STARTED: "Not Started",
   COMPLETED: "Completed",
 };

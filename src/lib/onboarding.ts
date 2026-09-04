@@ -29,7 +29,7 @@ export class InvalidOnboardingError extends Error {
 
 export class MissingReturnReasonError extends Error {
   constructor() {
-    super("Let the employee know why this step is being sent back.");
+    super("Let the team member know why this step is being sent back.");
     this.name = "MissingReturnReasonError";
   }
 }
@@ -40,7 +40,7 @@ export class MissingReturnReasonError extends Error {
 // link — admins add those with a real document attached from the Manage tab after this.
 const DEFAULT_CHECKLIST_ITEMS = [
   "Complete Direct Deposit Authorization Form",
-  "Read and Acknowledge Employee Handbook",
+  "Read and Acknowledge Team Member Handbook",
   "Meet with Your Supervisor",
   "Review the Staff Directory",
   "Complete Required Training",
@@ -306,7 +306,7 @@ export async function advanceOnboardingItem(actor: CurrentEmployee, itemId: stri
     // misrepresents the ADMIN as having read the document, not the employee. Only the
     // employee themselves may acknowledge their own document.
     if (actor.id !== employeeId) {
-      throw new ForbiddenError("Only the employee themselves can acknowledge this document.");
+      throw new ForbiddenError("Only the team member themselves can acknowledge this document.");
     }
     if (!item.documentId) {
       throw new InvalidOnboardingError("This step isn't linked to a document yet — ask HR to fix its setup.");
@@ -378,12 +378,12 @@ export async function decideOnboardingItem(
     );
     if (!latestAttempt || latestAttempt.status === "SUBMITTED") {
       throw new InvalidOnboardingError(
-        "Finish reviewing this employee's certification test answers before approving this step."
+        "Finish reviewing this team member's certification test answers before approving this step."
       );
     }
     if (latestAttempt.status === "FAILED") {
       throw new InvalidOnboardingError(
-        "This attempt didn't reach the passing score — return this step so the employee can retake the test, rather than approving it."
+        "This attempt didn't reach the passing score — return this step so the team member can retake the test, rather than approving it."
       );
     }
   }
@@ -480,7 +480,7 @@ export async function assertDocumentUsableForOnboarding(tx: PrismaClient, docume
   if (!doc || doc.archivedAt) throw new InvalidOnboardingError("Choose a valid document.");
   if (doc.visibility === "CONFIDENTIAL_HR") {
     throw new InvalidOnboardingError(
-      "Confidential HR documents can't be used as an onboarding step — the employee would never be able to see it."
+      "Confidential HR documents can't be used as an onboarding step — the team member would never be able to see it."
     );
   }
   return doc;
@@ -519,7 +519,7 @@ export async function startOnboarding(actor: CurrentEmployee, employeeId: string
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const existing = await tx.employeeOnboarding.findUnique({ where: { employeeId } });
-    if (existing) throw new InvalidOnboardingError("This employee's checklist has already been started.");
+    if (existing) throw new InvalidOnboardingError("This team member's checklist has already been started.");
 
     // Seeds the separate, admin/supervisor-only readiness checklist in the same action — one
     // click for HR, not two. Idempotent: if these were already seeded some other way (or this

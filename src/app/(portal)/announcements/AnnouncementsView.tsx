@@ -277,7 +277,7 @@ function ComposeAnnouncementForm({ onCreated }: { onCreated: () => void }) {
     }
     if (audienceType === "EMPLOYEES" && employeeIds.length === 0) {
       setStatus("error");
-      setErrorMessage("Choose at least one employee.");
+      setErrorMessage("Choose at least one team member.");
       return;
     }
 
@@ -345,7 +345,7 @@ function ComposeAnnouncementForm({ onCreated }: { onCreated: () => void }) {
           >
             <option value="EVERYONE">Everyone</option>
             <option value="DEPARTMENTS">Specific department(s)</option>
-            <option value="EMPLOYEES">Specific employee(s)</option>
+            <option value="EMPLOYEES">Specific team member(s)</option>
           </select>
         </div>
         <div>
@@ -388,7 +388,7 @@ function ComposeAnnouncementForm({ onCreated }: { onCreated: () => void }) {
 
       {audienceType === "EMPLOYEES" && (
         <div>
-          <label className="block text-sm font-medium mb-1.5">Employees</label>
+          <label className="block text-sm font-medium mb-1.5">Team Members</label>
           <div className="max-h-48 overflow-y-auto flex flex-wrap gap-2">
             {options?.employees.map((e) => (
               <label

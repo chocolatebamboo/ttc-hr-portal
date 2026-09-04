@@ -116,7 +116,7 @@ export async function deleteDepartment(actor: CurrentEmployee, departmentId: str
     } catch (err) {
       if (isForeignKeyConstraintError(err)) {
         throw new InvalidDepartmentError(
-          `"${existing.name}" is still assigned to at least one employee, document, or announcement — ` +
+          `"${existing.name}" is still assigned to at least one team member, document, or announcement — ` +
             "reassign or remove those first, then delete it."
         );
       }

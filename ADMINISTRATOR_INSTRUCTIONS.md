@@ -3,13 +3,13 @@
 A walkthrough of everything an HR Admin or Super Admin can do in the TTC HR Portal, written
 against the app as it exists today. This is the "Administrator Instructions" the original
 project brief called for — it was deliberately written first once there was real UI to
-describe, and updated again as the Employees and Administration pages followed. See README.md's
+describe, and updated again as the Team Members and Administration pages followed. See README.md's
 "What's NOT built yet" for the couple of small, deliberate gaps that remain.
 
 Two roles can do everything in this document: **HR Admin** and **Super Admin**. The app
 doesn't currently distinguish between them anywhere in the UI or in `src/lib/authorization.ts`
 — both pass every `isAdmin()` check identically. A **Supervisor** can do a subset of this
-(reviewing and deciding for their own direct reports only); an **Employee** can do none of it.
+(reviewing and deciding for their own direct reports only); a **Team Member** can do none of it.
 Every action described below is enforced twice — once in the application code
 (`src/lib/authorization.ts`) and independently again by the database itself (Postgres
 Row-Level Security, `prisma/rls.sql`) — so there's no admin action here that depends on the UI
@@ -22,17 +22,17 @@ with the email and password Supabase Auth has on file, **or** with the "Continue
 button once Google sign-in is enabled (see README's "Getting set up" §9 — it's a one-time
 setup step in Google Cloud Console and the Supabase dashboard, not something this app can turn
 on by itself). Either way there's no separate admin login. Once signed in, the left sidebar (or
-the bottom nav on a phone) shows an extra section below the regular employee links — Employees,
+the bottom nav on a phone) shows an extra section below the regular team member links — Team Members,
 Attendance, PTO Management, Documents' Manage tab, Onboarding's Manage tab, Announcements'
 Manage tab, Reports, and Administration — that a non-admin never sees at all, not even as a
 disabled/greyed-out link.
 
 Google sign-in is invite-gated exactly the same way email/password already is — it's a second
-door into the *same* account, not a new one. Someone still has to be added on the Employees page
+door into the *same* account, not a new one. Someone still has to be added on the Team Members page
 first (which creates their invited account under their TTC email); once that exists, clicking
 "Continue with Google" with that same email signs into that same account (Supabase Auth links
 the two automatically by matching verified email — no separate approval step). Someone who
-tries Google sign-in without ever having been added as an employee gets bounced straight back
+tries Google sign-in without ever having been added as a team member gets bounced straight back
 to the login page with a clear message telling them to ask HR, never a broken or partial
 dashboard.
 
@@ -42,21 +42,21 @@ If you need to set someone's password directly instead of relying on the invite-
 the pilot account script and never routes the password through this app itself.
 
 If nobody has the Super Admin role yet (a brand new deployment, for instance), see
-`scripts/set-role.mjs` — the Employees page and the app itself have no way to create the very
+`scripts/set-role.mjs` — the Team Members page and the app itself have no way to create the very
 first Super Admin, since only a Super Admin can grant that role and nobody can change their own
 role, so this one-off script sets it directly. See the README's "Getting set up" §8 for usage.
 
 ## Attendance (`/admin/attendance`)
 
-The one place to see every active employee's timesheet status for a given week at once,
+The one place to see every active team member's timesheet status for a given week at once,
 instead of opening each supervisor's team one at a time. Use the ← / → controls to move
 between weeks, and the department dropdown to narrow the list to one department.
 
 Each row shows a name, job title, department, an **Awaiting Approval** count (days that
-employee has submitted but nobody has approved or returned yet), and a **Missing Clock-Outs**
-count (a past day where the employee clocked in but the day was never closed out — today's
+team member has submitted but nobody has approved or returned yet), and a **Missing Clock-Outs**
+count (a past day where the team member clocked in but the day was never closed out — today's
 still-open entry is deliberately not counted here, since it may still be in progress).
-Clicking a row opens that employee's own review page — the same page a supervisor uses for
+Clicking a row opens that team member's own review page — the same page a supervisor uses for
 their reports — where you can approve or return individual days, or use **Approve all
 awaiting** to clear every day still awaiting approval in the visible week in one click. Bulk
 approval only touches days actually still in the Awaiting Approval state, so it's safe to click
@@ -69,38 +69,38 @@ needs on top of it, drawing from the same underlying data and the same approve/r
 
 The org-wide equivalent of a supervisor's PTO review, in two sections:
 
-- **Pending** — every employee's still-undecided time-off request, oldest first, with
-  Approve / Deny buttons right on the page. Deny accepts an optional note that the employee
+- **Pending** — every team member's still-undecided time-off request, oldest first, with
+  Approve / Deny buttons right on the page. Deny accepts an optional note that the team member
   will see explaining why. This uses the exact same decision endpoint a supervisor uses, so
-  approving or denying here shows up for the employee identically either way.
+  approving or denying here shows up for the team member identically either way.
 - **Upcoming approved leave** — every already-approved request whose leave hasn't fully ended
   yet (in progress or starting later), soonest first, so you can see who's already scheduled to
   be out before it becomes a same-day surprise. Nothing here is actionable — it's already
   decided; it's a lookahead, not a queue.
 
-Clicking an employee's name from either section opens their own review page, same as
+Clicking a team member's name from either section opens their own review page, same as
 Attendance.
 
 ## Documents (`/documents`, Manage tab)
 
 Admins see an extra **Manage** tab on the Documents page (alongside the same "My Documents"
-tab every employee has, since admins have their own documents to read too). From Manage:
+tab every team member has, since admins have their own documents to read too). From Manage:
 
 - **Upload Document** — pick a title, category, who it's visible to (everyone, one
-  department, one specific employee, or Confidential — HR/Admin only), optionally require
+  department, one specific team member, or Confidential — HR/Admin only), optionally require
   acknowledgment, and attach the file. A Confidential document can never require
-  acknowledgment, since the employee it's about is never shown it in the first place — the
+  acknowledgment, since the team member it's about is never shown it in the first place — the
   checkbox is disabled and explained when that visibility is selected.
 - **New version** — on any active (non-archived) document, upload a replacement file without
   losing the document's history. This bumps the version number shown next to the title and
   swaps in the new file; the previous file is kept in storage, not deleted. Because every
-  employee's acknowledgment is recorded against a specific version, uploading a new version
+  team member's acknowledgment is recorded against a specific version, uploading a new version
   automatically means everyone who'd already acknowledged the old one needs to acknowledge
   again — there's no separate step to reset that, it's just a consequence of the version
   number changing. Use this for things like an annually-updated handbook, rather than
   archiving the old one and uploading a brand new document (which would lose the acknowledgment
   history and any progress tracking tied to it).
-- **Archive** — removes a document from every employee's visible list without deleting the
+- **Archive** — removes a document from every team member's visible list without deleting the
   underlying record or file, for anything that's been fully superseded and shouldn't linger
   (e.g., a document you'd otherwise have replaced with a new version, but want to retire
   outright instead). Archiving is one-way in the current UI — there's no "unarchive" button, and
@@ -113,7 +113,7 @@ tab every employee has, since admins have their own documents to read too). From
 
 ## Onboarding (`/onboarding`, Manage tab)
 
-Onboarding is a guided, one-step-at-a-time flow, not a flat checklist — an employee only ever
+Onboarding is a guided, one-step-at-a-time flow, not a flat checklist — a team member only ever
 sees one step as "what you need to do right now"; everything after it is locked until that step
 is truly done, and everything before it stays visible as a completed trail. Start a new hire's
 checklist from the Manage tab, choosing either the standard five-task starter or a named
@@ -125,31 +125,31 @@ Admin can.
 
 Every step has a type, chosen when it's added:
 
-- **Task** — a plain checkbox. Completes the instant it's checked, by the employee or by an
+- **Task** — a plain checkbox. Completes the instant it's checked, by the team member or by an
   admin on their behalf — no approval step, and the next item unlocks right away.
-- **Document** — linked to a real document from the Documents module. The employee reviews and
+- **Document** — linked to a real document from the Documents module. The team member reviews and
   acknowledges it (the same acknowledgment this app already tracks elsewhere, not a second
   honor-system checkbox), which submits the step for approval. Picking an `INDIVIDUAL`-
-  visibility document that isn't yet assigned to this employee automatically assigns it to
+  visibility document that isn't yet assigned to this team member automatically assigns it to
   them, so the step is never blocked by a visibility gap you'd otherwise have to notice and fix
   by hand. A `CONFIDENTIAL_HR` document can't be chosen at all — that tier is never visible to
   a non-admin, so it could never be completed as a step.
-- **Training** and **Meeting** — the employee marks it done, which submits it for approval.
+- **Training** and **Meeting** — the team member marks it done, which submits it for approval.
   There's no document behind these; use them for anything you or a supervisor needs to
   personally confirm happened (a course, a supervisor orientation meeting).
-- **Certification** — the employee fills out and submits TTC's real New Hire Excellence
+- **Certification** — the team member fills out and submits TTC's real New Hire Excellence
   Certification Test in full, right there on the step, and it submits for approval — see
   "Certification" below for how grading and approval actually work for this one.
 
 Document/Training/Meeting steps all route through **Awaiting Approval** before the next step
-unlocks — you (or the employee's supervisor) either **Approve** it, which completes the step
+unlocks — you (or the team member's supervisor) either **Approve** it, which completes the step
 and unlocks the next one, or **Return** it with a required reason, which sends it back to the
-employee to fix and resubmit. A checklist's completion date is set the moment every step is
+team member to fix and resubmit. A checklist's completion date is set the moment every step is
 COMPLETED, and clears again automatically if any step — including one added after the fact —
 isn't. A Certification step also sits in Awaiting Approval, but Approve is refused until its
 test has been fully graded and passed — see "Certification" below.
 
-There's no email for any of this — an employee whose step gets approved or returned, or an
+There's no email for any of this — a team member whose step gets approved or returned, or an
 admin/supervisor whose team has a step awaiting approval, sees it in-app the next time they
 visit the portal: a small dot appears on the Onboarding link (or on "More," on a phone, since
 Onboarding lives one tap deeper there), and it's called out in the Dashboard's "Needs your
@@ -172,17 +172,17 @@ the template is never referenced again afterward.
 
 ### Roster status, Internal Readiness, and Checkpoints
 
-Each employee's row in the Manage tab's roster carries one glance-able status pill so you never
+Each team member's row in the Manage tab's roster carries one glance-able status pill so you never
 have to open every row to know what's going on: **Action Needed** (something's sitting in
 Awaiting Approval), **Upcoming** (a 30/60/90-day checkpoint below is due within a week, including
-an overdue one), **Waiting on Employee** (checklist started, nothing pending your review),
+an overdue one), **Waiting on Team Member** (checklist started, nothing pending your review),
 **Not Started**, or **Completed**. It's computed fresh every time, in that priority order — a
 checklist that finished a month ago but has a 90-Day Review due this week still shows Upcoming,
 not Completed.
 
-Opening **Manage** on an employee also shows two extra panels, both seeded automatically the
-moment you start that employee's checklist and both invisible to the employee themselves — they
-never appear anywhere on the employee's own Onboarding page:
+Opening **Manage** on a team member also shows two extra panels, both seeded automatically the
+moment you start that team member's checklist and both invisible to the team member themselves — they
+never appear anywhere on the team member's own Onboarding page:
 
 - **Internal Readiness** — eight fixed, unordered tasks for the real Day-1 prep work behind the
   scenes: Background Check Completed, TTC Email Account Created, Google Drive Access Granted,
@@ -198,22 +198,22 @@ never appear anywhere on the employee's own Onboarding page:
 ### Certification
 
 A Certification step embeds TTC's real 26-question New Hire Excellence Certification Test
-directly in the employee's current step — they answer everything and submit once, the same
+directly in the team member's current step — they answer everything and submit once, the same
 single-action shape as every other step type. What happens next depends on the question:
 
 - Multiple-choice, fill-in-the-blank, and select-all-that-apply questions with a configured
   answer key are scored the instant the test is submitted.
 - Open-ended and scenario questions — and any fill-in-the-blank or "name a few things" question
   whose answer key you haven't filled in yet (see below) — need a person to read them. Open
-  **Review Test** on that employee's row (it appears once they've submitted) to grade each one
+  **Review Test** on that team member's row (it appears once they've submitted) to grade each one
   as **Meets Expectations** or **Does Not Meet**, with an optional comment; CB's own rubric is
-  shown alongside each question to keep grading consistent. You or the employee's supervisor can
+  shown alongside each question to keep grading consistent. You or the team member's supervisor can
   do this — same reviewer rule as everything else in Onboarding.
 
 The step's **Approve** button stays refused, with a plain-language reason, until every
 manual-review question on the latest attempt has been graded AND the combined score (auto-scored
 points plus graded points, out of 100) reaches the test's 85% passing threshold. If it comes up
-short once fully graded, **Return** the step like any other — the employee gets a fresh attempt,
+short once fully graded, **Return** the step like any other — the team member gets a fresh attempt,
 and every past attempt stays on record under **Review Test** so you can see the full history,
 not just the latest try.
 
@@ -236,15 +236,15 @@ answer key itself.
 ## Directory (`/directory`)
 
 Read-only for everyone, admins included: name, title, department, role, work email, and work
-phone for every active employee. Personal phone, personal email, and emergency contact
+phone for every active team member. Personal phone, personal email, and emergency contact
 information are deliberately never shown here, even to an admin — those fields exist on the
-employee's own record but the Directory's query never selects them, so there's nothing to
+team member's own record but the Directory's query never selects them, so there's nothing to
 accidentally widen later. This is the one screen in the app where "everyone can see this row"
 is intentional; what's restricted is which *columns* come back, not which rows.
 
 ## Announcements (`/announcements`, Manage tab)
 
-Post a company-wide, single-department, or single-employee announcement, with an optional
+Post a company-wide, single-department, or single-team-member announcement, with an optional
 expiration date. The Manage tab lists every post regardless of whether it's currently live —
 including ones scheduled for the future and ones already expired — along with who it targeted,
 and can delete a post outright. Unlike Documents, there's no archive concept here; a deleted
@@ -264,19 +264,19 @@ download a number that would otherwise be quietly missing hours — go clear tho
 Attendance first (or accept the gap knowingly) before running payroll off an export with that
 warning showing.
 
-## Employees (`/admin/employees`)
+## Team Members (`/admin/employees`)
 
-Every employee record — active and deactivated — with the full HR record: everything Directory
+Every team member record — active and deactivated — with the full HR record: everything Directory
 shows plus personal phone, personal email, and emergency contact, none of which Directory ever
 exposes even to an admin (see Directory above). This is the one page in the app with that full
 picture, so it's admin-only end to end.
 
-- **Add Employee** — fill in name, email, job title, role, employment status, department
+- **Add Team Member** — fill in name, email, job title, role, employment status, department
   (type an existing one or a brand new name — new departments are created automatically),
   supervisor, hire date, and optionally phone/emergency-contact details. Submitting sends a
   real Supabase invite email to the address you entered — the same mechanism
   `scripts/create-pilot-accounts.mjs` uses, just built into the app now. Nobody, including you,
-  ever sees or sets the new employee's password; they set it themselves from the invite link.
+  ever sees or sets the new team member's password; they set it themselves from the invite link.
   If the email already has an Auth account (say, someone deactivated and being re-added), the
   existing account is reused rather than a duplicate invite going out.
 - **Invite pending / Resend Invite** — anyone who hasn't yet opened their invite email and set a
@@ -288,8 +288,8 @@ picture, so it's admin-only end to end.
   setting a password or by Google sign-in with the same email), since at that point resending an
   invite isn't the right tool anymore — see the next bullet. In its place, a green "Accepted
   [date/time]" badge shows for about two weeks so you can confirm a new hire actually got in, then
-  fades away on its own so long-tenured employees don't carry it forever.
-- **Edit** — change anything about an existing employee except their login email (changing that
+  fades away on its own so long-tenured team members don't carry it forever.
+- **Edit** — change anything about an existing team member except their login email (changing that
   would also require updating their linked Supabase Auth account, which isn't wired up yet —
   ask whoever manages the Supabase project for an email change) and their active/deactivated
   state, which is the dedicated action below instead of a field in this form. An HR Admin can
@@ -304,45 +304,45 @@ picture, so it's admin-only end to end.
   admin sets it from here for now.
 - **Deactivate / Reactivate** — revokes or restores login access immediately.
   `getCurrentEmployee()` checks this on *every* request, not just at sign-in, so a deactivated
-  employee is blocked on their very next action rather than staying logged in until a session
+  team member is blocked on their very next action rather than staying logged in until a session
   naturally expires — there's no session-level caching of this status that would delay it. You
   can't deactivate your own account from here, on purpose, so an admin can never accidentally
   lock themselves out.
-- **View as** — Super Admin only. Click it on any active employee (other than yourself) to see
+- **View as** — Super Admin only. Click it on any active team member (other than yourself) to see
   the app exactly as they would: their nav, their dashboard, their real data, top to bottom.
   A persistent amber bar stays across the top of every page the whole time as a reminder, with
   an **Exit preview** button that always works no matter where you've navigated to since. It's
   strictly read-only — every button that would submit, approve, clock in/out, or grade
   something is disabled at the server level while previewing, not just hidden, so there's no
   way to accidentally take a real action "as" someone else. Since it switches your nav to that
-  employee's role, most roles can't navigate back to this Employees page themselves while
+  team member's role, most roles can't navigate back to this Team Members page themselves while
   you're previewing them — use the amber bar's Exit preview button to get back, not the
   browser's back button.
 
-Search filters by name, email, job title, department, or employee code as you type.
+Search filters by name, email, job title, department, or team member code as you type.
 
 ## Administration (`/admin/administration`)
 
 Department management — the one system-level setting this app actually needed a dedicated
-admin UI for. Departments already exist throughout the app (every employee's `department`
+admin UI for. Departments already exist throughout the app (every team member's `department`
 field, the Attendance/PTO department filters, Document/Announcement targeting); this is where
 they're managed directly instead of only ever coming into existence implicitly by typing a new
-name into the Employees form.
+name into the Team Members form.
 
 - **Add Department** — creates an empty department ahead of assigning anyone to it. You can
-  still create one the old way too (type a new name into Employees' Department field), so use
+  still create one the old way too (type a new name into Team Members' Department field), so use
   whichever order fits how you're setting things up.
-- **Rename** — every employee, document, and announcement already pointing at that department
+- **Rename** — every team member, document, and announcement already pointing at that department
   keeps pointing at the same row, so they all just show the new name — nothing else needs to
   change.
-- **Delete** — only works while the department has zero employees, and nothing else (a document
+- **Delete** — only works while the department has zero team members, and nothing else (a document
   or announcement) still targets it. If it's still in use, the button stays disabled and the
   count next to the name tells you why; reassign or remove those first from wherever they're
-  set (Employees, Documents' Manage tab, Announcements' Manage tab), then delete it.
+  set (Team Members, Documents' Manage tab, Announcements' Manage tab), then delete it.
 
 What's deliberately NOT here: an organization name, timezone, pay-period start day, or any
 other org-wide setting — the app doesn't read any of those anywhere yet, so adding fields for
 them now would just be decoration. If a real need for one shows up, it's a small addition to
 this page rather than a new one. See README.md's "What's NOT built yet" for the couple of other
-small, deliberate gaps (mainly: an employee's login email can't be changed from the Employees
+small, deliberate gaps (mainly: a team member's login email can't be changed from the Team Members
 page yet).

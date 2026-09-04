@@ -130,13 +130,13 @@ export default function ReportsView() {
 
       <form onSubmit={handleSubmit} className="bg-surface border border-border rounded-xl p-4 mb-5 flex flex-wrap items-end gap-3">
         <div>
-          <label className="block text-sm font-medium mb-1.5">Employee</label>
+          <label className="block text-sm font-medium mb-1.5">Team Member</label>
           <select
             value={employeeId}
             onChange={(ev) => handleEmployeeChange(ev.target.value)}
             className="rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent min-w-[180px]"
           >
-            <option value="">All employees</option>
+            <option value="">All team members</option>
             {employees.map((emp) => (
               <option key={emp.id} value={emp.id}>
                 {emp.name}
@@ -211,7 +211,7 @@ export default function ReportsView() {
             <table className="w-full text-sm min-w-[720px]">
               <thead>
                 <tr className="border-b border-border text-left text-xs text-muted uppercase tracking-wide">
-                  <th className="px-4 py-2.5 font-medium">Employee</th>
+                  <th className="px-4 py-2.5 font-medium">Team Member</th>
                   <th className="px-4 py-2.5 font-medium">Department</th>
                   <th className="px-4 py-2.5 font-medium text-right">Regular</th>
                   <th className="px-4 py-2.5 font-medium text-right">Vacation</th>

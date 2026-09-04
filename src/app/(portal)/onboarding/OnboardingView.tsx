@@ -681,13 +681,13 @@ function AdminOnboardingPanel({ canStart }: { canStart: boolean }) {
 
       {loadState === "error" && (
         <div className="rounded-xl border border-border bg-surface p-6 text-sm text-accent">
-          Unable to load the employee roster. Please try again.
+          Unable to load the team member roster. Please try again.
         </div>
       )}
 
       {loadState === "ready" && roster.length === 0 && (
         <div className="rounded-xl border border-border bg-surface p-6 text-sm text-muted">
-          {canStart ? "No active employees yet." : "You don't have any direct reports yet."}
+          {canStart ? "No active team members yet." : "You don't have any direct reports yet."}
         </div>
       )}
 
@@ -1438,7 +1438,7 @@ function CertificationReviewPanel({ itemId, onGraded }: { itemId: string; onGrad
   }
   if (loadState === "error") {
     return (
-      <p className="mx-4 mb-3 text-sm text-accent">Unable to load this employee&rsquo;s certification attempts.</p>
+      <p className="mx-4 mb-3 text-sm text-accent">Unable to load this team member&rsquo;s certification attempts.</p>
     );
   }
   if (attempts.length === 0) {
@@ -1786,7 +1786,7 @@ function ReadinessChecklistPanel({ employeeId }: { employeeId: string }) {
 
   return (
     <div className="rounded-xl border border-border bg-background p-4">
-      <p className="text-xs font-medium text-muted mb-2">Internal Readiness (not visible to employee)</p>
+      <p className="text-xs font-medium text-muted mb-2">Internal Readiness (not visible to team member)</p>
       <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
         {items.map((item) => {
           const busy = busyItemId === item.id;
@@ -1895,7 +1895,7 @@ function CheckpointsPanel({ employeeId }: { employeeId: string }) {
 
   return (
     <div className="rounded-xl border border-border bg-background p-4">
-      <p className="text-xs font-medium text-muted mb-2">30/60/90-Day Checkpoints (not visible to employee)</p>
+      <p className="text-xs font-medium text-muted mb-2">30/60/90-Day Checkpoints (not visible to team member)</p>
       <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
         {checkpoints.map((cp) => {
           const isOpen = openId === cp.id;

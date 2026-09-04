@@ -124,14 +124,14 @@ export async function createDocument(actor: CurrentEmployee, input: CreateDocume
     (input.visibility === "INDIVIDUAL" || input.visibility === "CONFIDENTIAL_HR") &&
     !input.assigneeEmployeeId
   ) {
-    throw new InvalidDocumentError("Choose an employee for this document.");
+    throw new InvalidDocumentError("Choose a team member for this document.");
   }
   if (input.visibility === "CONFIDENTIAL_HR" && input.requiresAcknowledgment) {
     // Confidential-tier documents are never visible to the employee they're about (see
     // rls.sql) — requiring their acknowledgment would create a checkbox that can never be
     // checked, not a stricter setting.
     throw new InvalidDocumentError(
-      "A confidential HR-only document can't require acknowledgment — the employee it's about never sees it."
+      "A confidential HR-only document can't require acknowledgment — the team member it's about never sees it."
     );
   }
 

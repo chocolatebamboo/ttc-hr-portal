@@ -10,7 +10,7 @@ type LoadState = "loading" | "ready" | "error" | "empty";
  * setting this app actually needs an admin UI for today. Departments already exist as an
  * entity referenced throughout the app (Employee.departmentId, the Attendance/PTO department
  * filters, Document/Announcement targeting); this is where they're managed directly instead
- * of only ever being created implicitly by typing a new name into the Employees form.
+ * of only ever being created implicitly by typing a new name into the Team Members form.
  *
  * Deliberately doesn't invent settings nothing else in the app reads yet (a company name, a
  * timezone, a pay-period start day) — those would be decoration with no effect until
@@ -131,9 +131,9 @@ export default function AdministrationView() {
         </button>
       </div>
       <p className="text-sm text-muted mb-4">
-        Departments used across Employees, Attendance, PTO, Documents, and Announcements.
+        Departments used across Team Members, Attendance, PTO, Documents, and Announcements.
         Renaming here updates everywhere a department is shown; deleting one only works while
-        nothing — no employee, document, or announcement — is still assigned to it.
+        nothing — no team member, document, or announcement — is still assigned to it.
       </p>
 
       {addOpen && (
@@ -191,7 +191,7 @@ export default function AdministrationView() {
       {loadState === "empty" && (
         <div className="rounded-xl border border-border bg-surface p-6 text-sm text-muted">
           No departments yet — add one above, or one will be created automatically the first
-          time it's typed into the Employees form.
+          time it's typed into the Team Members form.
         </div>
       )}
 
@@ -226,7 +226,7 @@ export default function AdministrationView() {
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate">{dept.name}</p>
                     <p className="text-xs text-muted truncate">
-                      {dept.employeeCount} {dept.employeeCount === 1 ? "employee" : "employees"}
+                      {dept.employeeCount} {dept.employeeCount === 1 ? "team member" : "team members"}
                     </p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
@@ -247,7 +247,7 @@ export default function AdministrationView() {
                       disabled={busyId === dept.id || dept.employeeCount > 0}
                       title={
                         dept.employeeCount > 0
-                          ? "Reassign every employee in this department before deleting it."
+                          ? "Reassign every team member in this department before deleting it."
                           : undefined
                       }
                       className="btn-neutral text-xs px-3 py-1.5"

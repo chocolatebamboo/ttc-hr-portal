@@ -41,7 +41,7 @@ export const SUPERVISOR_NAV: NavItem[] = [{ label: "My Team", href: "/team", ico
 // which is the "why does Announcements show up twice" bug CB flagged; removed rather than
 // re-added.
 export const ADMIN_NAV: NavItem[] = [
-  { label: "Employees", href: "/admin/employees", icon: IdCardIcon },
+  { label: "Team Members", href: "/admin/employees", icon: IdCardIcon },
   { label: "Attendance", href: "/admin/attendance", icon: ClockIcon },
   { label: "PTO Management", href: "/admin/pto", icon: CalendarIcon },
   { label: "Reports", href: "/admin/reports", icon: ChartIcon },

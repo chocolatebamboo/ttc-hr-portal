@@ -230,7 +230,7 @@ export async function resendInvite(actor: CurrentEmployee, employeeId: string) {
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const existing = await tx.employee.findUnique({ where: { id: employeeId } });
-    if (!existing) throw new InvalidEmployeeError("That employee record doesn't exist.");
+    if (!existing) throw new InvalidEmployeeError("That team member record doesn't exist.");
 
     const supabaseAdmin = createSupabaseAdminClient();
     const authUsers = await listAllAuthUsers(supabaseAdmin);
@@ -335,7 +335,7 @@ export async function createEmployee(actor: CurrentEmployee, input: CreateEmploy
     } catch (err) {
       if (isUniqueConstraintError(err)) {
         throw new InvalidEmployeeError(
-          "That email (or employee code) is already in use by another employee record."
+          "That email (or team member code) is already in use by another team member record."
         );
       }
       throw err;
@@ -386,7 +386,7 @@ export async function updateEmployee(
   if (!jobTitle) throw new InvalidEmployeeError("Job title is required.");
   if (Number.isNaN(input.hireDate.getTime())) throw new InvalidEmployeeError("Choose a valid hire date.");
   if (input.supervisorId === employeeId) {
-    throw new InvalidEmployeeError("An employee can't be their own supervisor.");
+    throw new InvalidEmployeeError("A team member can't be their own supervisor.");
   }
   const ADMIN_ROLES: Role[] = ["SUPER_ADMIN", "HR_ADMIN"];
   if (employeeId === actor.id && !ADMIN_ROLES.includes(input.role)) {
@@ -395,7 +395,7 @@ export async function updateEmployee(
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const existing = await tx.employee.findUnique({ where: { id: employeeId } });
-    if (!existing) throw new InvalidEmployeeError("That employee record doesn't exist.");
+    if (!existing) throw new InvalidEmployeeError("That team member record doesn't exist.");
 
     // Only block an actual CHANGE onto/around the Super Admin role for a non-Super-Admin actor
     // — comparing against the row's current role (not just the submitted value) means an
@@ -446,7 +446,7 @@ export async function deactivateEmployee(actor: CurrentEmployee, employeeId: str
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const existing = await tx.employee.findUnique({ where: { id: employeeId } });
-    if (!existing) throw new InvalidEmployeeError("That employee record doesn't exist.");
+    if (!existing) throw new InvalidEmployeeError("That team member record doesn't exist.");
     const updated = await tx.employee.update({
       where: { id: employeeId },
       data: { deactivatedAt: new Date() },
@@ -462,7 +462,7 @@ export async function reactivateEmployee(actor: CurrentEmployee, employeeId: str
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const existing = await tx.employee.findUnique({ where: { id: employeeId } });
-    if (!existing) throw new InvalidEmployeeError("That employee record doesn't exist.");
+    if (!existing) throw new InvalidEmployeeError("That team member record doesn't exist.");
     const updated = await tx.employee.update({
       where: { id: employeeId },
       data: { deactivatedAt: null },
@@ -485,7 +485,7 @@ export async function setEmployeeAvatar(actor: CurrentEmployee, employeeId: stri
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const existing = await tx.employee.findUnique({ where: { id: employeeId } });
-    if (!existing) throw new InvalidEmployeeError("That employee record doesn't exist.");
+    if (!existing) throw new InvalidEmployeeError("That team member record doesn't exist.");
 
     const updated = await tx.employee.update({
       where: { id: employeeId },
@@ -505,7 +505,7 @@ export async function removeEmployeeAvatar(actor: CurrentEmployee, employeeId: s
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const existing = await tx.employee.findUnique({ where: { id: employeeId } });
-    if (!existing) throw new InvalidEmployeeError("That employee record doesn't exist.");
+    if (!existing) throw new InvalidEmployeeError("That team member record doesn't exist.");
 
     const updated = await tx.employee.update({
       where: { id: employeeId },

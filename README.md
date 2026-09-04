@@ -13,8 +13,8 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
 
 - **Authentication** — Supabase Auth (managed password hashing, sessions, password reset).
   Sign in, forgot/reset password all work end-to-end.
-- **Role-aware app shell** — four roles (Super Admin, HR Admin, Supervisor, Employee),
-  desktop sidebar + mobile bottom nav, admin-only sections hidden from employees.
+- **Role-aware app shell** — four roles (Super Admin, HR Admin, Supervisor, Team Member),
+  desktop sidebar + mobile bottom nav, admin-only sections hidden from team members.
 - **Time & Attendance** — clock in and out any number of times a day (no lunch step — a break
   is just an ordinary clock-out/clock-in, same as any other gap in the day), a month-calendar
   "My Time" view (click a day to see every session logged, correct a returned one, or request
@@ -23,16 +23,16 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   (even on an already-Approved day) reopens it as In Progress until it's closed again, so a
   supervisor is never asked to approve hours that are still being added to. This is the one
   module built and intended to be *solid* before anything else — per the brief, it's what
-  employees touch every day.
+  team members touch every day.
 - **Supervisor timesheet approval** — a supervisor's "My Team" page lists their direct
   reports (queried from the actual `supervisorId` relationship, not a client-supplied list)
-  with an awaiting-approval count, drilling into a per-employee weekly timesheet with
-  Approve / Return actions. Returning requires a comment, per the brief. The employee then
+  with an awaiting-approval count, drilling into a per-team-member weekly timesheet with
+  Approve / Return actions. Returning requires a comment, per the brief. The team member then
   sees exactly why on their own timesheet (as a red dot on that day in the My Time calendar),
   and can edit and resubmit that one day — closing the loop the brief's "Employee correction
   requested" audit action implies but doesn't fully spell out.
 - **PTO request + approval** — folded into the My Time page rather than a separate Time Off
-  page, so employees have one place for their calendar and their time-off requests. The
+  page, so team members have one place for their calendar and their time-off requests. The
   calendar itself is a single continuously-scrolling list of months, modeled on the Airbnb
   host calendar CB referenced — it opens on the current month and scrolling down lazily loads
   and appends earlier months one at a time (there's nothing to click through), the same
@@ -54,26 +54,26 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   writing the exact same PtoRequest row as the calendar's own form, so the request list, its
   cancel action, and supervisor approval all just work regardless of which entry point created
   the request. Supervisors decide (Approve / Deny, with an optional note on denial) from the
-  same employee page as timesheet review — it's the same supervisor relationship, so it lives
+  same team member page as timesheet review — it's the same supervisor relationship, so it lives
   in the same place rather than a second parallel "team" screen. Denied requests show the
-  reviewer's note to the employee. No payroll math is derived from PTO, per the brief.
+  reviewer's note to the team member. No payroll math is derived from PTO, per the brief.
 - **Document Center + acknowledgments** — HR/Super Admin uploads a document (title, category,
-  and who it's visible to: everyone, one department, one employee, or confidential
-  HR/Admin-only) to private Supabase Storage; every employee sees only what RLS says they may
+  and who it's visible to: everyone, one department, one team member, or confidential
+  HR/Admin-only) to private Supabase Storage; every team member sees only what RLS says they may
   see on their own Documents page, with a "View" link that opens a short-lived signed URL
   (never a public one) and an "Acknowledge" button for documents that require it. The Manage
   tab (admins only, same page) tracks acknowledgment progress per document and can archive
   one. The acknowledgment is explicitly labeled, in the UI itself, as a read-and-confirm
   record for HR — not a legal electronic signature, per the brief.
-- **Guided onboarding** — a step-by-step flow, not a flat checklist: an employee sees exactly
+- **Guided onboarding** — a step-by-step flow, not a flat checklist: a team member sees exactly
   one step as "what you need to do right now," everything after it stays locked until that
   step is truly done (computed live from item order, never a stored flag that could drift), and
   everything before it is a completed trail. Steps are typed — Task (a plain checkbox, no
   approval), Document (acknowledges a real linked Document, reusing that module's own
   acknowledgment tracking rather than a second honor-system copy), Training, and Meeting.
   Document/Training/Meeting all route through an AWAITING_APPROVAL state that HR or the
-  employee's own supervisor must Approve (unlocks the next step) or Return (with a required
-  reason, sending it back to the employee to redo). HR starts a new hire's checklist — either
+  team member's own supervisor must Approve (unlocks the next step) or Return (with a required
+  reason, sending it back to the team member to redo). HR starts a new hire's checklist — either
   the standard five-task starter, or a named, reusable Template ("Camp Counselor," etc.) built
   from HR's own Manage Templates screen — and adds typed steps beyond those from the Manage
   tab; supervisors get the same Manage tab scoped to their own direct reports. Applying a
@@ -81,14 +81,14 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   date is the checklist's start date plus that step's configured offset); editing or deleting
   the template afterward never touches a checklist already started from it. A checklist's
   completion date is set automatically the moment every step is COMPLETED, and cleared again
-  if any step (including a newly added one) isn't. Whether an employee has an actionable or
+  if any step (including a newly added one) isn't. Whether a team member has an actionable or
   returned step, or an admin/supervisor has anything awaiting their approval, is surfaced
   in-app only (no email) as a small dot on the Onboarding nav link and an entry in the
   Dashboard's "Needs your attention" list — recomputed live on every page load, never a stored
   notification to mark read. The admin/supervisor roster also shows one glance-able status pill
-  per employee — Action Needed, Upcoming, Waiting on Employee, Not Started, or Completed — so
+  per team member — Action Needed, Upcoming, Waiting on Team Member, Not Started, or Completed — so
   reviewing who needs what never requires opening every row. Starting a checklist also seeds two
-  admin/supervisor-only panels, both explicitly invisible to the employee: an **Internal
+  admin/supervisor-only panels, both explicitly invisible to the team member: an **Internal
   Readiness** checklist (background check, TTC email/Drive access, equipment, workspace, site
   tour, welcome meeting, external payroll setup — real Day-1 human tasks the app only tracks,
   never automates) and three fixed **30/60/90-Day Checkpoints** (due date, freeform notes,
@@ -96,11 +96,11 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   performance-management system, just a lightweight, un-gated follow-up record.
 - **Certification** — a fifth step type, Certification, seeds TTC's real New Hire Excellence
   Certification Test (26 questions mirroring the source document one-for-one) in place of a
-  single click: the employee answers every question and submits once. Multiple-choice,
+  single click: the team member answers every question and submits once. Multiple-choice,
   fill-in-the-blank, and select-all questions score instantly against an answer key; open-ended
   and scenario questions (and any question whose key HR hasn't configured yet — a fill-in or
   list question with no accepted answers is a deliberate "not configured" state, not a gap)
-  route to HR or the employee's supervisor for manual grading, with CB's own rubric shown
+  route to HR or the team member's supervisor for manual grading, with CB's own rubric shown
   alongside each one. The step stays in Awaiting Approval until every manual question is graded
   and the combined score is checked against the 85% passing threshold from the source test —
   Approve is refused (with a plain-language reason) until grading is complete and the attempt
@@ -109,12 +109,12 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   itself (correct options, accepted text variants, the manual-review rubric) is admin-editable,
   from the same Manage tab's "Manage Certification Test" screen — question wording, order, and
   points mirror the real document and aren't meant to be rewritten in-app.
-- **Directory** — every active employee, to every authenticated employee: name, title,
+- **Directory** — every active team member, to every authenticated team member: name, title,
   department, role, work email, work phone — nothing more. This is the one place in the app
   where RLS's row-level grant is deliberately broader than what any single request needs; see
   "Security notes" below for why that's safe and where the real narrowing happens.
-- **My Profile** — `/profile`, every employee's self-service view of their own record: photo,
-  name/title/department/role/hire date read-only (HR-only changes, via the Employees admin
+- **My Profile** — `/profile`, every team member's self-service view of their own record: photo,
+  name/title/department/role/hire date read-only (HR-only changes, via the Team Members admin
   page), and an editable contact card (preferred name, work/personal phone, personal email,
   emergency contact). Enforced at two independent layers, same split as the rest of this app —
   the API only ever builds an update from that exact field list, and `prisma/rls.sql`'s
@@ -123,21 +123,21 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   date, etc.), so an app-layer bug couldn't turn this into "edit anything about yourself" even
   by accident.
 - **Announcements** — HR/Super Admin posts a company-wide, department, or individual
-  announcement, with an optional expiration date. Employees see only what's currently published
+  announcement, with an optional expiration date. Team Members see only what's currently published
   and targeted at them; the Manage tab shows every post (including future-dated "Scheduled" and
   past-expiration "Expired" ones) with who it targeted, and can delete one outright — unlike
   Documents, there's no archive/audit-trail concept for a post that was never a legal or HR
   record in the first place.
 - **Administration (department management)** — `/admin/administration` (HR/Super Admin only)
   manages `Department` rows directly: add one ahead of assigning anyone to it, rename one (every
-  employee/document/announcement already pointing at it just sees the new name, since nothing
+  team member/document/announcement already pointing at it just sees the new name, since nothing
   about `departmentId` changes), or delete one — refused, with a clear explanation rather than a
-  raw database error, while any employee, document, or announcement still references it. This is
+  raw database error, while any team member, document, or announcement still references it. This is
   the one system-level setting the app actually needed a dedicated UI for; see "What's NOT built
   yet" below for what's deliberately not here.
-- **Employees admin page** — `/admin/employees` (HR/Super Admin only) lists every employee,
+- **Team Members admin page** — `/admin/employees` (HR/Super Admin only) lists every team member,
   active and deactivated, with full HR record fields Directory deliberately never shows
-  (personal phone/email, emergency contact). Adding a new employee sends them a real Supabase
+  (personal phone/email, emergency contact). Adding a new team member sends them a real Supabase
   invite email — the same `inviteUserByEmail` flow `scripts/create-pilot-accounts.mjs` uses,
   now built into the app itself — and creates their Department (by name, upserted) and
   Employee row. Editing covers everything except login email (would also require updating the
@@ -152,26 +152,26 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   app-side "pending approval" state is needed — see README "Getting set up" §9 for the one-time
   Google Cloud Console + Supabase dashboard configuration this needs (not something the app can
   turn on by itself).
-- **"View as" role preview** — Super Admin only, from the Employees page: temporarily see the
-  app exactly as one specific real employee would (their nav, their dashboard, their data),
+- **"View as" role preview** — Super Admin only, from the Team Members page: temporarily see the
+  app exactly as one specific real team member would (their nav, their dashboard, their data),
   without creating a throwaway account or changing anyone's real session. Strictly read-only —
   `src/proxy.ts` refuses every non-GET/HEAD `/api/*` request while a preview is active (except
   exiting it), so nothing can be submitted, approved, or graded under a previewed identity. A
   persistent banner names who's being previewed and exits back to your own account from any
   page. See `src/lib/preview.ts` for the full design.
 - **HR-wide Attendance dashboard** — `/admin/attendance` (HR/Super Admin only) lists every
-  active employee for a selected week, not just one supervisor's team, with an
+  active team member for a selected week, not just one supervisor's team, with an
   awaiting-approval count and a missing-clock-out count per person and an optional department
   filter. No new RLS policy was needed for this — `is_admin()` already grants the
   `time_entry_select` policy full org-wide read access (`prisma/rls.sql`), so the query in
   `src/lib/attendance-admin.ts` simply doesn't filter by `employeeId` when the caller is an
-  admin. Clicking a row opens the same per-employee review page a supervisor uses.
-- **HR-wide PTO dashboard** — `/admin/pto` (HR/Super Admin only) shows every employee's
+  admin. Clicking a row opens the same per-team-member review page a supervisor uses.
+- **HR-wide PTO dashboard** — `/admin/pto` (HR/Super Admin only) shows every team member's
   still-Pending requests as an actionable queue (Approve/Deny right there, same
   `/api/pto/requests/[id]/decide` endpoint a supervisor uses — an admin identity already
-  passes `assertCanReviewTimesheet`'s admin bypass for any employee) plus every already-Approved
+  passes `assertCanReviewTimesheet`'s admin bypass for any team member) plus every already-Approved
   request starting today or later, so HR can see upcoming coverage gaps before they happen.
-- **Bulk timesheet approval** — the per-employee review page (`/team/[employeeId]`, used by
+- **Bulk timesheet approval** — the per-team-member review page (`/team/[employeeId]`, used by
   both supervisors and HR/Super Admin) now has an "Approve all awaiting" button that approves
   every day in the visible week still Awaiting Approval in one request
   (`POST /api/time/entries/bulk-approve` → `bulkApproveTimeEntries` in
@@ -184,30 +184,30 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   `storageKey` swaps to the new file. The old file is left in storage, not deleted. Because
   every acknowledgment is already keyed to `(document, employee, version)`
   (`DocumentAcknowledgment`'s unique constraint), bumping the version is by itself what makes
-  every employee's prior acknowledgment stale again — no separate "clear acknowledgments" step
+  every team member's prior acknowledgment stale again — no separate "clear acknowledgments" step
   exists or is needed.
 - **Payroll hours export** — HR/Super Admin picks a date range on the Reports page (or clicks
   "This week" / "This month" for the current calendar period in one click) and gets a preview
-  table, or downloads it straight as a CSV, of approved hours per employee: regular hours (from
+  table, or downloads it straight as a CSV, of approved hours per team member: regular hours (from
   Time & Attendance) plus vacation/sick/personal/other-leave hours (from approved PTO requests),
   and a total. Genuinely just hours — no pay rate, overtime multiplier, or tax withholding
   anywhere in this feature, per the brief's payroll-handoff boundary. Only `APPROVED` time
   entries count; if anything in the chosen period is still awaiting review, the page says so
-  before HR downloads a number that's quietly missing hours. An Employee picker on the same page
-  narrows the preview/CSV to one person (sourced from the same active-employee list the
-  Documents/Announcements assignee pickers use) or leaves it on "All employees" for the full
+  before HR downloads a number that's quietly missing hours. A Team Member picker on the same page
+  narrows the preview/CSV to one person (sourced from the same active-team-member list the
+  Documents/Announcements assignee pickers use) or leaves it on "All team members" for the full
   company view — either way the CSV filename and download stay in sync with the current pick.
 - **Clock-out reminders** — since there's no fixed schedule (everyone just clocks in/out
   whenever), a forgotten clock-out otherwise sits silently open until someone notices. Once a
-  session's been open 3+ hours, the employee gets both an in-app banner on the Home page's time
+  session's been open 3+ hours, the team member gets both an in-app banner on the Home page's time
   clock card (`src/components/TimeClockCard.tsx`, re-checks every minute so it appears on its
   own without a page reload) and an email (`src/lib/clockout-reminders.ts`, sent via Resend —
   see `.env.example`'s "Clock-out reminder emails" section for the setup that needs). It's a
   one-time nudge per open session, not a repeating one, and there's no automatic clock-out —
-  the employee still closes it themselves. The email side runs from
+  the team member still closes it themselves. The email side runs from
   `POST /api/cron/clockout-reminders`, meant to be called on a schedule (every 10-15 minutes)
   by a Render Cron Job rather than any user-facing flow — protected by a shared `CRON_SECRET`
-  instead of a signed-in session, since the caller has no employee identity of its own.
+  instead of a signed-in session, since the caller has no team member identity of its own.
 - **Data model** — the full schema for every Phase 1 module (`prisma/schema.prisma`), even
   though only Time & Attendance, PTO, Documents, Onboarding, Directory, Announcements, and the
   payroll hours export have UI/API built on top of it yet.
@@ -224,7 +224,7 @@ yet (a company name, a timezone, a pay-period start day, roles/permissions confi
 already enforced in code and RLS). If a real need for one of those shows up, it's a small
 addition to an already-built page rather than a new one.
 
-An employee's login email can't be changed from the Employees page — that would also require
+A team member's login email can't be changed from the Team Members page — that would also require
 updating their linked Supabase Auth account to match, which isn't wired up yet; see
 `scripts/set-password.mjs` and `ADMINISTRATOR_INSTRUCTIONS.md` for the closest existing
 workaround (setting a password directly), and ask whoever manages the Supabase project for an
@@ -274,7 +274,7 @@ Copy `.env.example` to `.env.local` and fill in:
   It's what lets the app upload documents and mint signed download URLs (see "Document
   storage bucket" below) — it bypasses Supabase's own access rules entirely, so the app's own
   authorization check in `src/lib/documents.ts` is the only thing standing between an
-  employee and someone else's document.
+  team member and someone else's document.
 
 ### 3b. Document storage bucket
 
@@ -283,7 +283,7 @@ In the Supabase dashboard, go to Storage and create a new bucket named exactly `
 readable by anyone who guesses or intercepts a URL, bypassing every authorization check this
 app makes. The app never talks to this bucket with a user's own session; it always goes
 through the service-role key from a server route, after `src/lib/documents.ts` has already
-confirmed (via Postgres RLS, under that specific employee's identity) that they're allowed to
+confirmed (via Postgres RLS, under that specific team member's identity) that they're allowed to
 see the document in question.
 
 ### 3c. Profile photo bucket
@@ -291,7 +291,7 @@ see the document in question.
 In the Supabase dashboard, go to Storage and create a new bucket named exactly `avatars`.
 **Check "Public bucket" this time** — the opposite choice from `documents` above. A profile
 photo isn't a confidential HR record the way a signed offer letter or W-4 is, and it needs to
-render as a plain `<img src>` in employee lists without minting a fresh signed URL for every
+render as a plain `<img src>` in team member lists without minting a fresh signed URL for every
 row on every page load. Who may SET a photo is still fully gated at the app layer (the
 `assertIsAdmin()` check in `/api/admin/employees/[id]/photo`) — this bucket only controls who
 can *read* a photo once one exists, which for a headshot on an internal HR portal is fine to
@@ -349,7 +349,7 @@ This doesn't touch anything else about the public site.
 
 Once the app is actually deployed and reachable at a real URL (not just `localhost`), edit
 `scripts/create-pilot-accounts.mjs` with the real names/emails of the pilot cohort (one
-HR/Super Admin, one Supervisor, two or three Employees reporting to that Supervisor) and run
+HR/Super Admin, one Supervisor, two or three Team Members reporting to that Supervisor) and run
 `npm run pilot:create-accounts`. It creates real Supabase Auth accounts (each person gets an
 email invite to set their own password — the script never sees or sets a real password for
 anyone) and the matching `Employee` rows, wired with the org relationships the pilot workflows
@@ -366,7 +366,7 @@ every button is.
 
 ### 8. Bootstrapping your first Super Admin
 
-The Employees admin page (see "What's built so far" below) can't create the very first Super
+The Team Members admin page (see "What's built so far" below) can't create the very first Super
 Admin — only an existing Super Admin can grant that role to someone else, and nobody can
 change their own role from that page (the self-lockout guard, working as intended). Until at
 least one Super Admin exists, that's a chicken-and-egg problem the UI can't solve on its own.
@@ -374,8 +374,8 @@ least one Super Admin exists, that's a chicken-and-egg problem the UI can't solv
 `scripts/set-role.mjs` is the one-time escape hatch: run
 `node --env-file=.env.local scripts/set-role.mjs someone@talentedteenclub.org SUPER_ADMIN` from
 a machine with the real `.env.local` (same one `create-pilot-accounts.mjs` needs) to set any
-existing employee's role directly. Once one real Super Admin account exists, everyone else's
-role can be managed from the Employees page instead.
+existing team member's role directly. Once one real Super Admin account exists, everyone else's
+role can be managed from the Team Members page instead.
 
 ### 9. Enable Google sign-in (optional)
 
@@ -406,11 +406,11 @@ and email/password keeps working exactly as before.
    Supabase-side step — this app's login page already calls
    `supabase.auth.signInWithOAuth({ provider: "google" })`, so nothing else to configure there.
 3. Test it against a real invited account: add yourself (or reuse your existing admin account)
-   on the Employees page with your real Google email if it isn't already, sign out, and click
+   on the Team Members page with your real Google email if it isn't already, sign out, and click
    "Continue with Google" on `/login` using that same email. It should land you straight on
    the dashboard — Supabase links the Google sign-in to your existing invited account
    automatically by matching the verified email, no separate step needed. Then try it with an
-   email that was never added as an employee — it should bounce back to `/login` with a clear
+   email that was never added as a team member — it should bounce back to `/login` with a clear
    "ask HR" message instead of a broken dashboard.
 
 ## Roadmap (Phase 1 build order)
@@ -422,7 +422,7 @@ starts:
 2. ~~Data model + RLS~~ ✅
 3. ~~Auth + role-aware shell~~ ✅
 4. ~~Time & Attendance~~ ✅ (clock in/out, any number of sessions a day, timesheet, audit trail)
-5. ~~Supervisor timesheet approval~~ ✅ (My Team, review + approve/return, employee correction + resubmit)
+5. ~~Supervisor timesheet approval~~ ✅ (My Team, review + approve/return, team member correction + resubmit)
 6. ~~PTO request + approval~~ ✅ (submit, cancel, supervisor approve/deny with a note)
 7. ~~Document center + acknowledgments~~ ✅ (upload, per-role visibility via RLS, view via
    signed URL, acknowledge, archive, admin progress tracking, upload a new version)
@@ -431,7 +431,7 @@ starts:
    approve-or-return, auto-tracked completion date)
 9. ~~Directory + announcements~~ ✅ (searchable company directory; HR posts company-wide,
    department, or individual announcements with an optional expiration date)
-10. ~~Payroll hours export (CSV)~~ ✅ (approved regular + PTO hours per employee for a chosen
+10. ~~Payroll hours export (CSV)~~ ✅ (approved regular + PTO hours per team member for a chosen
     date range, previewed on the Reports page and downloadable as CSV; warns if anything in the
     period is still awaiting approval)
 11. ~~Security + mobile test pass~~ ✅ (found and fixed a real pre-existing RLS bug — see
@@ -442,7 +442,7 @@ starts:
     live pass found and fixed three more real defects, including one that would have hard-broken
     every RLS policy in production. Full findings, table-by-table access matrix, and live test
     results: **`SECURITY_VERIFICATION_REPORT.md`**.
-12. Pilot accounts (1 HR/Super Admin, 1 Supervisor, 2–3 Employees) running the complete
+12. Pilot accounts (1 HR/Super Admin, 1 Supervisor, 2–3 Team Members) running the complete
     workflows from the brief — **infrastructure ready, tooling ready, not yet run.** The live
     Supabase project now exists and is fully migrated/secured (see item 11), but
     `scripts/create-pilot-accounts.mjs` needs real network access to the Supabase Auth API to
@@ -451,13 +451,13 @@ starts:
     needs a real machine and real people, not something buildable further in isolation.
 
 13. ~~HR-wide Attendance + PTO dashboards, bulk timesheet approval, document versioning~~ ✅
-    (`/admin/attendance`, `/admin/pto`, "Approve all awaiting" on the per-employee review page,
+    (`/admin/attendance`, `/admin/pto`, "Approve all awaiting" on the per-team-member review page,
     "New version" on the Documents Manage tab — see "What's built so far" above for each).
-14. ~~Employees admin page~~ ✅ (`/admin/employees` — add/edit/deactivate/reactivate, real
+14. ~~Team Members admin page~~ ✅ (`/admin/employees` — add/edit/deactivate/reactivate, real
     Supabase invite emails from the UI). This also gives item 12 above a second path that
     doesn't need `scripts/create-pilot-accounts.mjs` run from a machine with real network
     access — the deployed app itself (on Render, not this sandbox) can send the invite
-    directly, so adding the Supervisor/Employee pilot testers can happen from the Employees
+    directly, so adding the Supervisor/Team Member pilot testers can happen from the Team Members
     page instead of the script, if that's easier.
 15. ~~Administrator Instructions~~ ✅ — see **`ADMINISTRATOR_INSTRUCTIONS.md`**, written now
     that there's real UI to document against.

@@ -229,7 +229,7 @@ export async function submitCertificationAttempt(
     throw new InvalidCertificationError("This step isn't a certification test.");
   }
   if (actor.id !== employeeId) {
-    throw new ForbiddenError("Only the employee themselves can take this test.");
+    throw new ForbiddenError("Only the team member themselves can take this test.");
   }
   if (item.status === "COMPLETED") {
     throw new InvalidCertificationError("This step is already complete.");

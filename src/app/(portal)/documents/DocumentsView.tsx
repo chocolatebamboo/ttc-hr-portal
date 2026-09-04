@@ -439,7 +439,7 @@ function NewVersionForm({
   return (
     <div className="mt-3 bg-black/[0.02] rounded-lg p-3">
       <p className="text-xs text-muted mb-2">
-        Uploading a new version replaces the file employees see and requires everyone to
+        Uploading a new version replaces the file team members see and requires everyone to
         acknowledge it again, if this document requires acknowledgment. The old file stays on
         record.
       </p>
@@ -532,7 +532,7 @@ function UploadDocumentForm({ onUploaded }: { onUploaded: () => void }) {
           required
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder="e.g. 2026 Employee Handbook"
+          placeholder="e.g. 2026 Team Member Handbook"
           className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-accent"
         />
       </div>
@@ -589,14 +589,14 @@ function UploadDocumentForm({ onUploaded }: { onUploaded: () => void }) {
 
       {needsEmployee && (
         <div>
-          <label className="block text-sm font-medium mb-1.5">Employee</label>
+          <label className="block text-sm font-medium mb-1.5">Team Member</label>
           <select
             required
             value={assigneeEmployeeId}
             onChange={(e) => setAssigneeEmployeeId(e.target.value)}
             className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-accent"
           >
-            <option value="">Choose an employee…</option>
+            <option value="">Choose a team member…</option>
             {options?.employees.map((e) => (
               <option key={e.id} value={e.id}>
                 {e.name}
@@ -605,7 +605,7 @@ function UploadDocumentForm({ onUploaded }: { onUploaded: () => void }) {
           </select>
           {visibility === "CONFIDENTIAL_HR" && (
             <p className="text-xs text-muted mt-1.5">
-              This employee will never see this document — confidential means HR/Admin only, regardless
+              This team member will never see this document — confidential means HR/Admin only, regardless
               of who it&apos;s about.
             </p>
           )}
@@ -630,8 +630,8 @@ function UploadDocumentForm({ onUploaded }: { onUploaded: () => void }) {
           onChange={(e) => setRequiresAcknowledgment(e.target.checked)}
           className="h-4 w-4 accent-[var(--ttc-pink)]"
         />
-        Require employees to acknowledge they&apos;ve read this
-        {confidentialAckDisabled ? " (unavailable — confidential documents aren't shown to employees)" : ""}
+        Require team members to acknowledge they&apos;ve read this
+        {confidentialAckDisabled ? " (unavailable — confidential documents aren't shown to team members)" : ""}
       </label>
 
       {status === "error" && (

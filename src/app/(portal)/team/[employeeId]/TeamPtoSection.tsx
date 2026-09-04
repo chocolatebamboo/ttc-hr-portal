@@ -63,7 +63,7 @@ export default function TeamPtoSection({ employeeId }: { employeeId: string }) {
   if (loadState === "empty") {
     return (
       <div className="rounded-xl border border-border bg-surface p-4 text-sm text-muted">
-        No time-off requests from this employee yet.
+        No time-off requests from this team member yet.
       </div>
     );
   }
@@ -110,7 +110,7 @@ export default function TeamPtoSection({ employeeId }: { employeeId: string }) {
               <textarea
                 value={denyComment}
                 onChange={(e) => setDenyComment(e.target.value)}
-                placeholder="Optional note for the employee…"
+                placeholder="Optional note for the team member…"
                 rows={2}
                 className="flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
               />

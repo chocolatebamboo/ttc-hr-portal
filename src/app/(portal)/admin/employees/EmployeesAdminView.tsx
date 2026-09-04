@@ -16,7 +16,7 @@ const ROLE_LABEL: Record<Role, string> = {
   SUPER_ADMIN: "Super Admin",
   HR_ADMIN: "HR Admin",
   SUPERVISOR: "Supervisor",
-  EMPLOYEE: "Employee",
+  EMPLOYEE: "Team Member",
 };
 const ROLE_OPTIONS: Role[] = ["EMPLOYEE", "SUPERVISOR", "HR_ADMIN", "SUPER_ADMIN"];
 
@@ -24,7 +24,7 @@ const STATUS_LABEL: Record<EmploymentStatus, string> = {
   ACTIVE: "Active",
   ON_LEAVE: "On Leave",
   INACTIVE: "Inactive",
-  FORMER_EMPLOYEE: "Former Employee",
+  FORMER_EMPLOYEE: "Former Team Member",
 };
 const STATUS_OPTIONS: EmploymentStatus[] = ["ACTIVE", "ON_LEAVE", "INACTIVE", "FORMER_EMPLOYEE"];
 
@@ -114,7 +114,7 @@ function valuesFromRow(row: EmployeeAdminRowDTO): EmployeeFormValues {
 }
 
 /**
- * The Employees admin page — add, edit, deactivate/reactivate every employee record. Unlike
+ * The Team Members admin page — add, edit, deactivate/reactivate every employee record. Unlike
  * Directory (read-only, active employees only, six safe columns), this is the full HR record
  * for everyone including deactivated accounts, so it's admin-only end to end (page.tsx's guard,
  * every /api/admin/employees route, and prisma/rls.sql's employee_write policy all agree).
@@ -193,7 +193,7 @@ export default function EmployeesAdminView({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setFormError(data.error ?? "Unable to add this employee. Please try again.");
+        setFormError(data.error ?? "Unable to add this team member. Please try again.");
         return;
       }
       setAddOpen(false);
@@ -246,7 +246,7 @@ export default function EmployeesAdminView({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setActionError(data.error ?? "Unable to start previewing this employee.");
+        setActionError(data.error ?? "Unable to start previewing this team member.");
         setBusyId(null);
         return;
       }
@@ -305,7 +305,7 @@ export default function EmployeesAdminView({
   return (
     <div>
       <div className="flex items-center justify-between gap-3 mb-1">
-        <h1 className="page-title text-2xl">Employees</h1>
+        <h1 className="page-title text-2xl">Team Members</h1>
         <button
           onClick={() => {
             setAddOpen((o) => !o);
@@ -314,11 +314,11 @@ export default function EmployeesAdminView({
           }}
           className={addOpen ? "btn-neutral text-sm px-4 py-2 shrink-0" : "btn-primary text-sm px-4 py-2 shrink-0"}
         >
-          {addOpen ? "Cancel" : "Add Employee"}
+          {addOpen ? "Cancel" : "Add Team Member"}
         </button>
       </div>
       <p className="text-sm text-muted mb-4">
-        Every employee record, active and deactivated. Adding someone sends them a real Supabase
+        Every team member record, active and deactivated. Adding someone sends them a real Supabase
         invite email to set their own password — nobody here ever sees or sets it for them.
       </p>
 
@@ -357,7 +357,7 @@ export default function EmployeesAdminView({
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search employees…"
+            placeholder="Search team members…"
             className="w-full rounded-full border border-border bg-surface pl-10 pr-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-accent"
           />
         </div>
@@ -373,13 +373,13 @@ export default function EmployeesAdminView({
 
       {loadState === "error" && (
         <div className="rounded-xl border border-border bg-surface p-6 text-sm text-accent">
-          Unable to load employees. Please try again.
+          Unable to load team members. Please try again.
         </div>
       )}
 
       {loadState === "empty" && (
         <div className="rounded-xl border border-border bg-surface p-6 text-sm text-muted">
-          No employee records yet.
+          No team member records yet.
         </div>
       )}
 
@@ -458,7 +458,7 @@ export default function EmployeesAdminView({
                     <button
                       onClick={() => viewAs(row)}
                       disabled={busyId === row.id}
-                      title="See exactly what this employee sees — read-only, you can exit any time"
+                      title="See exactly what this team member sees — read-only, you can exit any time"
                       className="btn-neutral text-xs px-3 py-1.5"
                     >
                       View as
@@ -742,7 +742,7 @@ function EmployeeForm({
 
       <div className="flex gap-2">
         <button type="submit" disabled={busy} className="btn-primary text-sm px-5 py-2">
-          {busy ? "Saving…" : mode === "create" ? "Add Employee" : "Save Changes"}
+          {busy ? "Saving…" : mode === "create" ? "Add Team Member" : "Save Changes"}
         </button>
         <button type="button" onClick={onCancel} className="btn-neutral text-sm px-5 py-2">
           Cancel

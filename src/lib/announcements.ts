@@ -160,7 +160,7 @@ export async function createAnnouncement(actor: CurrentEmployee, input: CreateAn
     throw new InvalidAnnouncementError("Choose at least one department.");
   }
   if (input.audienceType === "EMPLOYEES" && !(input.employeeIds && input.employeeIds.length > 0)) {
-    throw new InvalidAnnouncementError("Choose at least one employee.");
+    throw new InvalidAnnouncementError("Choose at least one team member.");
   }
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, (tx) =>

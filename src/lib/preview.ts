@@ -127,7 +127,7 @@ export async function startPreview(actor: CurrentEmployee, targetEmployeeId: str
     tx.employee.findUnique({ where: { id: targetEmployeeId }, select: { id: true, deactivatedAt: true } })
   );
   if (!target || target.deactivatedAt) {
-    throw new ForbiddenError("That employee doesn't exist or is deactivated.");
+    throw new ForbiddenError("That team member doesn't exist or is deactivated.");
   }
 
   const cookieStore = await cookies();
