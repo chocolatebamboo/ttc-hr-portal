@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { MailIcon, LockIcon } from "@/components/icons";
 
 // Google's official four-color "G" mark, per Google's own branding guidelines for sign-in
 // buttons — not a decorative icon, so it's reproduced exactly rather than recolored.
@@ -103,61 +104,99 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex-1 flex items-center justify-center px-4 py-12">
-      <div className="w-full max-w-sm">
-        <div className="mb-8 text-center">
-          <Image src="/ttc-logo.png" alt="Talented Teen Club" width={64} height={64} className="mx-auto mb-4" priority />
-          <h1 className="page-title text-2xl">Staff sign in</h1>
-          <p className="text-sm text-muted mt-1">Talented Teen Club HR Portal</p>
+    <main
+      className="flex-1 flex items-center justify-center px-4 py-12 relative overflow-hidden"
+      style={{
+        // Abstract mesh gradient — CB's second-round ask, after the first (a clean diagonal)
+        // read as too flat/plain. Several overlapping radial blooms in the same pink/blue
+        // palette, each faded to transparent so they blend into each other rather than
+        // showing hard edges, over a diagonal base so there's no flat area between them. Pure
+        // CSS, no image — this app has no lifestyle photography of its own to put here.
+        background: `
+          radial-gradient(circle at 15% 15%, color-mix(in srgb, var(--ttc-pink) 90%, transparent) 0%, transparent 45%),
+          radial-gradient(circle at 85% 10%, color-mix(in srgb, var(--ttc-blue) 85%, transparent) 0%, transparent 42%),
+          radial-gradient(circle at 10% 90%, color-mix(in srgb, var(--ttc-blue-ink) 80%, transparent) 0%, transparent 48%),
+          radial-gradient(circle at 90% 85%, color-mix(in srgb, var(--ttc-pink-ink) 85%, transparent) 0%, transparent 45%),
+          radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--ttc-pink) 60%, transparent) 0%, transparent 60%),
+          linear-gradient(135deg, var(--ttc-pink-ink), var(--ttc-blue))
+        `,
+      }}
+    >
+      <div className="w-full max-w-sm relative">
+        <div className="mb-6 text-center">
+          <Image
+            src="/ttc-logo.png"
+            alt="Talented Teen Club"
+            width={60}
+            height={60}
+            className="mx-auto mb-3 rounded-full shadow-lg"
+            priority
+          />
+          <h1 className="font-serif font-bold text-2xl text-white">Staff sign in</h1>
+          <p className="text-sm text-white/80 mt-1">Talented Teen Club HR Portal</p>
         </div>
 
-        <div className="bg-surface border border-border rounded-xl p-6 shadow-sm">
+        {/* The frosted-glass card itself — this is the one place in the app that gets that
+            treatment right now (see BottomNav/TimeClockCard's doc comments on why the rest of
+            the mobile pass stayed solid-color instead). */}
+        <div className="rounded-3xl border border-white/40 bg-white/70 backdrop-blur-xl shadow-2xl p-6">
           <button
             type="button"
             onClick={handleGoogle}
             disabled={googleLoading || status === "loading"}
-            className="w-full flex items-center justify-center gap-2.5 rounded-lg border border-border bg-background py-3 text-sm font-medium hover:bg-black/[0.02] transition-colors disabled:opacity-60"
+            className="w-full flex items-center justify-center gap-2.5 rounded-full border border-white/60 bg-white/80 py-3 text-sm font-medium hover:bg-white transition-colors disabled:opacity-60"
           >
             <GoogleIcon />
             {googleLoading ? "Redirecting to Google…" : "Continue with Google"}
           </button>
 
           <div className="flex items-center gap-3 my-5">
-            <div className="h-px flex-1 bg-border" />
+            <div className="h-px flex-1 bg-black/10" />
             <span className="text-xs text-muted">or</span>
-            <div className="h-px flex-1 bg-border" />
+            <div className="h-px flex-1 bg-black/10" />
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-3.5">
             <div>
               <label htmlFor="email" className="block text-sm font-medium mb-1.5">
                 TTC email
               </label>
-              <input
-                id="email"
-                type="email"
-                required
-                autoComplete="username"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-accent"
-                placeholder="you@talentedteenclub.org"
-              />
+              <div className="relative">
+                <MailIcon className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 h-[18px] w-[18px] text-muted" />
+                <input
+                  id="email"
+                  type="email"
+                  required
+                  autoComplete="username"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full rounded-full border border-black/10 bg-white/80 pl-11 pr-4 py-3 text-base outline-none focus:ring-2 focus:ring-accent"
+                  placeholder="you@talentedteenclub.org"
+                />
+              </div>
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium mb-1.5">
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                required
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-accent"
-              />
+              <div className="flex items-center justify-between mb-1.5">
+                <label htmlFor="password" className="block text-sm font-medium">
+                  Password
+                </label>
+                <a href="/forgot-password" className="text-xs text-accent-ink font-medium hover:underline">
+                  Forgot?
+                </a>
+              </div>
+              <div className="relative">
+                <LockIcon className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 h-[18px] w-[18px] text-muted" />
+                <input
+                  id="password"
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full rounded-full border border-black/10 bg-white/80 pl-11 pr-4 py-3 text-base outline-none focus:ring-2 focus:ring-accent"
+                />
+              </div>
             </div>
 
             {status === "error" && (
@@ -173,12 +212,6 @@ export default function LoginPage() {
             >
               {status === "loading" ? "Signing in…" : "Sign in"}
             </button>
-
-            <p className="text-center text-sm">
-              <a href="/forgot-password" className="text-accent-ink font-medium hover:underline">
-                Forgot your password?
-              </a>
-            </p>
           </form>
         </div>
       </div>
