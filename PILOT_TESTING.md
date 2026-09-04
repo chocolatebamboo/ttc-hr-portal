@@ -193,9 +193,12 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
 - [ ] From Employees, add one more person (a throwaway test account you control) with **Add
       Employee** and confirm the invite email arrives — this is now the in-app alternative to
       running `scripts/create-pilot-accounts.mjs` from a terminal. Confirm their row shows an
-      "Invite pending" badge, click **Resend Invite**, and confirm a second invite email
-      arrives. Then set that account's password from the invite link and confirm both the badge
-      and the Resend Invite button are gone the next time you load Employees.
+      "Invite pending" badge with an "Invited [date/time]" line, click **Resend Invite**, confirm
+      a second invite email arrives, and confirm that "Invited" timestamp updates to the resend
+      time. Then set that account's password from the invite link and confirm the "Invite
+      pending" badge, its timestamp, and the Resend Invite button are all gone the next time you
+      load Employees — replaced by a green "Accepted [date/time]" badge, which should itself be
+      gone if you check back in a couple weeks.
 - [ ] Deactivate that throwaway account from Employees and confirm they're immediately signed
       out / blocked on their next request — then Reactivate them and confirm they're back in.
       Also confirm you can't deactivate your own account from here.

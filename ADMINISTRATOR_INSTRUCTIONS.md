@@ -280,11 +280,15 @@ picture, so it's admin-only end to end.
   If the email already has an Auth account (say, someone deactivated and being re-added), the
   existing account is reused rather than a duplicate invite going out.
 - **Invite pending / Resend Invite** — anyone who hasn't yet opened their invite email and set a
-  password shows a small "Invite pending" badge next to their name, and gets a **Resend Invite**
-  button in their row — use it if the first email bounced, landed in spam, or they lost it. The
-  badge and button both disappear on their own the moment that person actually signs in for the
-  first time (whether by setting a password or by Google sign-in with the same email), since at
-  that point resending an invite isn't the right tool anymore — see the next bullet.
+  password shows a small "Invite pending" badge next to their name, with an "Invited [date/time]"
+  line underneath tracking when that invite (or the most recent resend) actually went out. They
+  also get a **Resend Invite** button in their row — use it if the first email bounced, landed in
+  spam, or they lost it; each resend refreshes that "Invited" timestamp. The badge, timestamp, and
+  button all disappear the moment that person actually signs in for the first time (whether by
+  setting a password or by Google sign-in with the same email), since at that point resending an
+  invite isn't the right tool anymore — see the next bullet. In its place, a green "Accepted
+  [date/time]" badge shows for about two weeks so you can confirm a new hire actually got in, then
+  fades away on its own so long-tenured employees don't carry it forever.
 - **Edit** — change anything about an existing employee except their login email (changing that
   would also require updating their linked Supabase Auth account, which isn't wired up yet —
   ask whoever manages the Supabase project for an email change) and their active/deactivated

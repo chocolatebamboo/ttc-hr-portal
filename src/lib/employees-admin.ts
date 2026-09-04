@@ -38,7 +38,34 @@ type EmployeeWithRelations = {
   avatarStorageKey: string | null;
 };
 
-function toDTO(e: EmployeeWithRelations, pendingInvite: boolean): EmployeeAdminRowDTO {
+/** The three invite-lifecycle facts the Employees page tracks per person: whether they're still
+ *  pending, when the most recent invite email went out (initial send OR a later Resend Invite —
+ *  Supabase Auth doesn't keep separate history, just the latest), and when they actually
+ *  confirmed. Computed from a Supabase Auth `User` in inviteStatusFromAuthUser below, or via a
+ *  single getInviteStatus lookup when only the userId is on hand. */
+interface InviteStatus {
+  pendingInvite: boolean;
+  inviteSentAt: string | null;
+  inviteAcceptedAt: string | null;
+}
+
+const UNKNOWN_INVITE_STATUS: InviteStatus = { pendingInvite: false, inviteSentAt: null, inviteAcceptedAt: null };
+
+/** `invited_at` is what Supabase Auth's own admin API docs show getting set by
+ *  inviteUserByEmail; `confirmation_sent_at` is the fallback for the rare case a user exists
+ *  without it (e.g. never actually invited through this flow). Both update again on a Resend
+ *  Invite, since that's the same inviteUserByEmail call re-run — there's no separate "first
+ *  sent" vs "last sent" field to preserve, so this is always just the latest. */
+function inviteStatusFromAuthUser(u: User): InviteStatus {
+  const inviteAcceptedAt = u.email_confirmed_at ?? null;
+  return {
+    pendingInvite: !inviteAcceptedAt,
+    inviteSentAt: u.invited_at ?? u.confirmation_sent_at ?? null,
+    inviteAcceptedAt,
+  };
+}
+
+function toDTO(e: EmployeeWithRelations, invite: InviteStatus): EmployeeAdminRowDTO {
   return {
     id: e.id,
     avatarUrl: e.avatarStorageKey ? getAvatarPublicUrl(e.avatarStorageKey) : null,
@@ -64,7 +91,9 @@ function toDTO(e: EmployeeWithRelations, pendingInvite: boolean): EmployeeAdminR
       : null,
     deactivatedAt: e.deactivatedAt ? e.deactivatedAt.toISOString() : null,
     hireDate: e.hireDate.toISOString(),
-    pendingInvite,
+    pendingInvite: invite.pendingInvite,
+    inviteSentAt: invite.inviteSentAt,
+    inviteAcceptedAt: invite.inviteAcceptedAt,
   };
 }
 
@@ -118,14 +147,16 @@ async function listAllAuthUsers(supabaseAdmin: ReturnType<typeof createSupabaseA
 }
 
 /** Single, cheap lookup (no pagination needed — Employee.userId already IS the Supabase Auth
- *  user id) for whether one employee has confirmed their account. Used by every mutation below
- *  whose response DTO needs an accurate pendingInvite, even though the frontend always
- *  re-fetches the whole roster right after anyway (see EmployeesAdminView's load() calls) —
- *  this keeps the API response itself honest, not just what ends up on screen. */
-async function isAccountConfirmed(supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>, userId: string) {
+ *  user id) for one employee's full invite status. Used by every mutation below whose response
+ *  DTO needs to be accurate, even though the frontend always re-fetches the whole roster right
+ *  after anyway (see EmployeesAdminView's load() calls) — this keeps the API response itself
+ *  honest, not just what ends up on screen. A lookup failure fails toward UNKNOWN_INVITE_STATUS
+ *  (pendingInvite: false, no dates) rather than pending, matching the existing precedent in
+ *  listEmployeesForAdmin below of hiding Resend Invite over showing it wrongly. */
+async function getInviteStatus(supabaseAdmin: ReturnType<typeof createSupabaseAdminClient>, userId: string): Promise<InviteStatus> {
   const { data, error } = await supabaseAdmin.auth.admin.getUserById(userId);
-  if (error || !data.user) return false;
-  return !!data.user.email_confirmed_at;
+  if (error || !data.user) return UNKNOWN_INVITE_STATUS;
+  return inviteStatusFromAuthUser(data.user);
 }
 
 /** Admin roster — every employee, active AND deactivated (unlike Directory/roster.ts, which
@@ -140,24 +171,26 @@ export async function listEmployeesForAdmin(actor: CurrentEmployee): Promise<Emp
   if (!isAdmin(actor)) throw new ForbiddenError();
 
   const authUsers = await listAllAuthUsers(createSupabaseAdminClient());
-  const confirmedByEmail = new Map(authUsers.map((u) => [u.email?.toLowerCase(), !!u.email_confirmed_at]));
+  const inviteStatusByEmail = new Map(authUsers.map((u) => [u.email?.toLowerCase(), inviteStatusFromAuthUser(u)]));
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const employees = await tx.employee.findMany({
       select: RELATIONS_SELECT,
       orderBy: [{ deactivatedAt: "asc" }, { lastName: "asc" }, { firstName: "asc" }],
     });
-    // Absent from confirmedByEmail entirely (shouldn't normally happen — every Employee row is
-    // created alongside its Auth account) is treated as "not pending" rather than "pending", so
-    // a lookup hiccup fails toward hiding the Resend Invite button rather than showing it for
-    // someone who may already be signed in.
+    // Absent from inviteStatusByEmail entirely (shouldn't normally happen — every Employee row
+    // is created alongside its Auth account) falls back to UNKNOWN_INVITE_STATUS ("not
+    // pending", no dates) rather than "pending", so a lookup hiccup fails toward hiding the
+    // Resend Invite button rather than showing it for someone who may already be signed in.
     // Explicit param type: the previous line was the point-free `employees.map(toDTO)`, which
     // never needed employees' own inferred element type to check out — toDTO's declared
     // parameter type carried the checking either way. Passing a second argument here requires
     // wrapping in an arrow function, which does need employees' element type inferable; annotate
     // it directly against EmployeeWithRelations (same type toDTO already declares) instead of
     // relying on that inference.
-    return employees.map((e: EmployeeWithRelations) => toDTO(e, confirmedByEmail.get(e.ttcEmail.toLowerCase()) === false));
+    return employees.map((e: EmployeeWithRelations) =>
+      toDTO(e, inviteStatusByEmail.get(e.ttcEmail.toLowerCase()) ?? UNKNOWN_INVITE_STATUS)
+    );
   });
 }
 
@@ -298,7 +331,7 @@ export async function createEmployee(actor: CurrentEmployee, input: CreateEmploy
         },
         select: RELATIONS_SELECT,
       });
-      return toDTO(created, !user.email_confirmed_at);
+      return toDTO(created, inviteStatusFromAuthUser(user));
     } catch (err) {
       if (isUniqueConstraintError(err)) {
         throw new InvalidEmployeeError(
@@ -399,8 +432,8 @@ export async function updateEmployee(
       },
       select: RELATIONS_SELECT,
     });
-    const confirmed = await isAccountConfirmed(createSupabaseAdminClient(), updated.userId);
-    return toDTO(updated, !confirmed);
+    const invite = await getInviteStatus(createSupabaseAdminClient(), updated.userId);
+    return toDTO(updated, invite);
   });
 }
 
@@ -419,8 +452,8 @@ export async function deactivateEmployee(actor: CurrentEmployee, employeeId: str
       data: { deactivatedAt: new Date() },
       select: RELATIONS_SELECT,
     });
-    const confirmed = await isAccountConfirmed(createSupabaseAdminClient(), updated.userId);
-    return toDTO(updated, !confirmed);
+    const invite = await getInviteStatus(createSupabaseAdminClient(), updated.userId);
+    return toDTO(updated, invite);
   });
 }
 
@@ -435,8 +468,8 @@ export async function reactivateEmployee(actor: CurrentEmployee, employeeId: str
       data: { deactivatedAt: null },
       select: RELATIONS_SELECT,
     });
-    const confirmed = await isAccountConfirmed(createSupabaseAdminClient(), updated.userId);
-    return toDTO(updated, !confirmed);
+    const invite = await getInviteStatus(createSupabaseAdminClient(), updated.userId);
+    return toDTO(updated, invite);
   });
 }
 
@@ -461,8 +494,8 @@ export async function setEmployeeAvatar(actor: CurrentEmployee, employeeId: stri
     });
 
     if (existing.avatarStorageKey) await deleteAvatarFile(existing.avatarStorageKey);
-    const confirmed = await isAccountConfirmed(createSupabaseAdminClient(), updated.userId);
-    return toDTO(updated, !confirmed);
+    const invite = await getInviteStatus(createSupabaseAdminClient(), updated.userId);
+    return toDTO(updated, invite);
   });
 }
 
@@ -481,7 +514,7 @@ export async function removeEmployeeAvatar(actor: CurrentEmployee, employeeId: s
     });
 
     if (existing.avatarStorageKey) await deleteAvatarFile(existing.avatarStorageKey);
-    const confirmed = await isAccountConfirmed(createSupabaseAdminClient(), updated.userId);
-    return toDTO(updated, !confirmed);
+    const invite = await getInviteStatus(createSupabaseAdminClient(), updated.userId);
+    return toDTO(updated, invite);
   });
 }

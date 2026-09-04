@@ -96,6 +96,14 @@ export interface EmployeeAdminRowDTO {
    *  employees-admin.ts. Drives the Employees page's "Invite pending" badge and Resend Invite
    *  button. */
   pendingInvite: boolean;
+  /** When the most recent invite email went out — the original invite, or the latest Resend
+   *  Invite click, whichever was last (Supabase Auth updates the same timestamp for both). Null
+   *  only if the lookup against Supabase Auth failed (see getInviteStatus). CB: "let us know
+   *  when was the last time we sent an invite." */
+  inviteSentAt: string | null;
+  /** When this person actually confirmed their account (set a password, or signed in with
+   *  Google using the invited email). Null while pendingInvite is true. */
+  inviteAcceptedAt: string | null;
 }
 
 /** My Profile (src/app/(portal)/profile) — an employee's own view of their record. Deliberately

@@ -33,6 +33,25 @@ function todayDateKey(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+function formatInviteDate(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+// CB: once someone accepts, show it — but only for a couple weeks, so the roster's older,
+// settled employees don't all carry a permanent "Accepted <date from years ago>" line. After
+// this window the row just goes back to looking like any other active employee's.
+const ACCEPTED_BADGE_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+
+function recentlyAccepted(inviteAcceptedAt: string | null): boolean {
+  if (!inviteAcceptedAt) return false;
+  return Date.now() - new Date(inviteAcceptedAt).getTime() < ACCEPTED_BADGE_WINDOW_MS;
+}
+
 export interface EmployeeFormValues {
   firstName: string;
   lastName: string;
@@ -404,6 +423,18 @@ export default function EmployeesAdminView({
                           Invite pending
                         </span>
                       )}
+                      {/* Solid, no gradient — matches the emerald "Approved"/"Completed" pills
+                          used for PTO and onboarding elsewhere. Fades away on its own after
+                          ACCEPTED_BADGE_WINDOW_MS so long-tenured employees don't carry this
+                          forever (CB, Sept 2026: "show briefly, then fade"). */}
+                      {!row.deactivatedAt && !row.pendingInvite && recentlyAccepted(row.inviteAcceptedAt) && (
+                        <span
+                          className="ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-800"
+                          title="They've set a password and signed in."
+                        >
+                          Accepted {formatInviteDate(row.inviteAcceptedAt!)}
+                        </span>
+                      )}
                     </p>
                     <p className="text-xs text-muted truncate">
                       {row.jobTitle}
@@ -415,6 +446,11 @@ export default function EmployeesAdminView({
                       {row.ttcEmail} · {row.employeeCode}
                       {row.supervisorName ? ` · reports to ${row.supervisorName}` : ""}
                     </p>
+                    {/* CB: "let us know when was the last time we sent an invite" — its own line
+                        (not folded into the row above, which truncates) so it's never cut off. */}
+                    {!row.deactivatedAt && row.pendingInvite && row.inviteSentAt && (
+                      <p className="text-xs text-muted truncate">Invited {formatInviteDate(row.inviteSentAt)}</p>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
