@@ -118,6 +118,10 @@ export interface MyProfileDTO {
   departmentName: string | null;
   supervisorName: string | null;
   hireDate: string;
+  /** Employees who report to YOU (Employee.supervisorId = your id) — empty for anyone who
+   *  doesn't supervise others. Sidebar-only, read-only; My Profile has no path to reassign a
+   *  report's supervisor (that's the Employees admin page). */
+  directReports: { id: string; name: string; jobTitle: string }[];
 }
 
 /** The fields My Profile actually lets you change — see enforce_employee_self_update() in

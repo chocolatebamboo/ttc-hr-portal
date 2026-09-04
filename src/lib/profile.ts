@@ -36,6 +36,10 @@ const SELECT = {
   supervisor: { select: { firstName: true, lastName: true, preferredName: true } },
   hireDate: true,
   avatarStorageKey: true,
+  reports: {
+    select: { id: true, firstName: true, lastName: true, preferredName: true, jobTitle: true },
+    orderBy: { firstName: "asc" },
+  },
 } as const;
 
 type SelectedEmployee = {
@@ -58,6 +62,7 @@ type SelectedEmployee = {
   supervisor: { firstName: string; lastName: string; preferredName: string | null } | null;
   hireDate: Date;
   avatarStorageKey: string | null;
+  reports: { id: string; firstName: string; lastName: string; preferredName: string | null; jobTitle: string }[];
 };
 
 function toDTO(e: SelectedEmployee): MyProfileDTO {
@@ -83,6 +88,11 @@ function toDTO(e: SelectedEmployee): MyProfileDTO {
       ? `${e.supervisor.preferredName || e.supervisor.firstName} ${e.supervisor.lastName}`
       : null,
     hireDate: e.hireDate.toISOString(),
+    directReports: e.reports.map((r) => ({
+      id: r.id,
+      name: `${r.preferredName || r.firstName} ${r.lastName}`,
+      jobTitle: r.jobTitle,
+    })),
   };
 }
 
