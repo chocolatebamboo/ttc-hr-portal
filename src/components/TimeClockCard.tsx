@@ -28,7 +28,7 @@ const STATUS_LABEL: Record<TimeClockState, string> = {
   CLOCKED_OUT: "Clocked out",
 };
 
-export default function TimeClockCard() {
+export default function TimeClockCard({ variant = "default" }: { variant?: "default" | "hero" }) {
   const [entry, setEntry] = useState<TimeEntryDTO | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [actionState, setActionState] = useState<ActionState>("idle");
@@ -84,7 +84,9 @@ export default function TimeClockCard() {
   }
 
   if (loadState === "loading") {
-    return (
+    return variant === "hero" ? (
+      <div className="rounded-3xl p-6 h-[220px] animate-pulse bg-[color-mix(in_srgb,var(--ttc-pink)_25%,white)]" />
+    ) : (
       <div className="rounded-2xl border border-border bg-surface p-6 animate-pulse">
         <div className="h-4 w-28 bg-black/10 rounded mb-4" />
         <div className="h-12 w-full bg-black/10 rounded-xl" />
@@ -113,6 +115,74 @@ export default function TimeClockCard() {
     ? Math.floor((new Date().getTime() - new Date(openSession.clockIn).getTime()) / 60000)
     : 0;
   const showReminder = state === "CLOCKED_IN" && openSession != null && openMinutes * 60000 >= REMINDER_THRESHOLD_MS;
+
+  // Every session logged today, most recent last — so clocking in and out several times (a
+  // break, an errand, whatever) shows up as a plain running list rather than only ever
+  // showing one in/out pair. Shared between both variants; only the text color differs.
+  const sessionsList = entry && entry.sessions.length > 0 && (
+    <div className={`mt-4 space-y-1.5 ${variant === "hero" ? "text-white/80" : "text-muted"}`}>
+      {entry.sessions.map((s) => (
+        <div key={s.id} className="flex items-center justify-between text-xs">
+          <span>
+            {formatClockTime(s.clockIn)} – {s.clockOut ? formatClockTime(s.clockOut) : "now"}
+          </span>
+          {!s.clockOut && (
+            <span className={`font-medium ${variant === "hero" ? "text-white" : "text-accent-ink"}`}>
+              In progress
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+
+  if (variant === "hero") {
+    // Bold color-block treatment for the mobile Dashboard (CB's Sept 2026 aesthetic pass —
+    // the reference screenshots she shared). Solid brand gradient rather than any blur/glass:
+    // see the doc comment on BottomNav's floating pill for why glass specifically stayed out
+    // of this pass (CB rejected a frosted-glass + glow treatment on this same card before).
+    return (
+      <div
+        className="rounded-3xl p-6 text-white shadow-lg"
+        style={{ background: "linear-gradient(135deg, var(--ttc-pink-ink), var(--ttc-pink) 55%, var(--ttc-blue))" }}
+      >
+        <p className="text-xs uppercase tracking-wide text-white/70 mb-1">Today</p>
+        <p className="text-xl font-bold mb-4">{STATUS_LABEL[state]}</p>
+
+        {state !== "BEFORE_WORK" && (
+          <div className="mb-5">
+            <p className="text-xs text-white/70 mb-0.5">Hours today</p>
+            <p className="text-4xl font-bold tabular-nums leading-none">
+              {formatMinutes(entry?.totalMinutes ?? null)}
+            </p>
+          </div>
+        )}
+
+        {showReminder && (
+          <div role="status" className="mb-4 rounded-xl bg-white/15 px-4 py-3 text-sm">
+            You&apos;ve been clocked in for {formatMinutes(openMinutes)} — don&apos;t forget to clock out when
+            you&apos;re done.
+          </div>
+        )}
+
+        <button
+          onClick={() => performAction(action.endpoint)}
+          disabled={actionState === "submitting"}
+          className="inline-flex items-center justify-center w-full min-h-[56px] rounded-full bg-white text-accent-ink font-semibold text-base transition-opacity disabled:opacity-70"
+        >
+          {actionState === "submitting" ? "Updating…" : action.label}
+        </button>
+
+        {errorMessage && (
+          <p role="alert" className="mt-3 text-sm text-white">
+            {errorMessage}
+          </p>
+        )}
+
+        {sessionsList}
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-2xl border border-border bg-surface p-6 shadow-sm">
@@ -150,21 +220,7 @@ export default function TimeClockCard() {
         </p>
       )}
 
-      {/* Every session logged today, most recent last — so clocking in and out several times
-          (a break, an errand, whatever) shows up as a plain running list rather than only ever
-          showing one in/out pair. */}
-      {entry && entry.sessions.length > 0 && (
-        <div className="mt-4 space-y-1.5">
-          {entry.sessions.map((s) => (
-            <div key={s.id} className="flex items-center justify-between text-xs text-muted">
-              <span>
-                {formatClockTime(s.clockIn)} – {s.clockOut ? formatClockTime(s.clockOut) : "now"}
-              </span>
-              {!s.clockOut && <span className="text-accent-ink font-medium">In progress</span>}
-            </div>
-          ))}
-        </div>
-      )}
+      {sessionsList}
     </div>
   );
 }
