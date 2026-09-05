@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AvailabilityStatusPill from "@/components/AvailabilityStatusPill";
+import JumpToTodayButton from "@/components/JumpToTodayButton";
 import { formatSlotDate, formatTime12h } from "@/lib/availability-format";
 import { todayDateKey } from "@/lib/time";
 import { getMonth, type Month } from "@/lib/month";
@@ -91,10 +92,13 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
   // the router's) has run, so nothing scrolls out from under it again. pageshow/
   // visibilitychange separately cover the PWA-background/bfcache-reopen case, where this
   // component never remounts at all.
+  // Hoisted out of the effect below (rather than a local function inside it) so the
+  // JumpToTodayButton's onClick can reuse the exact same scroll call.
+  function scrollToCurrentMonth() {
+    currentMonthRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
+  }
+
   useLayoutEffect(() => {
-    function scrollToCurrentMonth() {
-      currentMonthRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
-    }
     scrollToCurrentMonth();
     const raf1 = requestAnimationFrame(() => {
       const raf2 = requestAnimationFrame(scrollToCurrentMonth);
@@ -173,6 +177,10 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
         })}
         <p className="text-center text-xs text-muted/60 py-2">That&apos;s as far as planning goes for now.</p>
       </div>
+
+      {/* Same "don't get lost" affordance as My Time's calendar (CB, Sept 2026) — hidden while
+          the draft/detail panel is open on a phone, since it occupies the same corner. */}
+      <JumpToTodayButton targetRef={currentMonthRef} onJump={scrollToCurrentMonth} hidden={showPanel} />
 
       {showPanel && (
         <Panel
@@ -255,17 +263,25 @@ function MonthSection({
                     e.currentTarget.scrollIntoView({ behavior: "smooth", block: "nearest" });
                   }}
                   disabled={!clickable}
+                  // Same uniform light-gray-square treatment as My Time's calendar (CB, Sept
+                  // 2026, pointing at the Airbnb host calendar again: "the rounded squares...
+                  // a light gray... the spacing" — every day the same fill, today included;
+                  // today is marked by the small solid badge on the day number below instead).
                   className={`relative h-14 sm:h-20 rounded-xl p-2 flex flex-col items-start justify-between text-left transition-colors disabled:opacity-40 scroll-mb-[calc(50vh+112px)] sm:scroll-mb-0 ${
                     isDraft
                       ? "bg-accent-ink text-white"
                       : submission
                         ? STATUS_CHIP[submission.status]
-                        : day.isToday
-                          ? "bg-accent-ink/10 hover:bg-accent-ink/15"
-                          : "bg-black/[0.035] hover:bg-black/[0.06]"
+                        : "bg-black/[0.035] hover:bg-black/[0.06]"
                   }`}
                 >
-                  <span className="text-xs tabular-nums">{dayNumber}</span>
+                  {day.isToday && !isDraft ? (
+                    <span className="flex items-center justify-center h-5 w-5 rounded-full bg-accent-ink text-xs font-semibold text-white tabular-nums">
+                      {dayNumber}
+                    </span>
+                  ) : (
+                    <span className="text-xs tabular-nums">{dayNumber}</span>
+                  )}
                   {submission && !isDraft && (
                     <span className="text-[10px] sm:text-xs font-semibold leading-tight">
                       {formatTime12h(submission.slots.find((s) => s.date === day.date)?.startTime ?? "")}

@@ -49,7 +49,11 @@ export default function TimeClockCard({ variant = "default" }: { variant?: "defa
   const [errorMessage, setErrorMessage] = useState("");
   const now = useLiveClock();
   const liveDate = now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
-  const liveTime = now.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" });
+  // CB, Sept 2026: wants this "bigger... like one of the widgets Apple has... reading
+  // cleanly" — seconds dropped from the display for that (a big number visibly ticking every
+  // second reads as noisy/busy, the opposite of a clean widget face), even though the
+  // underlying clock (useLiveClock above) still updates every second same as before.
+  const liveTime = now.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 
   async function refresh() {
     try {
@@ -166,9 +170,14 @@ export default function TimeClockCard({ variant = "default" }: { variant?: "defa
         className="rounded-3xl p-6 text-white shadow-lg"
         style={{ background: "var(--ttc-pink)" }}
       >
-        <div className="flex items-center justify-between gap-3 mb-1">
-          <p className="text-xs uppercase tracking-wide text-white/70">{liveDate}</p>
-          <p className="text-xs font-semibold text-white/90 tabular-nums">{liveTime}</p>
+        {/* CB, Sept 2026: wanted the date/time bigger, "like one of the widgets that Apple
+            has... reading cleanly" — a big bold time face with the date as a small caption
+            underneath, the way an iOS clock widget reads, rather than a thin single line of
+            small text. Sized just above "Hours today" below so the two don't compete for
+            which one is the card's headline number. */}
+        <div className="mb-4">
+          <p className="text-5xl font-bold tabular-nums leading-none tracking-tight">{liveTime}</p>
+          <p className="text-sm font-medium text-white/75 mt-1.5">{liveDate}</p>
         </div>
         <p className="text-xl font-bold mb-4">{STATUS_LABEL[state]}</p>
 
@@ -211,11 +220,10 @@ export default function TimeClockCard({ variant = "default" }: { variant?: "defa
     <div className="rounded-2xl border border-border bg-surface p-6 shadow-sm">
       <div className="flex items-center justify-between mb-5">
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <p className="text-xs uppercase tracking-wide text-muted/70">{liveDate}</p>
-            <span className="text-muted/40">·</span>
-            <p className="text-xs text-muted/70 tabular-nums">{liveTime}</p>
-          </div>
+          {/* Same bigger, cleaner widget-style time face as the mobile hero card above, scaled
+              down for this denser desktop card. */}
+          <p className="text-3xl font-bold tabular-nums leading-none tracking-tight mb-1.5">{liveTime}</p>
+          <p className="text-xs uppercase tracking-wide text-muted/60 mb-2">{liveDate}</p>
           <p className="text-lg font-semibold">{STATUS_LABEL[state]}</p>
         </div>
         {state !== "BEFORE_WORK" && (

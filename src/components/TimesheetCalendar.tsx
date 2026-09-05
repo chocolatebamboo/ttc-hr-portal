@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import StatusPill from "@/components/StatusPill";
 import PtoStatusPill from "@/components/PtoStatusPill";
+import JumpToTodayButton from "@/components/JumpToTodayButton";
 import { ChevronDownIcon } from "@/components/icons";
 import type { CorrectionControls } from "@/components/TimesheetTable";
 import {
@@ -261,10 +262,13 @@ export default function TimesheetCalendar({
   // scroll a couple of frames later, after the browser has actually painted at least once —
   // by then every effect from this commit (ours and the router's) has already run, so this is
   // reliably the last word and nothing scrolls out from under it again.
+  // Hoisted out of the effect below (rather than a local function inside it) so the
+  // JumpToTodayButton's onClick can reuse the exact same scroll call.
+  function scrollToCurrentMonth() {
+    currentMonthRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
+  }
+
   useLayoutEffect(() => {
-    function scrollToCurrentMonth() {
-      currentMonthRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
-    }
     scrollToCurrentMonth();
     const raf1 = requestAnimationFrame(() => {
       const raf2 = requestAnimationFrame(scrollToCurrentMonth);
@@ -424,6 +428,11 @@ export default function TimesheetCalendar({
           onClose={() => setSelection(null)}
         />
       )}
+
+      {/* CB (Sept 2026, pointing at the Airbnb host calendar): scrolling through months should
+          never leave you unsure how to get back. Hidden while the day panel is open on a phone
+          — it occupies the same corner (see DayPanel's own bottom-24 offset below). */}
+      <JumpToTodayButton targetRef={currentMonthRef} onJump={scrollToCurrentMonth} hidden={!!selection} />
     </div>
   );
 }
@@ -504,23 +513,29 @@ function MonthSection({
                   // CB (Sept 2026, pointing at the Airbnb host calendar): liked the overall
                   // mobile My Time view but wanted the day cells themselves to "read cleanly"
                   // more like that reference — a flat tinted fill rather than a thin bordered
-                  // box around every single day. Border removed in favor of a soft fill
-                  // (bg-black/[0.035], a shade darker on hover); today is now the same flat
-                  // treatment tinted with the accent color instead of an outline, so the grid
-                  // reads as one even surface of cells rather than a grid of outlined boxes.
+                  // box around every single day, "the rounded squares... a light gray... the
+                  // spacing" the same for every day. Border removed in favor of a soft fill
+                  // (bg-black/[0.035], a shade darker on hover), same for every cell including
+                  // today — CB was explicit that this uniform look should hold "whilst
+                  // maintaining our theme" rather than every day getting a differently-colored
+                  // fill. Today is marked instead by the small solid badge on the day number
+                  // itself below (matching the reference's own red circle on "today"), not by
+                  // singling out the whole cell.
                   className={`relative h-14 sm:h-20 rounded-xl p-2 flex flex-col items-start justify-between text-left transition-colors disabled:opacity-40 scroll-mb-[calc(50vh+112px)] sm:scroll-mb-0 ${
-                    isSelected
-                      ? "bg-accent-ink text-white"
-                      : day.isToday
-                        ? "bg-accent-ink/10 hover:bg-accent-ink/15"
-                        : "bg-black/[0.035] hover:bg-black/[0.06]"
+                    isSelected ? "bg-accent-ink text-white" : "bg-black/[0.035] hover:bg-black/[0.06]"
                   }`}
                 >
-                  <span
-                    className={`text-xs tabular-nums ${isSelected ? "text-white" : day.isFuture && !dayPto ? "text-muted/60" : ""}`}
-                  >
-                    {dayNumber}
-                  </span>
+                  {day.isToday && !isSelected ? (
+                    <span className="flex items-center justify-center h-5 w-5 rounded-full bg-accent-ink text-xs font-semibold text-white tabular-nums">
+                      {dayNumber}
+                    </span>
+                  ) : (
+                    <span
+                      className={`text-xs tabular-nums ${isSelected ? "text-white" : day.isFuture && !dayPto ? "text-muted/60" : ""}`}
+                    >
+                      {dayNumber}
+                    </span>
+                  )}
 
                   {dayPto ? (
                     <span
