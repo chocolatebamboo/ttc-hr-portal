@@ -38,7 +38,15 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname.startsWith("/login") ||
     request.nextUrl.pathname.startsWith("/forgot-password") ||
     request.nextUrl.pathname.startsWith("/reset-password") ||
-    request.nextUrl.pathname.startsWith("/api/auth");
+    request.nextUrl.pathname.startsWith("/api/auth") ||
+    // The two reminder-email cron endpoints (src/app/api/cron/*) have no signed-in employee
+    // behind them at all — they're hit by a scheduled GitHub Action, not a browser with a
+    // Supabase session cookie — so without this they were being redirected to /login before
+    // ever reaching the route handler that checks CRON_SECRET. That's a same-origin, no-op
+    // redirect either way — not a permission bypass — since each route below still requires
+    // the correct Bearer CRON_SECRET itself and returns 401 without it; this just lets that
+    // check actually run.
+    request.nextUrl.pathname.startsWith("/api/cron/");
 
   if (!user && !isPublicPath) {
     const url = request.nextUrl.clone();
