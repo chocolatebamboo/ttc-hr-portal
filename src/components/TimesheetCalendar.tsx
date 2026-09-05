@@ -126,10 +126,14 @@ interface MonthSlot {
   loadState: LoadState;
 }
 
-/** How far back the calendar will scroll before it stops offering more — 60 months (5 years)
- *  is far more history than a pilot company needs, and an outer bound keeps a very determined
+/** How far back the calendar will scroll before it stops offering more. Originally 60 months
+ *  (5 years) — CB, Sept 2026, after noticing the calendar would happily scroll all the way back
+ *  to 2024: "since we're just starting... a minimum amount of days... that is conducive to...
+ *  give people enough time." TTC's whole history on this system doesn't go back further than a
+ *  few months, so 3 months of look-back is already more than anyone has real entries for — an
+ *  outer bound still exists (rather than removing it entirely) to keep a very determined
  *  scroller from firing off requests forever. */
-const EARLIEST_OFFSET = -60;
+const EARLIEST_OFFSET = -3;
 
 /** How far ahead the calendar shows, so people can block off PTO in advance rather than only
  *  being able to see/click days in the current month (CB, Sept 2026: "probably six months
