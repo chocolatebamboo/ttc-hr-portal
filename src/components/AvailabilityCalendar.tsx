@@ -77,15 +77,31 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
     Array.from({ length: MAX_FUTURE_OFFSET + 1 }, (_, i) => getMonth(MAX_FUTURE_OFFSET - i))
   );
   const currentMonthRef = useRef<HTMLDivElement | null>(null);
+  // Tracks whichever requestAnimationFrame is pending from the scroll effect below, so its
+  // cleanup can cancel a not-yet-fired one on unmount instead of leaking it.
+  const rafRef = useRef<number | null>(null);
 
-  // Same "land on today, survive PWA background/reopen" behavior as TimesheetCalendar — see
-  // that component's own comment for why pageshow/visibilitychange (not just a mount effect)
-  // are both needed.
+  // Same "land on today" behavior as TimesheetCalendar, including the same fix for the same
+  // real bug: Next.js's own App Router scroll-restoration runs its scroll-to-top AFTER this
+  // component's own mount effect (a parent's plain useEffect can still undo a child's
+  // useLayoutEffect on the very same navigation, since passive effects across the whole tree
+  // commit after every layout effect has), so a plain mount-time scrollIntoView isn't reliably
+  // the last word. The two rAF callbacks re-assert the same scroll a couple of frames later,
+  // after the browser has actually painted — by then every effect from this commit (ours and
+  // the router's) has run, so nothing scrolls out from under it again. pageshow/
+  // visibilitychange separately cover the PWA-background/bfcache-reopen case, where this
+  // component never remounts at all.
   useLayoutEffect(() => {
     function scrollToCurrentMonth() {
       currentMonthRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
     }
     scrollToCurrentMonth();
+    const raf1 = requestAnimationFrame(() => {
+      const raf2 = requestAnimationFrame(scrollToCurrentMonth);
+      rafRef.current = raf2;
+    });
+    rafRef.current = raf1;
+
     function onPageShow() {
       scrollToCurrentMonth();
     }
@@ -95,6 +111,7 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
     window.addEventListener("pageshow", onPageShow);
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
       window.removeEventListener("pageshow", onPageShow);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };

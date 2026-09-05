@@ -216,6 +216,9 @@ export default function TimesheetCalendar({
   // The current month's own wrapper div, so the mount effect below can scroll straight to it —
   // otherwise the page would land on the topmost (furthest-future) month instead of today's.
   const currentMonthRef = useRef<HTMLDivElement | null>(null);
+  // Tracks whichever requestAnimationFrame is currently pending from the scroll effect below,
+  // so its cleanup can cancel a not-yet-fired frame on unmount rather than leaking one.
+  const rafRef = useRef<number | null>(null);
 
   async function loadMonth(offset: number) {
     const month = getMonth(offset);
@@ -246,19 +249,28 @@ export default function TimesheetCalendar({
   // before the browser paints, avoiding a visible flash of the future months first.
   //
   // CB (Sept 2026): reported landing on a future month (6 months out — exactly
-  // MAX_FUTURE_OFFSET) instead of today's. Root cause: this only ever ran once, on first mount.
-  // On a phone, "opening" My Time is very often NOT a fresh mount — backgrounding and
-  // reopening a home-screen/PWA-style tab, or the browser's own back/forward cache, both keep
-  // this component alive with whatever scroll position was last left (e.g. after browsing
-  // ahead to plan a future PTO date) instead of remounting it. Re-running the same scroll on
-  // `pageshow` (fires on a bfcache restore) and whenever the tab becomes visible again covers
-  // those cases too, so every real "look at My Time" lands back on today, matching CB's
-  // Airbnb-calendar expectation, not just the very first one.
+  // MAX_FUTURE_OFFSET) instead of today's. First fix here was pageshow/visibilitychange
+  // (below) for the PWA-background/bfcache-reopen case. CB then reported the SAME symptom on
+  // a plain, direct "open My Time" — not a reopen at all — which pageshow/visibilitychange
+  // can't explain. The real culprit: Next.js's own App Router scroll-restoration runs its
+  // scroll-to-top AFTER this component's effects (a plain useEffect somewhere up the tree,
+  // and passive effects across the whole tree commit after every layout effect has, so a
+  // parent's plain effect can still undo a child's useLayoutEffect on the very same
+  // navigation) — so the very first scrollIntoView below was correct for an instant, then got
+  // silently overridden before the user ever saw it. The two rAF callbacks re-assert the same
+  // scroll a couple of frames later, after the browser has actually painted at least once —
+  // by then every effect from this commit (ours and the router's) has already run, so this is
+  // reliably the last word and nothing scrolls out from under it again.
   useLayoutEffect(() => {
     function scrollToCurrentMonth() {
       currentMonthRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
     }
     scrollToCurrentMonth();
+    const raf1 = requestAnimationFrame(() => {
+      const raf2 = requestAnimationFrame(scrollToCurrentMonth);
+      rafRef.current = raf2;
+    });
+    rafRef.current = raf1;
 
     function onPageShow() {
       scrollToCurrentMonth();
@@ -269,6 +281,7 @@ export default function TimesheetCalendar({
     window.addEventListener("pageshow", onPageShow);
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
       window.removeEventListener("pageshow", onPageShow);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
