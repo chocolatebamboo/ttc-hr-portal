@@ -36,7 +36,7 @@ function NavLink({ item, showDot }: { item: NavItem; showDot: boolean }) {
 export default function RoleNav({ role, needsOnboardingAttention = false }: { role: Role; needsOnboardingAttention?: boolean }) {
   const { primary, extra } = navForRole(role);
   return (
-    <nav className="hidden md:flex md:w-56 md:flex-col md:shrink-0 md:border-r md:border-border md:py-6 md:px-3 md:gap-6">
+    <nav className="hidden md:flex md:w-56 md:flex-col md:shrink-0 md:overflow-y-auto md:border-r md:border-border md:py-6 md:px-3 md:gap-6">
       <div className="animate-in flex flex-col gap-0.5">
         {primary.map((item) => (
           <NavLink key={item.href} item={item} showDot={needsOnboardingAttention && item.href === "/onboarding"} />

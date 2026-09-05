@@ -29,21 +29,27 @@ export default async function PortalLayout({ children }: { children: React.React
   const { needsAttention: needsOnboardingAttention } = await getOnboardingAttention(employee);
 
   return (
-    <div className="flex-1 flex flex-col md:flex-row">
+    // md:h-screen + md:overflow-hidden turn this into a fixed-height app shell on desktop, so
+    // the two md:overflow-y-auto regions below (the nav, and the header+main column) each get
+    // their own independent scrollbar instead of the whole document scrolling as one unit —
+    // that's what keeps RoleNav on screen while a long page like Time or Availability scrolls.
+    // Deliberately md: only: on mobile the page still scrolls normally, which is what
+    // BottomNav's own `fixed` positioning (see BottomNav.tsx) is already built to sit on top of.
+    <div className="flex-1 flex flex-col md:flex-row md:h-screen md:overflow-hidden">
       {/* RoleNav resolves the nav list itself from `role` — nav items carry icon component
           references, and a Server Component can't pass functions as props into a Client
           Component (RSC serialization boundary), so the computed {primary, extra} arrays
           can't cross from here. needsOnboardingAttention is a plain boolean, so it crosses fine. */}
       <RoleNav role={employee.role} needsOnboardingAttention={needsOnboardingAttention} />
 
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 md:overflow-hidden">
         {isPreviewing && (
           <PreviewBanner
             name={employee.preferredName || `${employee.firstName} ${employee.lastName}`}
             role={employee.role}
           />
         )}
-        <header className="flex items-center justify-between border-b border-border px-4 md:px-6 py-3">
+        <header className="flex items-center justify-between border-b border-border px-4 md:px-6 py-3 md:shrink-0">
           <div className="flex items-center gap-2.5">
             <Image src="/ttc-logo.png" alt="" width={32} height={32} className="h-8 w-8 rounded-full" priority />
             <span className="font-serif font-bold text-accent hidden sm:inline">HR Portal</span>
@@ -56,7 +62,7 @@ export default async function PortalLayout({ children }: { children: React.React
           />
         </header>
 
-        <main className="flex-1 px-4 md:px-6 py-6 pb-24 md:pb-6">{children}</main>
+        <main className="flex-1 px-4 md:px-6 py-6 pb-24 md:pb-6 md:overflow-y-auto">{children}</main>
       </div>
 
       <BottomNav needsOnboardingAttention={needsOnboardingAttention} />
