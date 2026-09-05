@@ -8,6 +8,7 @@ import {
   MissingReturnCommentError,
 } from "@/lib/time-actions";
 import { InvalidPtoRequestError } from "@/lib/pto-actions";
+import { InvalidAvailabilityError } from "@/lib/availability";
 import { InvalidEmployeeError } from "@/lib/employees-admin";
 import { InvalidDepartmentError } from "@/lib/departments-admin";
 import { DocumentNotFoundError, InvalidDocumentError } from "@/lib/documents";
@@ -42,6 +43,7 @@ export function toErrorResponse(err: unknown) {
     err instanceof MissingReturnReasonError ||
     err instanceof InvalidCorrectionError ||
     err instanceof InvalidPtoRequestError ||
+    err instanceof InvalidAvailabilityError ||
     err instanceof InvalidEmployeeError ||
     err instanceof InvalidDepartmentError ||
     err instanceof InvalidDocumentError ||

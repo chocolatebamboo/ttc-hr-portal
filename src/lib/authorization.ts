@@ -91,3 +91,15 @@ export async function assertCanReviewOnboarding(
   if (actor.role !== "SUPERVISOR") throw new ForbiddenError();
   await assertCanAccessEmployeeRecords(actor, targetEmployeeId);
 }
+
+/** Same rule again, for deciding a team member's submitted weekly availability — a
+ *  supervisor's authority over their own reports' PTO/timesheets/onboarding is one
+ *  relationship, not a separate one to keep in sync per feature. */
+export async function assertCanReviewAvailability(
+  actor: CurrentEmployee,
+  targetEmployeeId: string
+): Promise<void> {
+  if (isAdmin(actor)) return;
+  if (actor.role !== "SUPERVISOR") throw new ForbiddenError();
+  await assertCanAccessEmployeeRecords(actor, targetEmployeeId);
+}

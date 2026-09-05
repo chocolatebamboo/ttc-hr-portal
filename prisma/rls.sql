@@ -286,6 +286,32 @@ create policy pto_write on "PtoRequest" for all using (
 );
 
 
+-- Same row-level shape as PtoRequest: self, admin, or that employee's own supervisor may read
+-- or write the row. Which FIELDS a given caller may actually set (an employee may edit
+-- slots/note but never status/reviewedBy*; only a supervisor/admin may decide) is enforced at
+-- the app layer (src/lib/availability.ts's separate submitAvailability/decideAvailability
+-- functions), the same division PtoRequest itself relies on — RLS is row-level, not
+-- column-level, here too.
+alter table "EmployeeAvailability" enable row level security;
+alter table "EmployeeAvailability" force row level security;
+
+drop policy if exists availability_select on "EmployeeAvailability";
+create policy availability_select on "EmployeeAvailability" for select using (
+  is_admin()
+  or "employeeId" = current_employee_id()
+  or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+);
+
+drop policy if exists availability_write on "EmployeeAvailability";
+create policy availability_write on "EmployeeAvailability" for all using (
+  "employeeId" = current_employee_id() or is_admin()
+  or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+) with check (
+  "employeeId" = current_employee_id() or is_admin()
+  or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+);
+
+
 alter table "Document" enable row level security;
 alter table "Document" force row level security;
 

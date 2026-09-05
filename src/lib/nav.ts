@@ -23,6 +23,7 @@ export interface NavItem {
 export const EMPLOYEE_NAV: NavItem[] = [
   { label: "Home", href: "/dashboard", icon: HomeIcon },
   { label: "My Time", href: "/time", icon: ClockIcon },
+  { label: "Availability", href: "/availability", icon: CalendarIcon },
   { label: "Documents", href: "/documents", icon: FolderIcon },
   { label: "Onboarding", href: "/onboarding", icon: ChecklistIcon },
   { label: "Directory", href: "/directory", icon: UsersIcon },
@@ -44,6 +45,7 @@ export const ADMIN_NAV: NavItem[] = [
   { label: "Team Members", href: "/admin/employees", icon: IdCardIcon },
   { label: "Attendance", href: "/admin/attendance", icon: ClockIcon },
   { label: "PTO Management", href: "/admin/pto", icon: CalendarIcon },
+  { label: "Availability", href: "/admin/availability", icon: CalendarIcon },
   { label: "Reports", href: "/admin/reports", icon: ChartIcon },
   { label: "Administration", href: "/admin/administration", icon: GearIcon },
 ];

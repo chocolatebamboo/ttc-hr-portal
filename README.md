@@ -57,6 +57,15 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   same team member page as timesheet review — it's the same supervisor relationship, so it lives
   in the same place rather than a second parallel "team" screen. Denied requests show the
   reviewer's note to the team member. No payroll math is derived from PTO, per the brief.
+- **Availability** (`/availability`) — a team member's standing WEEKLY pattern (which days,
+  roughly what hours, they're generally free), submitted once and edited whenever it changes
+  rather than resubmitted every week (CB, Sept 2026: "so that we don't have to manually keep
+  on asking them what's their availability"). A supervisor or HR/Super Admin approves or
+  denies it from the same per-team-member page PTO/timesheet review already lives on
+  (`TeamAvailabilitySection`), or org-wide from Administration's Availability page. Editing an
+  already-approved pattern resets it to Pending — a supervisor never ends up approving a
+  version of the week they never actually saw. Purely informational for now: nothing enforces
+  it against anything, since there's no shift-scheduling feature yet to enforce it against.
 - **Document Center + acknowledgments** — HR/Super Admin uploads a document (title, category,
   and who it's visible to: everyone, one department, one team member, or confidential
   HR/Admin-only) to private Supabase Storage; every team member sees only what RLS says they may

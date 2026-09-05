@@ -191,6 +191,39 @@ export interface AdminPtoSummaryDTO {
   upcoming: AdminPtoRequestDTO[];
 }
 
+export type AvailabilityStatus = "PENDING" | "APPROVED" | "DENIED";
+
+/** One day's recurring weekly window — "available roughly this time, this day of the week,"
+ *  not a specific date. dayOfWeek is 0 (Sunday) through 6 (Saturday), matching Date.getDay()
+ *  and this app's existing WEEKDAY_LABELS convention (src/components/TimesheetCalendar.tsx).
+ *  A day with no slot in the array means "not available" that day. */
+export interface AvailabilitySlot {
+  dayOfWeek: 0 | 1 | 2 | 3 | 4 | 5 | 6;
+  startTime: string; // "HH:MM", 24-hour
+  endTime: string; // "HH:MM", 24-hour, after startTime
+}
+
+/** A team member's standing weekly availability — one per employee (see EmployeeAvailability
+ *  in prisma/schema.prisma). null everywhere except status/slots means nobody's submitted one
+ *  yet; the API returns a full object with an empty slots array and status "PENDING" is never
+ *  used for "no submission" — see AvailabilityDTO.exists below instead. */
+export interface AvailabilityDTO {
+  exists: boolean;
+  slots: AvailabilitySlot[];
+  note: string | null;
+  status: AvailabilityStatus;
+  submittedAt: string | null;
+  reviewComment: string | null;
+  reviewedAt: string | null;
+}
+
+/** Same shape as AvailabilityDTO plus who it belongs to — for the supervisor/HR-wide
+ *  availability views (TeamAvailabilitySection, AvailabilityAdminView). */
+export interface AdminAvailabilityDTO extends AvailabilityDTO {
+  employeeId: string;
+  employeeName: string;
+}
+
 export type DocumentCategory =
   | "EMPLOYEE_HANDBOOK"
   | "HR_POLICY"

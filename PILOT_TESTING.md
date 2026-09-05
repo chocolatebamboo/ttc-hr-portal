@@ -101,6 +101,10 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
       cancel works before a supervisor acts on it — try this once from the request list and
       once from clicking that day on the My Time calendar, since both lead to the same cancel
       action.
+- [ ] Open Availability — mark yourself available a few days a week with start/end times, add
+      an optional note, and submit. Confirm it shows "Pending approval" until your supervisor
+      or HR decides it (below), then edit it again and confirm it goes back to Pending — a
+      changed pattern needs a fresh sign-off, not the old one carrying over.
 - [ ] Open My Profile — upload a photo, edit your personal phone/email and emergency contact,
       and Save; reload the page and confirm everything you entered is still there. Confirm
       name/title/department/role/hire date are shown but NOT editable (ask HR to change one of
@@ -130,6 +134,8 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
 - [ ] Review and Approve at least one report's timesheet entry.
 - [ ] Review and Return at least one report's timesheet entry with a comment (coordinate with
       that team member so they know to check for it and correct/resubmit).
+- [ ] From that same report's page, Approve their submitted Availability (or Deny one with a
+      comment for a different report) — confirm the team member sees the updated status.
 - [ ] Approve one PTO request and Deny a different one with a comment; confirm both requesters
       can see the outcome and your comment — including on My Time itself, where that day's
       calendar marker should update to match (green for Approved, red for Denied).
@@ -220,6 +226,9 @@ will need to coordinate timing loosely (e.g., "I submitted my hours, go ahead an
 - [ ] On a supervisor's per-team-member review page (My Team → a team member, or via Attendance),
       submit enough of that team member's days to have more than one Awaiting Approval at once,
       then use "Approve all awaiting" and confirm every one of them updates.
+- [ ] Open Availability (Administration section) — confirm it lists every pilot team member
+      who's submitted a pattern, org-wide, and that approving or denying one there shows up for
+      that team member identically to a supervisor deciding it from their own team page.
 - [ ] On the Documents Manage tab, upload a new version of a document that requires
       acknowledgment; confirm a team member who already acknowledged the old version is asked to
       acknowledge again, and that the version number shown ticks up.

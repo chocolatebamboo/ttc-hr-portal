@@ -97,6 +97,8 @@ model Employee {
   documentAssignments  DocumentAssignment[]
   acknowledgments      DocumentAcknowledgment[]
   onboarding           EmployeeOnboarding?
+  availability         EmployeeAvailability?   @relation("AvailabilitySubject")
+  availabilityReviewed EmployeeAvailability[]  @relation("AvailabilityReviewer")
   onboardingReadinessItems OnboardingReadinessItem[]
   onboardingCheckpoints    OnboardingCheckpoint[]
   certificationAttempts    CertificationAttempt[]
@@ -249,6 +251,46 @@ model PtoRequest {
   updatedAt DateTime @updatedAt
 
   @@index([employeeId])
+  @@index([status])
+}
+
+enum AvailabilityStatus {
+  PENDING
+  APPROVED
+  DENIED
+}
+
+// A team member's standing WEEKLY availability pattern — not a specific week's schedule, and
+// not enforced against anything yet (no shift-scheduling feature exists in this app). Purely
+// so a supervisor/HR can see who's generally free when instead of asking individually every
+// time (CB, Sept 2026: "so that we don't have to manually keep on asking them what's their
+// availability"). One row per employee (upsert, never multiple rows) — editing an
+// already-approved pattern resets it to PENDING rather than creating a second row, so there's
+// always exactly one current state per person, same as the day it was first submitted.
+model EmployeeAvailability {
+  id         String   @id @default(uuid())
+  employeeId String   @unique
+  employee   Employee @relation("AvailabilitySubject", fields: [employeeId], references: [id])
+
+  // Recurring weekly pattern, not date-specific: an array of {dayOfWeek: 0-6 (Sun-Sat),
+  // startTime: "09:00", endTime: "17:00"} slots. A day absent from this array means "not
+  // available" that day. JSON rather than a child table — always read/written as one whole
+  // unit (the employee's own form submits the entire week at once), never queried slot by
+  // slot, and the shape is simple enough not to need real relational structure.
+  slots Json
+
+  note String? // optional note from the team member submitting/updating
+
+  status        AvailabilityStatus @default(PENDING)
+  submittedAt   DateTime           @default(now())
+  reviewedById  String?
+  reviewedBy    Employee?          @relation("AvailabilityReviewer", fields: [reviewedById], references: [id])
+  reviewedAt    DateTime?
+  reviewComment String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([status])
 }
 

@@ -5,6 +5,7 @@ import { canAccessEmployeeRecords } from "@/lib/authorization";
 import { withRlsContext } from "@/lib/db";
 import ReviewTimesheetView from "./ReviewTimesheetView";
 import TeamPtoSection from "./TeamPtoSection";
+import TeamAvailabilitySection from "./TeamAvailabilitySection";
 
 export default async function ReviewEmployeePage(
   props: PageProps<"/team/[employeeId]">
@@ -43,6 +44,9 @@ export default async function ReviewEmployeePage(
 
       <h2 className="text-sm font-medium text-muted mb-2 mt-8">Time Off</h2>
       <TeamPtoSection employeeId={target.id} />
+
+      <h2 className="text-sm font-medium text-muted mb-2 mt-8">Availability</h2>
+      <TeamAvailabilitySection employeeId={target.id} />
     </div>
   );
 }
