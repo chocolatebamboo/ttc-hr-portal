@@ -287,23 +287,26 @@ create policy pto_write on "PtoRequest" for all using (
 
 
 -- Same row-level shape as PtoRequest: self, admin, or that employee's own supervisor may read
--- or write the row. Which FIELDS a given caller may actually set (an employee may edit
--- slots/note but never status/reviewedBy*; only a supervisor/admin may decide) is enforced at
--- the app layer (src/lib/availability.ts's separate submitAvailability/decideAvailability
--- functions), the same division PtoRequest itself relies on — RLS is row-level, not
--- column-level, here too.
-alter table "EmployeeAvailability" enable row level security;
-alter table "EmployeeAvailability" force row level security;
+-- or write the row. Which FIELDS a given caller may actually set (an employee may create a
+-- submission with slots/note but never set status/reviewedBy*; only a supervisor/admin may
+-- decide) is enforced at the app layer (src/lib/availability.ts's separate
+-- submitAvailability/decideAvailability functions), the same division PtoRequest itself relies
+-- on — RLS is row-level, not column-level, here too. Table renamed from EmployeeAvailability
+-- to AvailabilitySubmission (prisma/migrations/20260905_rework_availability_to_submissions) —
+-- one row per employee is no longer true, so policies just needed the new table name, the
+-- actual rules are unchanged.
+alter table "AvailabilitySubmission" enable row level security;
+alter table "AvailabilitySubmission" force row level security;
 
-drop policy if exists availability_select on "EmployeeAvailability";
-create policy availability_select on "EmployeeAvailability" for select using (
+drop policy if exists availability_select on "AvailabilitySubmission";
+create policy availability_select on "AvailabilitySubmission" for select using (
   is_admin()
   or "employeeId" = current_employee_id()
   or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
 );
 
-drop policy if exists availability_write on "EmployeeAvailability";
-create policy availability_write on "EmployeeAvailability" for all using (
+drop policy if exists availability_write on "AvailabilitySubmission";
+create policy availability_write on "AvailabilitySubmission" for all using (
   "employeeId" = current_employee_id() or is_admin()
   or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
 ) with check (

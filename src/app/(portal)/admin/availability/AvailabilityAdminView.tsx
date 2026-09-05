@@ -9,14 +9,17 @@ import type { AdminAvailabilityDTO } from "@/types";
 type LoadState = "loading" | "ready" | "error";
 
 /**
- * HR-wide availability roster — every team member who's submitted a weekly pattern, org-wide,
- * not just one supervisor's team (same relationship PtoAdminView has to TeamPtoSection).
- * Deciding here reuses /api/availability/[employeeId]/decide, the same endpoint a supervisor
- * uses on TeamAvailabilitySection — an HR/Super Admin passes assertCanReviewAvailability's
- * admin bypass for any employee.
+ * HR-wide availability roster — every submitted-availability record, org-wide, not just one
+ * supervisor's team (same relationship PtoAdminView has to TeamPtoSection). One row per
+ * submission now, not per employee — the same person can appear more than once across Pending
+ * and Decided as they submit new dates over time. Deciding here reuses
+ * /api/availability/[submissionId]/decide, the same endpoint a supervisor uses on
+ * TeamAvailabilitySection — an HR/Super Admin passes assertCanReviewAvailability's admin
+ * bypass for any employee.
  */
 export default function AvailabilityAdminView() {
-  const [rows, setRows] = useState<AdminAvailabilityDTO[]>([]);
+  const [pending, setPending] = useState<AdminAvailabilityDTO[]>([]);
+  const [decided, setDecided] = useState<AdminAvailabilityDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [denyingId, setDenyingId] = useState<string | null>(null);
@@ -27,8 +30,9 @@ export default function AvailabilityAdminView() {
     try {
       const res = await fetch("/api/admin/availability");
       if (!res.ok) throw new Error();
-      const data = await res.json();
-      setRows(data.availability);
+      const data: { pending: AdminAvailabilityDTO[]; decided: AdminAvailabilityDTO[] } = await res.json();
+      setPending(data.pending);
+      setDecided(data.decided);
       setLoadState("ready");
     } catch {
       setLoadState("error");
@@ -40,10 +44,10 @@ export default function AvailabilityAdminView() {
     load();
   }, []);
 
-  async function decide(employeeId: string, decision: "APPROVED" | "DENIED", comment?: string) {
-    setBusyId(employeeId);
+  async function decide(submissionId: string, decision: "APPROVED" | "DENIED", comment?: string) {
+    setBusyId(submissionId);
     try {
-      await fetch(`/api/availability/${employeeId}/decide`, {
+      await fetch(`/api/availability/${submissionId}/decide`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ decision, comment }),
@@ -56,16 +60,12 @@ export default function AvailabilityAdminView() {
     }
   }
 
-  const pending = rows.filter((r) => r.status === "PENDING");
-  const decided = rows.filter((r) => r.status !== "PENDING");
-
   return (
     <div className="max-w-3xl">
       <h1 className="page-title text-2xl mb-1">Availability</h1>
       <p className="text-sm text-muted mb-4">
-        Every team member&apos;s submitted weekly availability, org-wide — not just one
-        supervisor&apos;s team. Purely informational: nothing here is enforced against
-        scheduling.
+        Every team member&apos;s submitted availability, org-wide — not just one supervisor&apos;s
+        team. Purely informational: nothing here is enforced against scheduling.
       </p>
 
       {loadState === "loading" && (
@@ -96,12 +96,12 @@ export default function AvailabilityAdminView() {
               <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
                 {pending.map((r) => (
                   <Row
-                    key={r.employeeId}
+                    key={r.id}
                     row={r}
-                    busy={busyId === r.employeeId}
-                    denying={denyingId === r.employeeId}
+                    busy={busyId === r.id}
+                    denying={denyingId === r.id}
                     denyComment={denyComment}
-                    onDenyToggle={() => setDenyingId(denyingId === r.employeeId ? null : r.employeeId)}
+                    onDenyToggle={() => setDenyingId(denyingId === r.id ? null : r.id)}
                     onDenyCommentChange={setDenyComment}
                     onDecide={decide}
                   />
@@ -121,7 +121,7 @@ export default function AvailabilityAdminView() {
             ) : (
               <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
                 {decided.map((r) => (
-                  <div key={r.employeeId} className="px-4 py-3.5">
+                  <div key={r.id} className="px-4 py-3.5">
                     <div className="flex items-center justify-between gap-3">
                       <p className="text-sm font-medium">
                         <Link href={`/team/${r.employeeId}`} className="hover:underline">
@@ -130,7 +130,7 @@ export default function AvailabilityAdminView() {
                       </p>
                       <AvailabilityStatusPill status={r.status} />
                     </div>
-                    <p className="text-xs text-muted mt-0.5">{describeSlots(r.slots).join(" · ") || "No days marked available."}</p>
+                    <p className="text-xs text-muted mt-0.5">{describeSlots(r.slots).join(" · ") || "No dates marked available."}</p>
                   </div>
                 ))}
               </div>
@@ -157,7 +157,7 @@ function Row({
   denyComment: string;
   onDenyToggle: () => void;
   onDenyCommentChange: (v: string) => void;
-  onDecide: (employeeId: string, decision: "APPROVED" | "DENIED", comment?: string) => void;
+  onDecide: (submissionId: string, decision: "APPROVED" | "DENIED", comment?: string) => void;
 }) {
   const lines = describeSlots(r.slots);
   return (
@@ -169,11 +169,11 @@ function Row({
               {r.employeeName}
             </Link>
           </p>
-          <p className="text-xs text-muted">{lines.join(" · ") || "No days marked available."}</p>
+          <p className="text-xs text-muted">{lines.join(" · ") || "No dates marked available."}</p>
           {r.note && <p className="text-xs text-muted mt-0.5">&ldquo;{r.note}&rdquo;</p>}
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <button onClick={() => onDecide(r.employeeId, "APPROVED")} disabled={busy} className="btn-primary text-xs px-3 py-1.5">
+          <button onClick={() => onDecide(r.id, "APPROVED")} disabled={busy} className="btn-primary text-xs px-3 py-1.5">
             Approve
           </button>
           <button onClick={onDenyToggle} disabled={busy} className="btn-neutral text-xs px-3 py-1.5">
@@ -192,7 +192,7 @@ function Row({
             className="flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
           />
           <button
-            onClick={() => onDecide(r.employeeId, "DENIED", denyComment.trim() || undefined)}
+            onClick={() => onDecide(r.id, "DENIED", denyComment.trim() || undefined)}
             disabled={busy}
             className="btn-primary text-xs px-3 py-1.5 self-start"
           >

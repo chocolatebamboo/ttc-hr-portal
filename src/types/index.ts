@@ -193,26 +193,26 @@ export interface AdminPtoSummaryDTO {
 
 export type AvailabilityStatus = "PENDING" | "APPROVED" | "DENIED";
 
-/** One day's recurring weekly window — "available roughly this time, this day of the week,"
- *  not a specific date. dayOfWeek is 0 (Sunday) through 6 (Saturday), matching Date.getDay()
- *  and this app's existing WEEKDAY_LABELS convention (src/components/TimesheetCalendar.tsx).
- *  A day with no slot in the array means "not available" that day. */
+/** One specific calendar date a team member marked themselves available, with a start/end
+ *  time for that day — tapped directly on the Availability calendar, same "HH:MM" 24-hour
+ *  convention PTO/timesheet fields already use. Not a recurring weekday pattern: every entry
+ *  is a real date, and a single submission can bundle several (not necessarily consecutive)
+ *  dates at once. */
 export interface AvailabilitySlot {
-  dayOfWeek: 0 | 1 | 2 | 3 | 4 | 5 | 6;
+  date: string; // "YYYY-MM-DD"
   startTime: string; // "HH:MM", 24-hour
   endTime: string; // "HH:MM", 24-hour, after startTime
 }
 
-/** A team member's standing weekly availability — one per employee (see EmployeeAvailability
- *  in prisma/schema.prisma). null everywhere except status/slots means nobody's submitted one
- *  yet; the API returns a full object with an empty slots array and status "PENDING" is never
- *  used for "no submission" — see AvailabilityDTO.exists below instead. */
+/** One submitted-availability record (see AvailabilitySubmission in prisma/schema.prisma) —
+ *  a team member can have many of these over time, same as PtoRequestDTO; approving or
+ *  denying one never overwrites another, so the full list is a real history. */
 export interface AvailabilityDTO {
-  exists: boolean;
+  id: string;
   slots: AvailabilitySlot[];
   note: string | null;
   status: AvailabilityStatus;
-  submittedAt: string | null;
+  submittedAt: string;
   reviewComment: string | null;
   reviewedAt: string | null;
 }

@@ -97,8 +97,8 @@ model Employee {
   documentAssignments  DocumentAssignment[]
   acknowledgments      DocumentAcknowledgment[]
   onboarding           EmployeeOnboarding?
-  availability         EmployeeAvailability?   @relation("AvailabilitySubject")
-  availabilityReviewed EmployeeAvailability[]  @relation("AvailabilityReviewer")
+  availabilitySubmissions AvailabilitySubmission[] @relation("AvailabilitySubject")
+  availabilityReviewed    AvailabilitySubmission[] @relation("AvailabilityReviewer")
   onboardingReadinessItems OnboardingReadinessItem[]
   onboardingCheckpoints    OnboardingCheckpoint[]
   certificationAttempts    CertificationAttempt[]
@@ -260,26 +260,26 @@ enum AvailabilityStatus {
   DENIED
 }
 
-// A team member's standing WEEKLY availability pattern — not a specific week's schedule, and
-// not enforced against anything yet (no shift-scheduling feature exists in this app). Purely
-// so a supervisor/HR can see who's generally free when instead of asking individually every
-// time (CB, Sept 2026: "so that we don't have to manually keep on asking them what's their
-// availability"). One row per employee (upsert, never multiple rows) — editing an
-// already-approved pattern resets it to PENDING rather than creating a second row, so there's
-// always exactly one current state per person, same as the day it was first submitted.
-model EmployeeAvailability {
+// A team member's submitted availability for specific calendar dates — modeled after
+// PtoRequest, not as a standing weekly template: CB (Sept 2026, after seeing the first
+// version) wants the same tap-dates-on-a-calendar experience as My Time, "week to week...
+// members just let us know when they're available, and then we will approve it so that we
+// have a record on our side." Every submission is its own row (never upserted/overwritten),
+// so approving or denying one leaves a permanent record — the same reason PtoRequest never
+// edits a past request in place, just creates a new one.
+model AvailabilitySubmission {
   id         String   @id @default(uuid())
-  employeeId String   @unique
+  employeeId String
   employee   Employee @relation("AvailabilitySubject", fields: [employeeId], references: [id])
 
-  // Recurring weekly pattern, not date-specific: an array of {dayOfWeek: 0-6 (Sun-Sat),
-  // startTime: "09:00", endTime: "17:00"} slots. A day absent from this array means "not
-  // available" that day. JSON rather than a child table — always read/written as one whole
-  // unit (the employee's own form submits the entire week at once), never queried slot by
-  // slot, and the shape is simple enough not to need real relational structure.
+  // One entry per date the team member tapped: {date: "2026-09-17", startTime: "09:00",
+  // endTime: "17:00"}. A single submission can cover several (not necessarily consecutive)
+  // dates at once — everything tapped before hitting Submit becomes one record reviewed
+  // together. JSON rather than a child table for the same reason PtoRequest doesn't have one
+  // either: always read/written as one whole unit, never queried slot by slot.
   slots Json
 
-  note String? // optional note from the team member submitting/updating
+  note String? // optional note from the team member submitting
 
   status        AvailabilityStatus @default(PENDING)
   submittedAt   DateTime           @default(now())
@@ -291,6 +291,7 @@ model EmployeeAvailability {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([employeeId])
   @@index([status])
 }
 

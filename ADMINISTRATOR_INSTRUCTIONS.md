@@ -83,18 +83,19 @@ Attendance.
 
 ## Availability (`/admin/availability`)
 
-Every team member's submitted weekly availability pattern, org-wide — the same "which days
-and roughly what hours are they generally free" a supervisor decides on from their own team
-member's review page, just across everyone at once rather than one supervisor's reports.
-**Pending** lists anyone waiting on a decision (Approve / Deny, with an optional note on
-denial, same decision endpoint a supervisor uses); **Decided** lists everyone else with their
-current status. A team member who hasn't submitted anything yet simply doesn't appear here.
+Every submitted-availability record, org-wide — the same specific dates/times a supervisor
+decides on from their own team member's review page, just across everyone at once rather than
+one supervisor's reports. A team member can appear more than once here over time: each
+submission (a batch of dates they tapped on their own Availability calendar and submitted
+together) is its own record, not one row that gets overwritten. **Pending** lists submissions
+waiting on a decision (Approve / Deny, with an optional note on denial, same decision endpoint
+a supervisor uses); **Decided** lists the most recent 200 already-decided submissions with
+their outcome. A team member who hasn't submitted anything yet simply doesn't appear here.
 
 This is purely informational — approving someone's availability doesn't do anything else in
 the app yet (there's no shift-scheduling feature for it to feed into). It exists so HR and
-supervisors can see who's generally free when without asking each person individually.
-Editing an already-approved pattern resets it back to Pending, since a decision made on the
-old version shouldn't silently carry over to a different one nobody's reviewed.
+supervisors can see who's generally free when without asking each person individually, and so
+there's a real record of what was offered and decided over time.
 
 ## Documents (`/documents`, Manage tab)
 
