@@ -70,6 +70,14 @@ export interface AvailabilityCalendarControls {
  * a submission instead opens that submission's detail (read-only — approving/denying happens
  * from TeamAvailabilitySection/AvailabilityAdminView, not here) — the draft in progress, if
  * any, isn't lost; closing that detail panel returns to it.
+ *
+ * A DENIED submission's detail isn't a dead end (CB, Sept 2026: "it's like it's not giving you
+ * the option to even adjust... almost like a permanent statement") — its "Submit different
+ * times" button drops the same dates back into `draft`, pre-filled with the denied times so
+ * there's something to start from, so the person can adjust and resend rather than being stuck
+ * forever on a date they can never touch again. `submissionsByDate` already resolves a date to
+ * whichever submission covering it is newest, precisely so a later resubmission naturally
+ * supersedes the denied one it replaced — this button was the only piece missing.
  */
 export default function AvailabilityCalendar({ controls }: { controls: AvailabilityCalendarControls }) {
   const { submissions } = controls;
@@ -141,6 +149,16 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
     submittedIds.current = ids;
   }, [submissions]);
 
+  // Seeds a fresh draft from a denied submission's own dates and times, then swaps the
+  // read-only detail view out for the editable draft panel — see this component's doc comment
+  // above for why this exists rather than leaving a denied date permanently unclickable.
+  function startResubmit(submission: AvailabilityDTO) {
+    setViewingId(null);
+    setDraft(() =>
+      Object.fromEntries(submission.slots.map((s) => [s.date, { startTime: s.startTime, endTime: s.endTime }]))
+    );
+  }
+
   function handleDayClick(dateKey: string) {
     const existing = byDate.get(dateKey);
     if (existing) {
@@ -201,6 +219,7 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
           submitting={controls.submitting}
           error={controls.error}
           onClose={() => setViewingId(null)}
+          onResubmit={viewingSubmission ? () => startResubmit(viewingSubmission) : undefined}
         />
       )}
     </div>
@@ -312,6 +331,7 @@ function Panel({
   submitting,
   error,
   onClose,
+  onResubmit,
 }: {
   viewingSubmission: AvailabilityDTO | undefined;
   draftDates: string[];
@@ -323,6 +343,7 @@ function Panel({
   submitting: boolean;
   error?: string;
   onClose: () => void;
+  onResubmit?: () => void;
 }) {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -364,7 +385,7 @@ function Panel({
       </div>
 
       {viewingSubmission ? (
-        <SubmissionDetail submission={viewingSubmission} />
+        <SubmissionDetail submission={viewingSubmission} onResubmit={onResubmit} />
       ) : (
         <DraftForm
           draftDates={draftDates}
@@ -380,7 +401,7 @@ function Panel({
   );
 }
 
-function SubmissionDetail({ submission }: { submission: AvailabilityDTO }) {
+function SubmissionDetail({ submission, onResubmit }: { submission: AvailabilityDTO; onResubmit?: () => void }) {
   const lines = [...submission.slots].sort((a, b) => a.date.localeCompare(b.date));
 
   return (
@@ -404,6 +425,18 @@ function SubmissionDetail({ submission }: { submission: AvailabilityDTO }) {
       </div>
 
       {submission.status === "PENDING" && <p className="text-sm text-white/60">Waiting on a supervisor or HR to approve.</p>}
+
+      {/* Denied isn't final — this reopens the same dates as an editable draft, pre-filled
+          with the denied times, so there's a clear next step instead of a dead end. */}
+      {submission.status === "DENIED" && onResubmit && (
+        <button
+          type="button"
+          onClick={onResubmit}
+          className="w-full rounded-2xl bg-white text-neutral-900 hover:bg-white/90 py-3 text-sm font-medium"
+        >
+          Submit different times
+        </button>
+      )}
     </div>
   );
 }
