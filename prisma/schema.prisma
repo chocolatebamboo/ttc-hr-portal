@@ -291,8 +291,28 @@ model AvailabilitySubmission {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  shiftReminders AvailabilityShiftReminder[]
+
   @@index([employeeId])
   @@index([status])
+}
+
+// One row per (submission, date) a "your shift starts soon" email has already gone out for —
+// CB, Sept 2026: "once they pick out their availability and it's confirmed [approved]... set a
+// reminder... thirty minutes before they clock in". Slots live as JSON on AvailabilitySubmission
+// (see its own comment above), so this is a separate table rather than a field on that JSON —
+// unlike TimeSession's single reminderSentAt column (one open session, one possible reminder),
+// one submission can cover several dates and each needs its own independent sent/not-sent
+// tracking. The (submissionId, date) unique constraint is what makes a second cron run within
+// the same reminder window a no-op instead of a duplicate email — see src/lib/shift-reminders.ts.
+model AvailabilityShiftReminder {
+  id           String                 @id @default(uuid())
+  submissionId String
+  submission   AvailabilitySubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  date         String // "YYYY-MM-DD" — matches one entry in the submission's own slots array
+  sentAt       DateTime               @default(now())
+
+  @@unique([submissionId, date])
 }
 
 // ---------------------------------------------------------------------------
