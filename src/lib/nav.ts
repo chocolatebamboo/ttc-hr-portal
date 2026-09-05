@@ -45,7 +45,12 @@ export const ADMIN_NAV: NavItem[] = [
   { label: "Team Members", href: "/admin/employees", icon: IdCardIcon },
   { label: "Attendance", href: "/admin/attendance", icon: ClockIcon },
   { label: "PTO Management", href: "/admin/pto", icon: CalendarIcon },
-  { label: "Availability", href: "/admin/availability", icon: CalendarIcon },
+  // Labeled "Team Availability" rather than plain "Availability" — every role already has a
+  // personal "Availability" link up in EMPLOYEE_NAV (for submitting your own), so an admin
+  // account was seeing the word "Availability" twice in the sidebar with nothing to tell the
+  // two apart at a glance (CB, Sept 2026). Same fix in spirit as SUPERVISOR_NAV's "My Team"
+  // just above — name the admin-facing link by what it's FOR, not just the resource.
+  { label: "Team Availability", href: "/admin/availability", icon: CalendarIcon },
   { label: "Reports", href: "/admin/reports", icon: ChartIcon },
   { label: "Administration", href: "/admin/administration", icon: GearIcon },
 ];

@@ -62,7 +62,7 @@ export default function AvailabilityAdminView() {
 
   return (
     <div className="max-w-3xl">
-      <h1 className="page-title text-2xl mb-1">Availability</h1>
+      <h1 className="page-title text-2xl mb-1">Team Availability</h1>
       <p className="text-sm text-muted mb-4">
         Every team member&apos;s submitted availability, org-wide — not just one supervisor&apos;s
         team. Purely informational: nothing here is enforced against scheduling.
@@ -120,19 +120,34 @@ export default function AvailabilityAdminView() {
               </div>
             ) : (
               <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
-                {decided.map((r) => (
-                  <div key={r.id} className="px-4 py-3.5">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-medium">
-                        <Link href={`/team/${r.employeeId}`} className="hover:underline">
-                          {r.employeeName}
-                        </Link>
-                      </p>
-                      <AvailabilityStatusPill status={r.status} />
+                {decided.map((r) => {
+                  const lines = describeSlots(r.slots);
+                  return (
+                    <div key={r.id} className="px-5 py-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-medium">
+                          <Link href={`/team/${r.employeeId}`} className="hover:underline">
+                            {r.employeeName}
+                          </Link>
+                        </p>
+                        <AvailabilityStatusPill status={r.status} />
+                      </div>
+                      {/* One line per submitted day (see the matching comment on Row below) —
+                          same layout treatment as Pending so the page reads consistently. */}
+                      <div className="mt-1.5 space-y-0.5">
+                        {lines.length > 0 ? (
+                          lines.map((line, i) => (
+                            <p key={i} className="text-sm text-muted">
+                              {line}
+                            </p>
+                          ))
+                        ) : (
+                          <p className="text-sm text-muted">No dates marked available.</p>
+                        )}
+                      </div>
                     </div>
-                    <p className="text-xs text-muted mt-0.5">{describeSlots(r.slots).join(" · ") || "No dates marked available."}</p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </section>
@@ -161,22 +176,35 @@ function Row({
 }) {
   const lines = describeSlots(r.slots);
   return (
-    <div className="px-4 py-3.5">
-      <div className="flex items-center justify-between gap-3">
+    <div className="px-5 py-4">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-medium">
+          <p className="text-base font-semibold">
             <Link href={`/team/${r.employeeId}`} className="hover:underline">
               {r.employeeName}
             </Link>
           </p>
-          <p className="text-xs text-muted">{lines.join(" · ") || "No dates marked available."}</p>
-          {r.note && <p className="text-xs text-muted mt-0.5">&ldquo;{r.note}&rdquo;</p>}
+          {/* Each submitted day on its own line rather than one long "Mon ... · Wed ... · Fri
+              ..." run-on string — CB (Sept 2026) flagged that a multi-day submission read as
+              one dense, hard-to-scan line here. Same fix applied to the Decided list above. */}
+          <div className="mt-1.5 space-y-0.5">
+            {lines.length > 0 ? (
+              lines.map((line, i) => (
+                <p key={i} className="text-sm text-muted">
+                  {line}
+                </p>
+              ))
+            ) : (
+              <p className="text-sm text-muted">No dates marked available.</p>
+            )}
+          </div>
+          {r.note && <p className="text-sm text-muted italic mt-1.5">&ldquo;{r.note}&rdquo;</p>}
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <button onClick={() => onDecide(r.id, "APPROVED")} disabled={busy} className="btn-primary text-xs px-3 py-1.5">
+          <button onClick={() => onDecide(r.id, "APPROVED")} disabled={busy} className="btn-primary text-sm px-4 py-2">
             Approve
           </button>
-          <button onClick={onDenyToggle} disabled={busy} className="btn-neutral text-xs px-3 py-1.5">
+          <button onClick={onDenyToggle} disabled={busy} className="btn-neutral text-sm px-4 py-2">
             Deny
           </button>
         </div>
@@ -194,7 +222,7 @@ function Row({
           <button
             onClick={() => onDecide(r.id, "DENIED", denyComment.trim() || undefined)}
             disabled={busy}
-            className="btn-primary text-xs px-3 py-1.5 self-start"
+            className="btn-primary text-sm px-4 py-2 self-start"
           >
             Confirm deny
           </button>
