@@ -10,8 +10,11 @@
 ALTER TABLE "EmployeeAvailability" RENAME TO "AvailabilitySubmission";
 
 -- DropIndex (the old one-row-per-employee constraint no longer applies — an employee can now
--- have many submissions)
-ALTER TABLE "AvailabilitySubmission" DROP CONSTRAINT "EmployeeAvailability_employeeId_key";
+-- have many submissions). This was created via CREATE UNIQUE INDEX, not ADD CONSTRAINT (see
+-- the original 20260905_employee_availability migration), so it has to be dropped as an
+-- index — ALTER TABLE ... DROP CONSTRAINT doesn't find it, since Postgres never registered it
+-- as a table constraint in the first place.
+DROP INDEX "EmployeeAvailability_employeeId_key";
 
 -- RenameForeignKey (cosmetic only — Postgres doesn't require these to match the table name,
 -- but keeping them in sync avoids confusion reading the schema later)
