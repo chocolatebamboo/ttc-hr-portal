@@ -267,12 +267,15 @@ function MonthSection({
                   // 2026, pointing at the Airbnb host calendar again: "the rounded squares...
                   // a light gray... the spacing" — every day the same fill, today included;
                   // today is marked by the small solid badge on the day number below instead).
+                  // Fill bumped from bg-black/[0.035] to bg-black/[0.07] (hover [0.12]) — CB
+                  // flagged the original as reading as plain white against the white card
+                  // behind it rather than a visible light gray like the reference.
                   className={`relative h-14 sm:h-20 rounded-xl p-2 flex flex-col items-start justify-between text-left transition-colors disabled:opacity-40 scroll-mb-[calc(50vh+112px)] sm:scroll-mb-0 ${
                     isDraft
                       ? "bg-accent-ink text-white"
                       : submission
                         ? STATUS_CHIP[submission.status]
-                        : "bg-black/[0.035] hover:bg-black/[0.06]"
+                        : "bg-black/[0.07] hover:bg-black/[0.12]"
                   }`}
                 >
                   {day.isToday && !isDraft ? (

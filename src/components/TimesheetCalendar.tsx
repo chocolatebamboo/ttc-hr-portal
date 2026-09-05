@@ -514,15 +514,21 @@ function MonthSection({
                   // mobile My Time view but wanted the day cells themselves to "read cleanly"
                   // more like that reference — a flat tinted fill rather than a thin bordered
                   // box around every single day, "the rounded squares... a light gray... the
-                  // spacing" the same for every day. Border removed in favor of a soft fill
-                  // (bg-black/[0.035], a shade darker on hover), same for every cell including
-                  // today — CB was explicit that this uniform look should hold "whilst
-                  // maintaining our theme" rather than every day getting a differently-colored
-                  // fill. Today is marked instead by the small solid badge on the day number
-                  // itself below (matching the reference's own red circle on "today"), not by
-                  // singling out the whole cell.
+                  // spacing" the same for every day. Border removed in favor of a soft fill,
+                  // same for every cell including today — CB was explicit that this uniform
+                  // look should hold "whilst maintaining our theme" rather than every day
+                  // getting a differently-colored fill. Today is marked instead by the small
+                  // solid badge on the day number itself below (matching the reference's own
+                  // red circle on "today"), not by singling out the whole cell.
+                  //
+                  // The fill itself started at bg-black/[0.035] (a very faint tint against the
+                  // white --surface card behind it) and CB flagged it as reading as plain white
+                  // once today's cell no longer got its own extra-dark tint to contrast against
+                  // — "it just looks too plain... has to reflect the [Airbnb] example". Bumped
+                  // to bg-black/[0.07] (hover bg-black/[0.12]) so the gray actually reads at a
+                  // glance, matching that reference's own clearly-visible light-gray squares.
                   className={`relative h-14 sm:h-20 rounded-xl p-2 flex flex-col items-start justify-between text-left transition-colors disabled:opacity-40 scroll-mb-[calc(50vh+112px)] sm:scroll-mb-0 ${
-                    isSelected ? "bg-accent-ink text-white" : "bg-black/[0.035] hover:bg-black/[0.06]"
+                    isSelected ? "bg-accent-ink text-white" : "bg-black/[0.07] hover:bg-black/[0.12]"
                   }`}
                 >
                   {day.isToday && !isSelected ? (
