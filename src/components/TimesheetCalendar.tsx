@@ -152,8 +152,11 @@ const MAX_FUTURE_OFFSET = 6;
  *      calendar underneath it. Airbnb's panel is non-blocking — it docks to the side (a small
  *      floating card on a phone) and the calendar grid stays visible and clickable while it's
  *      open. There is deliberately no backdrop element here for that reason, and on a phone the
- *      panel is capped at half the viewport height and floats above the bottom tab bar rather
- *      than covering the whole screen, so there's always calendar left to see and scroll.
+ *      panel is capped at 75% of the viewport height (CB, after the Request Time Off form's
+ *      submit button ended up clipped below the original 50% cap on a shorter phone screen:
+ *      "some of it isn't showing toward the bottom... make sure we see everything") and floats
+ *      above the bottom tab bar rather than covering the whole screen, so there's still a
+ *      sliver of calendar visible above it to scroll.
  *   2. Airbnb lets you click a second date to extend the first into a multi-day range (the
  *      panel then edits all of it at once) rather than one day at a time. `selection` below
  *      is `{start, end}` rather than a single date for exactly this — clicking a second empty,
@@ -502,7 +505,7 @@ function MonthSection({
                     // CB: tapping a day could leave the just-tapped date hidden under the day
                     // panel that pops up on top of it (the panel is `fixed`, so it never pushes
                     // the grid around on its own). scroll-mb reserves the panel's own footprint
-                    // (its max-h-[50vh] cap plus its bottom-24 offset) as space `scrollIntoView`
+                    // (its max-h-[75vh] cap plus its bottom-24 offset) as space `scrollIntoView`
                     // treats as NOT actually visible, so "nearest" scrolls this button up just
                     // far enough to clear the panel that's about to appear over it — nothing
                     // moves if it's already clear. Only matters on the phone-sized floating
@@ -527,7 +530,7 @@ function MonthSection({
                   // — "it just looks too plain... has to reflect the [Airbnb] example". Bumped
                   // to bg-black/[0.07] (hover bg-black/[0.12]) so the gray actually reads at a
                   // glance, matching that reference's own clearly-visible light-gray squares.
-                  className={`relative h-14 sm:h-20 rounded-xl p-2 flex flex-col items-start justify-between text-left transition-colors disabled:opacity-40 scroll-mb-[calc(50vh+112px)] sm:scroll-mb-0 ${
+                  className={`relative h-14 sm:h-20 rounded-xl p-2 flex flex-col items-start justify-between text-left transition-colors disabled:opacity-40 scroll-mb-[calc(75vh+112px)] sm:scroll-mb-0 ${
                     isSelected ? "bg-accent-ink text-white" : "bg-black/[0.07] hover:bg-black/[0.12]"
                   }`}
                 >
@@ -617,7 +620,7 @@ function DayPanel({
     // — close to the grid and always in view, the way Airbnb's own panel behaves.
     <div
       className="fixed z-50 bg-neutral-900 text-white shadow-2xl overflow-y-auto p-4
-        inset-x-3 bottom-24 max-h-[50vh] rounded-3xl
+        inset-x-3 bottom-24 max-h-[75vh] rounded-3xl
         sm:sticky sm:top-4 sm:inset-auto sm:z-auto sm:max-h-none sm:w-[320px] sm:shrink-0 sm:rounded-2xl"
     >
       <div className="flex items-center justify-between gap-3 mb-3">

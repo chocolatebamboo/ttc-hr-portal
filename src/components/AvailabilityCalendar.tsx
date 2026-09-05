@@ -270,7 +270,7 @@ function MonthSection({
                   // Fill bumped from bg-black/[0.035] to bg-black/[0.07] (hover [0.12]) — CB
                   // flagged the original as reading as plain white against the white card
                   // behind it rather than a visible light gray like the reference.
-                  className={`relative h-14 sm:h-20 rounded-xl p-2 flex flex-col items-start justify-between text-left transition-colors disabled:opacity-40 scroll-mb-[calc(50vh+112px)] sm:scroll-mb-0 ${
+                  className={`relative h-14 sm:h-20 rounded-xl p-2 flex flex-col items-start justify-between text-left transition-colors disabled:opacity-40 scroll-mb-[calc(75vh+112px)] sm:scroll-mb-0 ${
                     isDraft
                       ? "bg-accent-ink text-white"
                       : submission
@@ -343,7 +343,7 @@ function Panel({
   return (
     <div
       className="fixed z-50 bg-neutral-900 text-white shadow-2xl overflow-y-auto p-4
-        inset-x-3 bottom-24 max-h-[50vh] rounded-3xl
+        inset-x-3 bottom-24 max-h-[75vh] rounded-3xl
         sm:sticky sm:top-4 sm:inset-auto sm:z-auto sm:max-h-none sm:w-[320px] sm:shrink-0 sm:rounded-2xl"
     >
       <div className="flex items-center justify-between gap-3 mb-3">
