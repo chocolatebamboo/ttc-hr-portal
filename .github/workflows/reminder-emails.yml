@@ -1,0 +1,40 @@
+name: Reminder emails
+
+# Free alternative to a paid Render Cron Job (CB, Sept 2026 — Render's Cron Jobs have no free
+# tier, and this repo already lives on GitHub, so a scheduled Action reuses an account she
+# already has instead of adding a new paid resource or a new third-party service). Pings the
+# same two reminder endpoints a Render Cron Job would've hit on a schedule:
+#   - POST /api/cron/clockout-reminders  (src/lib/clockout-reminders.ts — "you're still clocked in")
+#   - POST /api/cron/shift-reminders     (src/lib/shift-reminders.ts    — "your shift starts soon")
+# Both are one-time-per-thing nudges with their own dedup tracking server-side, and both
+# comparisons tolerate a few minutes of scheduling jitter (a 3+ hour threshold and a 0-30
+# minute window, respectively) — GitHub's own docs note scheduled workflows can run a few
+# minutes late under load, which is fine here but wouldn't be for something needing exact timing.
+#
+# Requires a repository secret named CRON_SECRET, matching the CRON_SECRET set on the Render
+# web service's own environment — see README's "Clock-out reminders"/"Shift reminders"
+# sections. Add it under this repo's Settings -> Secrets and variables -> Actions -> New
+# repository secret.
+#
+# Known GitHub quirk worth knowing about: GitHub automatically disables a scheduled workflow
+# after 60 days with no commits to the repo at all (any commit, not just to this file) — if
+# reminders quietly stop, check Actions -> this workflow for a "disabled" banner and re-enable
+# it there, or push any small commit to reset the clock.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {} # lets you trigger a run manually from the Actions tab to test it
+
+jobs:
+  ping-reminder-endpoints:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clock-out reminders
+        run: |
+          curl -sS -X POST https://ttc-hr-portal.onrender.com/api/cron/clockout-reminders \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+      - name: Shift reminders
+        run: |
+          curl -sS -X POST https://ttc-hr-portal.onrender.com/api/cron/shift-reminders \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
