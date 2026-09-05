@@ -28,11 +28,28 @@ const STATUS_LABEL: Record<TimeClockState, string> = {
   CLOCKED_OUT: "Clocked out",
 };
 
+// CB, Sept 2026: wants the actual current date/time visible on the Clock In card itself —
+// "so that we know... it's real time, what time it is, and the date" — rather than someone
+// having to trust that "Today" really means right now. Ticks every second (not just the
+// once-a-minute reminder tick below, which is deliberately coarse) since a clock that's
+// visibly moving is the point.
+function useLiveClock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return now;
+}
+
 export default function TimeClockCard({ variant = "default" }: { variant?: "default" | "hero" }) {
   const [entry, setEntry] = useState<TimeEntryDTO | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [actionState, setActionState] = useState<ActionState>("idle");
   const [errorMessage, setErrorMessage] = useState("");
+  const now = useLiveClock();
+  const liveDate = now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+  const liveTime = now.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" });
 
   async function refresh() {
     try {
@@ -149,7 +166,10 @@ export default function TimeClockCard({ variant = "default" }: { variant?: "defa
         className="rounded-3xl p-6 text-white shadow-lg"
         style={{ background: "var(--ttc-pink)" }}
       >
-        <p className="text-xs uppercase tracking-wide text-white/70 mb-1">Today</p>
+        <div className="flex items-center justify-between gap-3 mb-1">
+          <p className="text-xs uppercase tracking-wide text-white/70">{liveDate}</p>
+          <p className="text-xs font-semibold text-white/90 tabular-nums">{liveTime}</p>
+        </div>
         <p className="text-xl font-bold mb-4">{STATUS_LABEL[state]}</p>
 
         {state !== "BEFORE_WORK" && (
@@ -191,7 +211,11 @@ export default function TimeClockCard({ variant = "default" }: { variant?: "defa
     <div className="rounded-2xl border border-border bg-surface p-6 shadow-sm">
       <div className="flex items-center justify-between mb-5">
         <div>
-          <p className="text-xs uppercase tracking-wide text-muted/70 mb-1">Today</p>
+          <div className="flex items-center gap-2 mb-1">
+            <p className="text-xs uppercase tracking-wide text-muted/70">{liveDate}</p>
+            <span className="text-muted/40">·</span>
+            <p className="text-xs text-muted/70 tabular-nums">{liveTime}</p>
+          </div>
           <p className="text-lg font-semibold">{STATUS_LABEL[state]}</p>
         </div>
         {state !== "BEFORE_WORK" && (

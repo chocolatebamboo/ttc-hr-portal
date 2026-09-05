@@ -87,9 +87,9 @@ export default async function DashboardPage() {
         </div>
 
         <div className="animate-in animate-in-3 grid grid-cols-3 gap-3">
-          <StatCard label="This week" value={formatHoursCompact(weekMinutes)} tone="blue" />
-          <StatCard label="Pending PTO" value={String(pendingPtoCount)} tone="pink" />
-          <StatCard label="Docs to review" value={String(pendingAcknowledgments.length)} tone="amber" />
+          <StatCard label="This week" value={formatHoursCompact(weekMinutes)} tone="blue" href="/time" />
+          <StatCard label="Pending PTO" value={String(pendingPtoCount)} tone="pink" href="/time" />
+          <StatCard label="Docs to review" value={String(pendingAcknowledgments.length)} tone="amber" href="/documents" />
         </div>
 
         <div className="animate-in animate-in-4">
@@ -172,7 +172,22 @@ export default async function DashboardPage() {
   );
 }
 
-function StatCard({ label, value, tone }: { label: string; value: string; tone: "blue" | "pink" | "amber" }) {
+// CB, Sept 2026: these three tiles should be tappable straight through to whatever they're
+// summarizing — "This week" and "Pending PTO" to My Time (hours and PTO both live there),
+// "Docs to review" to Documents — rather than sitting there as plain readouts with nowhere to
+// go. transition-transform + active:scale gives the same tap feedback Quick Actions already
+// has, so tapping a stat tile feels like the same kind of control, not a different one.
+function StatCard({
+  label,
+  value,
+  tone,
+  href,
+}: {
+  label: string;
+  value: string;
+  tone: "blue" | "pink" | "amber";
+  href: string;
+}) {
   const TONE: Record<string, string> = {
     blue: "text-white",
     pink: "text-white",
@@ -185,10 +200,14 @@ function StatCard({ label, value, tone }: { label: string; value: string; tone: 
         ? { background: "var(--ttc-pink)" }
         : undefined;
   return (
-    <div className={`rounded-2xl p-4 ${TONE[tone]}`} style={style}>
+    <Link
+      href={href}
+      className={`block rounded-2xl p-4 transition-transform active:scale-95 ${TONE[tone]}`}
+      style={style}
+    >
       <p className="text-xl font-bold leading-none tabular-nums">{value}</p>
       <p className="text-[11px] font-medium mt-1.5 opacity-90 leading-tight">{label}</p>
-    </div>
+    </Link>
   );
 }
 
