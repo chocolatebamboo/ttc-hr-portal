@@ -128,6 +128,33 @@ export async function submitAvailability(
   });
 }
 
+/**
+ * Employee withdraws one of their OWN submissions — while it's still Pending (not yet
+ * reviewed), or after it's been Denied. CB, Sept 2026: "I should be able to clear the dates
+ * that either I got denied or the dates that I... said I was available... they shouldn't just
+ * be set in stone." Deliberately NOT available on an Approved submission — once a supervisor
+ * has signed off on it, unwinding it isn't something the employee does unilaterally, same
+ * stance cancelPtoRequest (src/lib/pto-actions.ts) already takes for PTO. Sets status to
+ * CANCELLED rather than deleting the row, same reasoning: it stays a real record of what was
+ * offered and then withdrawn, not erased. No separate authorization check beyond ownership
+ * (checked here, and again by RLS under the actor's own identity) — this is a self-service
+ * action, not something a supervisor/HR can do on someone else's behalf.
+ */
+export async function cancelAvailabilitySubmission(actor: CurrentEmployee, submissionId: string): Promise<AvailabilityDTO> {
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const existing = await tx.availabilitySubmission.findUnique({ where: { id: submissionId } });
+    if (!existing || existing.employeeId !== actor.id) {
+      throw new InvalidAvailabilityError("Submission not found.");
+    }
+    if (existing.status !== "PENDING" && existing.status !== "DENIED") {
+      throw new InvalidAvailabilityError('Only a "Pending" or "Denied" submission can be cleared.');
+    }
+
+    const row = await tx.availabilitySubmission.update({ where: { id: submissionId }, data: { status: "CANCELLED" } });
+    return toDTO(row);
+  });
+}
+
 type Decision = "APPROVED" | "DENIED";
 
 /** Supervisor/HR decides on one submission. Authorization (is the reviewer actually this

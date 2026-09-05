@@ -20,20 +20,27 @@ const DEFAULT_END = "17:00";
 
 // Same solid-fill status colors AvailabilityStatusPill uses, as a full-cell background — an
 // availability submission replaces the plain day cell entirely, the same way a PTO request
-// replaces the hours readout on My Time's calendar.
+// replaces the hours readout on My Time's calendar. CANCELLED is included only to keep this a
+// complete Record<AvailabilityDTO["status"], ...> — submissionsByDate below skips Cancelled
+// submissions entirely, so this entry is never actually looked up.
 const STATUS_CHIP: Record<AvailabilityDTO["status"], string> = {
   PENDING: "bg-amber-100 text-amber-800",
   APPROVED: "bg-emerald-100 text-emerald-800",
   DENIED: "bg-rose-100 text-rose-800",
+  CANCELLED: "bg-black/5 text-muted",
 };
 
 /** Every calendar date covered by any of this person's submissions, newest-first so an
  *  overlapping resubmission (a Denied one and a later Pending one for the same date, say)
  *  shows the most recent — `submissions` is expected pre-sorted newest-first, exactly what
- *  GET /api/availability already returns. */
+ *  GET /api/availability already returns. Cancelled submissions are skipped outright: clearing
+ *  one (CB, Sept 2026: "they shouldn't just be set in stone") should free that date up for a
+ *  brand-new submission immediately, same as My Time's ptoByDate skipping Cancelled PTO
+ *  requests. */
 function submissionsByDate(submissions: AvailabilityDTO[]): Map<string, AvailabilityDTO> {
   const map = new Map<string, AvailabilityDTO>();
   for (const s of submissions) {
+    if (s.status === "CANCELLED") continue;
     for (const slot of s.slots) {
       if (!map.has(slot.date)) map.set(slot.date, s);
     }
@@ -50,6 +57,13 @@ export interface AvailabilityCalendarControls {
   onSubmit: (slots: AvailabilitySlot[], note?: string) => void;
   submitting: boolean;
   error?: string;
+  /** Clearing (cancelling) one of the signed-in team member's own Pending or Denied
+   *  submissions — see cancelAvailabilitySubmission's doc comment in src/lib/availability.ts
+   *  for why Approved submissions aren't included. */
+  onCancel: (submissionId: string) => void;
+  /** Which submission (if any) a clear request is currently in flight for, so its button can
+   *  show a busy state without a whole separate loading flag. */
+  cancellingId: string | null;
 }
 
 /**
@@ -78,6 +92,14 @@ export interface AvailabilityCalendarControls {
  * forever on a date they can never touch again. `submissionsByDate` already resolves a date to
  * whichever submission covering it is newest, precisely so a later resubmission naturally
  * supersedes the denied one it replaced — this button was the only piece missing.
+ *
+ * Neither a Pending nor a Denied submission is permanent, full stop (CB, Sept 2026: "I should
+ * be able to clear the dates that either I got denied or the dates that I... said I was
+ * available... they shouldn't just be set in stone") — a "Clear this submission" button sets it
+ * to Cancelled, which `submissionsByDate` skips entirely, so the date goes right back to being
+ * a plain, selectable one. Left out for Approved: once a supervisor's signed off, that's not
+ * something the employee unwinds unilaterally, same stance PTO already takes on its own
+ * Cancel button.
  */
 export default function AvailabilityCalendar({ controls }: { controls: AvailabilityCalendarControls }) {
   const { submissions } = controls;
@@ -159,6 +181,13 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
     );
   }
 
+  // Clearing closes the panel too — once Cancelled, submissionsByDate no longer resolves this
+  // date to this submission (see its doc comment above), so there's nothing left here to view.
+  function handleCancel(submissionId: string) {
+    controls.onCancel(submissionId);
+    setViewingId(null);
+  }
+
   function handleDayClick(dateKey: string) {
     const existing = byDate.get(dateKey);
     if (existing) {
@@ -220,6 +249,8 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
           error={controls.error}
           onClose={() => setViewingId(null)}
           onResubmit={viewingSubmission ? () => startResubmit(viewingSubmission) : undefined}
+          onCancel={viewingSubmission ? () => handleCancel(viewingSubmission.id) : undefined}
+          cancelling={!!viewingSubmission && controls.cancellingId === viewingSubmission.id}
         />
       )}
     </div>
@@ -332,6 +363,8 @@ function Panel({
   error,
   onClose,
   onResubmit,
+  onCancel,
+  cancelling,
 }: {
   viewingSubmission: AvailabilityDTO | undefined;
   draftDates: string[];
@@ -344,6 +377,8 @@ function Panel({
   error?: string;
   onClose: () => void;
   onResubmit?: () => void;
+  onCancel?: () => void;
+  cancelling?: boolean;
 }) {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -385,7 +420,7 @@ function Panel({
       </div>
 
       {viewingSubmission ? (
-        <SubmissionDetail submission={viewingSubmission} onResubmit={onResubmit} />
+        <SubmissionDetail submission={viewingSubmission} onResubmit={onResubmit} onCancel={onCancel} cancelling={cancelling} />
       ) : (
         <DraftForm
           draftDates={draftDates}
@@ -401,8 +436,19 @@ function Panel({
   );
 }
 
-function SubmissionDetail({ submission, onResubmit }: { submission: AvailabilityDTO; onResubmit?: () => void }) {
+function SubmissionDetail({
+  submission,
+  onResubmit,
+  onCancel,
+  cancelling,
+}: {
+  submission: AvailabilityDTO;
+  onResubmit?: () => void;
+  onCancel?: () => void;
+  cancelling?: boolean;
+}) {
   const lines = [...submission.slots].sort((a, b) => a.date.localeCompare(b.date));
+  const canClear = submission.status === "PENDING" || submission.status === "DENIED";
 
   return (
     <div className="space-y-3">
@@ -435,6 +481,20 @@ function SubmissionDetail({ submission, onResubmit }: { submission: Availability
           className="w-full rounded-2xl bg-white text-neutral-900 hover:bg-white/90 py-3 text-sm font-medium"
         >
           Submit different times
+        </button>
+      )}
+
+      {/* Withdraws a Pending submission, or clears a Denied one out for good instead of
+          resubmitting it — either way the date goes right back to being selectable (see this
+          component's doc comment above). Not offered once Approved. */}
+      {canClear && onCancel && (
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={cancelling}
+          className="w-full rounded-2xl bg-white/10 hover:bg-white/20 disabled:opacity-50 py-3 text-sm font-medium"
+        >
+          {cancelling ? "Clearing…" : "Clear this submission"}
         </button>
       )}
     </div>

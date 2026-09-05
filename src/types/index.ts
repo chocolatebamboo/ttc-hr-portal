@@ -191,7 +191,7 @@ export interface AdminPtoSummaryDTO {
   upcoming: AdminPtoRequestDTO[];
 }
 
-export type AvailabilityStatus = "PENDING" | "APPROVED" | "DENIED";
+export type AvailabilityStatus = "PENDING" | "APPROVED" | "DENIED" | "CANCELLED";
 
 /** One specific calendar date a team member marked themselves available, with a start/end
  *  time for that day — tapped directly on the Availability calendar, same "HH:MM" 24-hour

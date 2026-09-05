@@ -258,6 +258,10 @@ enum AvailabilityStatus {
   PENDING
   APPROVED
   DENIED
+  // Added after the fact (CB, Sept 2026: "they shouldn't just be set in stone") so a team
+  // member can withdraw their own Pending or Denied submission — same shape PtoStatus already
+  // has for the identical reason on PTO requests.
+  CANCELLED
 }
 
 // A team member's submitted availability for specific calendar dates — modeled after

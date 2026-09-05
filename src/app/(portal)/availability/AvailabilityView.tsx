@@ -23,6 +23,9 @@ export default function AvailabilityView() {
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  // Which submission (if any) a clear/cancel request is currently in flight for — lets that
+  // one submission's button show a busy state without a whole separate loading screen.
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   async function load() {
     setLoadState("loading");
@@ -64,6 +67,21 @@ export default function AvailabilityView() {
     }
   }
 
+  // Clearing a Pending or Denied submission of your own (CB, Sept 2026: "they shouldn't just
+  // be set in stone") — updates that one row in place to CANCELLED rather than refetching the
+  // whole list, same pattern handleSubmit already uses for a freshly-created one.
+  async function handleCancel(submissionId: string) {
+    setCancellingId(submissionId);
+    try {
+      const res = await fetch(`/api/availability/${submissionId}/cancel`, { method: "POST" });
+      if (!res.ok) return;
+      const updated: AvailabilityDTO = await res.json();
+      setSubmissions((prev) => prev.map((s) => (s.id === submissionId ? updated : s)));
+    } finally {
+      setCancellingId(null);
+    }
+  }
+
   return (
     <div>
       <h1 className="page-title text-2xl mb-1">Availability</h1>
@@ -81,7 +99,9 @@ export default function AvailabilityView() {
       )}
 
       {loadState === "ready" && (
-        <AvailabilityCalendar controls={{ submissions, onSubmit: handleSubmit, submitting, error }} />
+        <AvailabilityCalendar
+          controls={{ submissions, onSubmit: handleSubmit, submitting, error, onCancel: handleCancel, cancellingId }}
+        />
       )}
     </div>
   );

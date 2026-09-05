@@ -1,0 +1,12 @@
+-- CB (Sept 2026): "I should be able to clear the dates that either I got denied or the dates
+-- that I... said I was available... they shouldn't just be set in stone." Mirrors PtoStatus's
+-- existing CANCELLED value (see PtoRequest / cancelPtoRequest in src/lib/pto-actions.ts) —
+-- same shape, just added to AvailabilityStatus after the fact since availability didn't
+-- originally need a self-withdraw concept.
+--
+-- IF NOT EXISTS makes this file safe to run twice: it was applied directly against production
+-- first (via the Supabase SQL editor) so the feature could ship immediately, and this migration
+-- file lands in git right alongside it for the normal history. A later `prisma migrate deploy`
+-- picking this migration up for the first time (a fresh database, or CI) re-runs the same
+-- statement as a no-op instead of failing on a duplicate enum value.
+ALTER TYPE "AvailabilityStatus" ADD VALUE IF NOT EXISTS 'CANCELLED';
