@@ -240,12 +240,38 @@ export default function TimesheetCalendar({
   }, []);
 
   // Lands the page on the current month rather than the furthest-future one now sitting above
-  // it — runs once on mount; the current month's wrapper div already exists in the very first
-  // render (all 0..MAX_FUTURE_OFFSET slots are in initial state, not lazily added), so there's
-  // no need to wait on data actually loading. useLayoutEffect (not useEffect) so this scroll
-  // happens before the browser paints, avoiding a visible flash of the future months first.
+  // it — the current month's wrapper div already exists in the very first render (all
+  // 0..MAX_FUTURE_OFFSET slots are in initial state, not lazily added), so there's no need to
+  // wait on data actually loading. useLayoutEffect (not useEffect) so the initial run happens
+  // before the browser paints, avoiding a visible flash of the future months first.
+  //
+  // CB (Sept 2026): reported landing on a future month (6 months out — exactly
+  // MAX_FUTURE_OFFSET) instead of today's. Root cause: this only ever ran once, on first mount.
+  // On a phone, "opening" My Time is very often NOT a fresh mount — backgrounding and
+  // reopening a home-screen/PWA-style tab, or the browser's own back/forward cache, both keep
+  // this component alive with whatever scroll position was last left (e.g. after browsing
+  // ahead to plan a future PTO date) instead of remounting it. Re-running the same scroll on
+  // `pageshow` (fires on a bfcache restore) and whenever the tab becomes visible again covers
+  // those cases too, so every real "look at My Time" lands back on today, matching CB's
+  // Airbnb-calendar expectation, not just the very first one.
   useLayoutEffect(() => {
-    currentMonthRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
+    function scrollToCurrentMonth() {
+      currentMonthRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
+    }
+    scrollToCurrentMonth();
+
+    function onPageShow() {
+      scrollToCurrentMonth();
+    }
+    function onVisibilityChange() {
+      if (document.visibilityState === "visible") scrollToCurrentMonth();
+    }
+    window.addEventListener("pageshow", onPageShow);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("pageshow", onPageShow);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, []);
 
   // Re-fetch every month already in memory — used after a correction is resubmitted elsewhere
@@ -449,14 +475,32 @@ function MonthSection({
                 <button
                   key={day.date}
                   type="button"
-                  onClick={() => onDayClick(day.date)}
+                  onClick={(e) => {
+                    onDayClick(day.date);
+                    // CB: tapping a day could leave the just-tapped date hidden under the day
+                    // panel that pops up on top of it (the panel is `fixed`, so it never pushes
+                    // the grid around on its own). scroll-mb reserves the panel's own footprint
+                    // (its max-h-[50vh] cap plus its bottom-24 offset) as space `scrollIntoView`
+                    // treats as NOT actually visible, so "nearest" scrolls this button up just
+                    // far enough to clear the panel that's about to appear over it — nothing
+                    // moves if it's already clear. Only matters on the phone-sized floating
+                    // panel; sm+ docks the panel beside the calendar instead of over it.
+                    e.currentTarget.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                  }}
                   disabled={!clickable}
-                  className={`relative h-14 sm:h-20 rounded-lg border p-2 flex flex-col items-start justify-between text-left transition-colors disabled:opacity-40 ${
+                  // CB (Sept 2026, pointing at the Airbnb host calendar): liked the overall
+                  // mobile My Time view but wanted the day cells themselves to "read cleanly"
+                  // more like that reference — a flat tinted fill rather than a thin bordered
+                  // box around every single day. Border removed in favor of a soft fill
+                  // (bg-black/[0.035], a shade darker on hover); today is now the same flat
+                  // treatment tinted with the accent color instead of an outline, so the grid
+                  // reads as one even surface of cells rather than a grid of outlined boxes.
+                  className={`relative h-14 sm:h-20 rounded-xl p-2 flex flex-col items-start justify-between text-left transition-colors disabled:opacity-40 scroll-mb-[calc(50vh+112px)] sm:scroll-mb-0 ${
                     isSelected
-                      ? "bg-accent-ink border-accent-ink text-white"
+                      ? "bg-accent-ink text-white"
                       : day.isToday
-                        ? "border-accent-ink/50 bg-surface hover:bg-black/[0.02]"
-                        : "border-border bg-surface hover:bg-black/[0.02]"
+                        ? "bg-accent-ink/10 hover:bg-accent-ink/15"
+                        : "bg-black/[0.035] hover:bg-black/[0.06]"
                   }`}
                 >
                   <span
