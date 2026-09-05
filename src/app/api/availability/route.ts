@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
       }
       return {
         exists: true,
-        slots: row.slots as AvailabilityDTO["slots"],
+        slots: row.slots as unknown as AvailabilityDTO["slots"],
         note: row.note,
         status: row.status,
         submittedAt: row.submittedAt.toISOString(),

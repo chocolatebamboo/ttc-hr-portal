@@ -1,5 +1,6 @@
 import { withRlsContext } from "@/lib/db";
 import { isAdmin, ForbiddenError } from "@/lib/authorization";
+import type { Prisma } from "@prisma/client";
 import type { AdminAvailabilityDTO, AvailabilityDTO, AvailabilityStatus, AvailabilitySlot, CurrentEmployee } from "@/types";
 
 /** Hand-declared rather than importing Prisma's generated EmployeeAvailability type — same
@@ -102,12 +103,12 @@ export async function submitAvailability(
       where: { employeeId: actor.id },
       create: {
         employeeId: actor.id,
-        slots: input.slots,
+        slots: input.slots as unknown as Prisma.InputJsonValue,
         note: input.note?.trim() || null,
         status: "PENDING",
       },
       update: {
-        slots: input.slots,
+        slots: input.slots as unknown as Prisma.InputJsonValue,
         note: input.note?.trim() || null,
         status: "PENDING",
         submittedAt: new Date(),
