@@ -83,9 +83,16 @@ export default function AvailabilityView() {
   }
 
   return (
-    <div>
-      <h1 className="page-title text-2xl mb-1">Availability</h1>
-      <p className="text-sm text-muted mb-4">
+    // md:h-full md:flex md:flex-col md:min-h-0 (CB, Sept 2026, restructuring this page's
+    // layout): gives AvailabilityCalendar's own row a real, bounded height to stretch into —
+    // exactly `main`'s own available height under the portal shell's fixed header (see
+    // (portal)/layout.tsx) — instead of the calendar sizing itself to its content and letting
+    // `main` scroll the whole page as one piece. Mobile is untouched (no md: prefix means none
+    // of this applies below the breakpoint): the page still scrolls normally there, same as
+    // before.
+    <div className="md:h-full md:flex md:flex-col md:min-h-0">
+      <h1 className="page-title text-2xl mb-1 md:shrink-0">Availability</h1>
+      <p className="text-sm text-muted mb-4 md:shrink-0">
         Tap the dates you&apos;re available, set a time for each, and submit them for your
         supervisor or HR to approve — so they don&apos;t have to ask you individually.
       </p>

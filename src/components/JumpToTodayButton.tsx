@@ -11,12 +11,14 @@ import { ChevronDownIcon } from "@/components/icons";
  * passed in as `targetRef`) scrolls fully out of view, so browsing months up to 6 ahead (or,
  * on My Time, years back) never leaves you unsure how to get back.
  *
- * Both calendars render the current month between the future months (above it) and whatever
- * comes after (past history on My Time; the end of the list on Availability, which has no
- * past), so the direction to get back is derivable from which way the target scrolled off:
- * above the viewport (its top is negative) means you scrolled down past it, so the chevron
- * points up; below the viewport (top positive) means you scrolled up into the future ahead of
- * it, so it points down.
+ * My Time renders the current month between future months (above it, eagerly loaded) and past
+ * history (below it, lazily loaded on scroll) — Availability, since CB's Sept 2026 layout
+ * restructure, orders the OPPOSITE way (past above, future below), matching a real scheduling
+ * app rather than My Time's original "scroll up for what's ahead" choice. Either way this
+ * button doesn't care which direction is which: the direction to point in is derivable purely
+ * from which way the target scrolled off screen — above the viewport (its top is negative)
+ * means you scrolled past it, so the chevron points up to send you back; below the viewport
+ * (top positive) means you haven't reached it yet, so it points down.
  */
 export default function JumpToTodayButton({
   targetRef,

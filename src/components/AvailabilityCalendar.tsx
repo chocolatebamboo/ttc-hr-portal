@@ -15,6 +15,16 @@ const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
  *  different one. */
 const MAX_FUTURE_OFFSET = 6;
 
+/** How far back this calendar shows history — CB, Sept 2026, restructuring this page's layout:
+ *  "The user should still have flexibility to scroll backward and view or select previous
+ *  dates... Do not remove access to past dates unless there is already a business rule
+ *  preventing selection." There wasn't one before this — the calendar simply never rendered
+ *  any past month at all. Same -3 window and reasoning as My Time's EARLIEST_OFFSET (TTC's
+ *  history on this system doesn't go back further than a few months), but eagerly loaded here
+ *  rather than lazily paginated: unlike My Time's per-month time-entry fetches, every
+ *  submission is already loaded upfront by listMyAvailability, so there's no fetch to defer. */
+const PAST_OFFSET = -3;
+
 const DEFAULT_START = "09:00";
 const DEFAULT_END = "17:00";
 
@@ -85,6 +95,30 @@ export interface AvailabilityCalendarControls {
  * from TeamAvailabilitySection/AvailabilityAdminView, not here) — the draft in progress, if
  * any, isn't lost; closing that detail panel returns to it.
  *
+ * Renders past-to-future top-to-bottom (CB, Sept 2026, restructuring this page's layout: "When
+ * somebody opens Availability on September 6, 2026, September should be the main starting
+ * point. From there they scroll down into October, November, December, etc. and can scroll up
+ * to August, July, etc.") — deliberately the OPPOSITE order from how this component originally
+ * shipped (future above, current month as the last item, no past at all), and also the opposite
+ * of My Time's own calendar, which intentionally keeps "scroll up for future, down for past."
+ * Left My Time as-is since this request was specifically about Availability's layout; the two
+ * calendars no longer share a scroll direction, but they never shared past-month behavior
+ * either (My Time paginates lazily; this one loads its whole ±window eagerly).
+ *
+ * The three-region desktop layout below (fixed nav/header from the portal shell, a calendar
+ * column with its own independent overflow-y-auto, and a non-scrolling detail panel beside it)
+ * replaces an earlier version that relied on `position: sticky` to keep the panel in place
+ * while the month list scrolled past it underneath. CB, after that still looked wrong: "Do not
+ * solve this with one giant sticky container... if position: sticky is currently failing
+ * because an ancestor has overflow, transform, or an unconstrained height, restructure the
+ * layout rather than simply adding more position: sticky rules." Sticky positioning ties a
+ * panel's position to whatever ancestor happens to scroll, which is exactly the kind of
+ * containment-chain fragility that caused the sidebar-blank bug in (portal)/layout.tsx — this
+ * uses the same fix here (an explicit md:min-h-0 height chain, md: to match the portal shell's
+ * own desktop breakpoint) so the calendar column is the ONLY thing that scrolls, and the panel
+ * is a normal, independently-sized flex sibling that simply never moves, with its own
+ * overflow-y-auto only for when its own content (many selected dates) is taller than it.
+ *
  * A DENIED submission's detail isn't a dead end (CB, Sept 2026: "it's like it's not giving you
  * the option to even adjust... almost like a permanent statement") — its "Submit different
  * times" button drops the same dates back into `draft`, pre-filled with the denied times so
@@ -104,8 +138,12 @@ export interface AvailabilityCalendarControls {
 export default function AvailabilityCalendar({ controls }: { controls: AvailabilityCalendarControls }) {
   const { submissions } = controls;
 
+  // Ascending offset order (PAST_OFFSET .. MAX_FUTURE_OFFSET) so the array is already in
+  // top-to-bottom render order with no reordering logic needed — past months first, current
+  // month in the middle, future months last. See this component's doc comment above for why
+  // this is the opposite of My Time's own month ordering.
   const [months] = useState<Month[]>(() =>
-    Array.from({ length: MAX_FUTURE_OFFSET + 1 }, (_, i) => getMonth(MAX_FUTURE_OFFSET - i))
+    Array.from({ length: MAX_FUTURE_OFFSET - PAST_OFFSET + 1 }, (_, i) => getMonth(PAST_OFFSET + i))
   );
   const currentMonthRef = useRef<HTMLDivElement | null>(null);
   // Tracks whichever requestAnimationFrame is pending from the scroll effect below, so its
@@ -209,13 +247,26 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
   const showPanel = draftDates.length > 0 || !!viewingSubmission;
 
   return (
-    <div className="flex flex-col sm:flex-row sm:items-start gap-4">
-      <div className="flex-1 min-w-0 space-y-6">
+    // md:flex-1 md:min-h-0: this row fills whatever height AvailabilityView's own md:h-full
+    // wrapper hands it (itself the remaining height under the portal shell's fixed header —
+    // see (portal)/layout.tsx), rather than sizing to its own content the way a plain flex row
+    // would by default. That's what lets its two children below stretch to a real, bounded
+    // height (the default `items-stretch` applies since nothing overrides it) instead of each
+    // just being as tall as its own content — the same "give every nested flex level an actual
+    // height, not just the outermost one" fix as (portal)/layout.tsx's own md:min-h-0 chain.
+    // md: (not sm:) deliberately matches the portal shell's own desktop breakpoint, so this
+    // fixed three-region layout only ever turns on exactly when RoleNav also switches into its
+    // own fixed desktop treatment — no in-between width where one has and the other hasn't.
+    <div className="flex flex-col md:flex-row md:flex-1 md:min-h-0 gap-4">
+      {/* The ONLY scrollable region on desktop — md:min-h-0 is what lets md:overflow-y-auto
+          actually engage instead of this column just growing to fit all ~10 months of content
+          and pushing the row (and the panel beside it) taller than the viewport. */}
+      <div className="flex-1 min-w-0 space-y-6 md:min-h-0 md:overflow-y-auto md:pr-1">
         <p className="text-center text-xs text-muted/60 py-2">
           Tap the dates you&apos;re available — you can plan up to {MAX_FUTURE_OFFSET} months ahead.
         </p>
         {months.map((month, i) => {
-          const offset = MAX_FUTURE_OFFSET - i;
+          const offset = PAST_OFFSET + i;
           return (
             <div key={month.start} ref={offset === 0 ? currentMonthRef : undefined}>
               <MonthSection month={month} byDate={byDate} draft={draft} today={today} onDayClick={handleDayClick} />
@@ -320,7 +371,7 @@ function MonthSection({
                   // Fill bumped from bg-black/[0.035] to bg-black/[0.07] (hover [0.12]) — CB
                   // flagged the original as reading as plain white against the white card
                   // behind it rather than a visible light gray like the reference.
-                  className={`relative h-14 sm:h-20 rounded-xl p-2 flex flex-col items-start justify-between text-left transition-colors disabled:opacity-40 scroll-mb-[calc(75vh+112px)] sm:scroll-mb-0 ${
+                  className={`relative h-14 sm:h-20 rounded-xl p-2 flex flex-col items-start justify-between text-left transition-colors disabled:opacity-40 scroll-mb-[calc(75vh+112px)] md:scroll-mb-0 ${
                     isDraft
                       ? "bg-accent-ink text-white"
                       : submission
@@ -328,8 +379,19 @@ function MonthSection({
                         : "bg-black/[0.07] hover:bg-black/[0.12]"
                   }`}
                 >
-                  {day.isToday && !isDraft ? (
-                    <span className="flex items-center justify-center h-5 w-5 rounded-full bg-accent-ink text-xs font-semibold text-white tabular-nums">
+                  {day.isToday ? (
+                    // Today and Selected are two different states (CB, Sept 2026: "I would keep
+                    // a dedicated Today treatment separate from Selected... If today is
+                    // selected, use the selected styling while still making it clear that it
+                    // represents today") — solid when the cell's own background is still plain
+                    // gray (nothing to contrast against but the cell itself), outlined once the
+                    // cell is already filled solid accent-ink by being drafted/selected (a solid
+                    // same-color badge would simply vanish against it).
+                    <span
+                      className={`flex items-center justify-center h-5 w-5 rounded-full text-xs font-semibold tabular-nums ${
+                        isDraft ? "border-2 border-white text-white" : "bg-accent-ink text-white"
+                      }`}
+                    >
                       {dayNumber}
                     </span>
                   ) : (
@@ -398,9 +460,16 @@ function Panel({
 
   return (
     <div
+      // On desktop this is a normal (non-sticky, non-absolute) flex sibling of the calendar
+      // column, stretched by the row's own `items-stretch` default to that row's real,
+      // md:min-h-0-bounded height — so it simply never moves while the calendar scrolls next to
+      // it, rather than tracking scroll position the way `sticky` does. `overflow-y-auto` (in
+      // the unconditional classes below) is what gives IT an independent scrollbar if enough
+      // dates are selected to make its own content taller than that fixed height — see this
+      // component's doc comment above for why sticky was replaced rather than added to.
       className="fixed z-50 bg-neutral-900 text-white shadow-2xl overflow-y-auto p-4
         inset-x-3 bottom-24 max-h-[75vh] rounded-3xl
-        sm:sticky sm:top-4 sm:inset-auto sm:z-auto sm:max-h-none sm:w-[320px] sm:shrink-0 sm:rounded-2xl"
+        md:static md:inset-auto md:z-auto md:h-full md:max-h-full md:min-h-0 md:w-[320px] md:shrink-0 md:rounded-2xl"
     >
       <div className="flex items-center justify-between gap-3 mb-3">
         <p className="text-sm font-medium">{headerLabel}</p>
