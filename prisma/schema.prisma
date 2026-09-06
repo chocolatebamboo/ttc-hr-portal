@@ -190,6 +190,12 @@ enum TimeAuditAction {
   HR_CORRECTION
   TIMESHEET_APPROVED
   TIMESHEET_RETURNED
+  // A session the team member never closed themselves, force-closed by the auto-clockout job
+  // (src/lib/auto-clockout.ts) once it's been open past the 4-hour cap — CB, Sept 2026: "it
+  // went over twelve hours, and then it documented it to be twelve hours. I don't necessarily
+  // want that because that's not necessarily true." No actor behind this one (see actorId
+  // below) — it's the system closing the gap, not a person.
+  AUTO_CLOCK_OUT
 }
 
 // Immutable log — a TimeEntry is never silently overwritten. Every change appends a row here.
@@ -199,8 +205,12 @@ model TimeEntryAuditEvent {
   timeEntry   TimeEntry        @relation(fields: [timeEntryId], references: [id])
 
   action      TimeAuditAction
-  actorId     String
-  actor       Employee         @relation("ActorOnTimeEntryAudit", fields: [actorId], references: [id])
+  // Nullable — same reasoning as AvailabilitySubmission.reviewedById: most audit rows have a
+  // real employee behind them (whoever clocked in/out or reviewed), but AUTO_CLOCK_OUT rows
+  // (src/lib/auto-clockout.ts) are the system acting on a stale open session with no signed-in
+  // employee to attribute it to. Null here means exactly that — not a missing/unknown actor.
+  actorId     String?
+  actor       Employee?        @relation("ActorOnTimeEntryAudit", fields: [actorId], references: [id])
 
   fieldName   String?          // e.g. "clockOut" — which field changed, when applicable
   oldValue    String?

@@ -214,25 +214,36 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   clock card (`src/components/TimeClockCard.tsx`, re-checks every minute so it appears on its
   own without a page reload) and an email (`src/lib/clockout-reminders.ts`, sent via Resend —
   see `.env.example`'s "Clock-out reminder emails" section for the setup that needs). It's a
-  one-time nudge per open session, not a repeating one, and there's no automatic clock-out —
-  the team member still closes it themselves. The email side runs from
+  one-time nudge per open session, not a repeating one. The email side runs from
   `POST /api/cron/clockout-reminders`, hit on a schedule (every 15 minutes) rather than by any
   user-facing flow — protected by a shared `CRON_SECRET` instead of a signed-in session, since
   the caller has no team member identity of its own.
+- **Auto clock-out** — a session left open past this reminder is still just a reminder, not a
+  fix: CB, Sept 2026, after forgetting to clock out overnight, "it went over twelve hours, and
+  then it documented it to be twelve hours. I don't necessarily want that because that's not
+  necessarily true." Once a session's been open 4 hours, `src/lib/auto-clockout.ts` force-closes
+  it — but at exactly the 4-hour mark, not whenever the job happens to run, so a session never
+  gets credited with more elapsed time than the cap. The day it belongs to is put back into
+  Awaiting Approval (the same status any ordinary clock-out produces) so a supervisor sees it in
+  their normal review queue, and the audit trail records it as a distinct `AUTO_CLOCK_OUT` event
+  (no team member or reviewer attached — it's the system closing the gap) so it's visibly
+  different from a time entry the team member actually submitted themselves. Runs from
+  `POST /api/cron/auto-clockout`, same `CRON_SECRET`-protected shape and same schedule as the
+  two reminder endpoints above.
 - **Shift reminders** — once an Availability submission is `APPROVED`, each of its dates gets a
   one-time "your shift starts soon" email 30 minutes before that date's start time
   (`src/lib/shift-reminders.ts`), same Resend setup as the clock-out reminder email above.
   Email only, by CB's choice — there's no in-app notification system in this app yet, and
   building one just for this was a bigger lift than the value of doing so right now. Runs from
   `POST /api/cron/shift-reminders`, hit every 15 minutes the same way `/api/cron/
-  clockout-reminders` is (same shared `CRON_SECRET`) — the two are independent jobs, not one
-  combined schedule, so either can be paused without affecting the other. Comparing "is it
-  within 30 minutes of this shift's start time" needs an actual timezone (unlike the clock-out
-  job, which only measures elapsed duration and never needs to know what time of day it is) —
-  nothing else in the app has needed one before this, so it's hardcoded to `America/New_York`
-  (`ORG_TIMEZONE` in `src/lib/shift-reminders.ts`) rather than configurable, per CB confirming
-  that's where TTC's shifts are.
-- **What actually calls those two cron endpoints on a schedule** — a GitHub Actions workflow
+  clockout-reminders` and `/api/cron/auto-clockout` are (same shared `CRON_SECRET`) — all three
+  are independent jobs, not one combined schedule, so any one can be paused without affecting
+  the others. Comparing "is it within 30 minutes of this shift's start time" needs an actual
+  timezone (unlike the clock-out jobs, which only measure elapsed duration and never need to
+  know what time of day it is) — nothing else in the app has needed one before this, so it's
+  hardcoded to `America/New_York` (`ORG_TIMEZONE` in `src/lib/shift-reminders.ts`) rather than
+  configurable, per CB confirming that's where TTC's shifts are.
+- **What actually calls those three cron endpoints on a schedule** — a GitHub Actions workflow
   (`.github/workflows/reminder-emails.yml`), not a Render Cron Job: Render's Cron Jobs have no
   free tier, and this repo already lives on GitHub, so a scheduled Action reuses an account
   that already exists rather than adding a new paid resource. It needs a repository secret

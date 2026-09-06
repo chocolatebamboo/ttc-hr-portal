@@ -3,13 +3,17 @@ name: Reminder emails
 # Free alternative to a paid Render Cron Job (CB, Sept 2026 — Render's Cron Jobs have no free
 # tier, and this repo already lives on GitHub, so a scheduled Action reuses an account she
 # already has instead of adding a new paid resource or a new third-party service). Pings the
-# same two reminder endpoints a Render Cron Job would've hit on a schedule:
+# three cron endpoints a Render Cron Job would've hit on a schedule:
 #   - POST /api/cron/clockout-reminders  (src/lib/clockout-reminders.ts — "you're still clocked in")
 #   - POST /api/cron/shift-reminders     (src/lib/shift-reminders.ts    — "your shift starts soon")
-# Both are one-time-per-thing nudges with their own dedup tracking server-side, and both
-# comparisons tolerate a few minutes of scheduling jitter (a 3+ hour threshold and a 0-30
-# minute window, respectively) — GitHub's own docs note scheduled workflows can run a few
-# minutes late under load, which is fine here but wouldn't be for something needing exact timing.
+#   - POST /api/cron/auto-clockout       (src/lib/auto-clockout.ts      — force-closes a session
+#     left open past 4 hours, per CB Sept 2026: "it went over twelve hours, and then it
+#     documented it to be twelve hours. I don't necessarily want that")
+# All three are idempotent/self-limiting server-side (dedup tracking for the two reminder jobs,
+# and auto-clockout only ever touches a session that's already past its cap, so a late or
+# doubled-up run can't force-close something early) and tolerate a few minutes of scheduling
+# jitter — GitHub's own docs note scheduled workflows can run a few minutes late under load,
+# which is fine here but wouldn't be for something needing exact timing.
 #
 # Requires a repository secret named CRON_SECRET, matching the CRON_SECRET set on the Render
 # web service's own environment — see README's "Clock-out reminders"/"Shift reminders"
@@ -37,4 +41,8 @@ jobs:
       - name: Shift reminders
         run: |
           curl -sS -X POST https://ttc-hr-portal.onrender.com/api/cron/shift-reminders \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+      - name: Auto clock-out
+        run: |
+          curl -sS -X POST https://ttc-hr-portal.onrender.com/api/cron/auto-clockout \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
