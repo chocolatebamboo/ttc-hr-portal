@@ -32,11 +32,22 @@ function NavLink({ item, showDot }: { item: NavItem; showDot: boolean }) {
  * icon component references, and a Server Component can't pass functions across the RSC
  * boundary into a Client Component prop — only plain values like the parent server layout's
  * already-verified `role` string and this boolean can.
- */
+ *
+ * md:sticky md:top-0 md:self-start md:h-screen (CB, Sept 2026: "I should always kinda see that
+ * side navigation" — the first attempt at this relied entirely on the parent layout
+ * ((portal)/layout.tsx's md:h-screen + nested md:overflow-hidden/md:overflow-y-auto) boxing
+ * this nav into exactly one viewport's height so it would never need to move. In practice that
+ * still left this nav stretching to match its sibling's full (much taller, unbounded) content
+ * height, with the actual nav items sitting in only the top slice of it — everything below
+ * read as a blank column once a long page like Availability was scrolled. `self-start` opts
+ * this element out of that stretch instead of depending on it, `h-screen` gives it its own
+ * fixed height regardless of what the rest of the row does, and `sticky top-0` pins it to
+ * whichever ancestor actually ends up scrolling — so this nav stays correctly sized and in
+ * place even if the parent's own scroll-containment ever regresses again. */
 export default function RoleNav({ role, needsOnboardingAttention = false }: { role: Role; needsOnboardingAttention?: boolean }) {
   const { primary, extra } = navForRole(role);
   return (
-    <nav className="hidden md:flex md:w-56 md:flex-col md:shrink-0 md:overflow-y-auto md:border-r md:border-border md:py-6 md:px-3 md:gap-6">
+    <nav className="hidden md:flex md:sticky md:top-0 md:self-start md:h-screen md:w-56 md:flex-col md:shrink-0 md:overflow-y-auto md:border-r md:border-border md:py-6 md:px-3 md:gap-6">
       <div className="animate-in flex flex-col gap-0.5">
         {primary.map((item) => (
           <NavLink key={item.href} item={item} showDot={needsOnboardingAttention && item.href === "/onboarding"} />
