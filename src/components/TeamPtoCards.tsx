@@ -1,17 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
+import { useState, useEffect } from "react";
 import PtoStatusPill from "@/components/PtoStatusPill";
+import TeamNotesThread from "@/components/TeamNotesThread";
+import { ChevronDownIcon, ChatIcon } from "@/components/icons";
 import { PTO_TYPE_LABEL, formatDateRange } from "@/lib/time";
-import type { AdminPtoRequestDTO, AdminPtoSummaryDTO } from "@/types";
+import type { AdminPtoRequestDTO, AdminPtoSummaryDTO, PtoType } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
 
-/** Same avatar-tone treatment as TeamAvailabilityCards' Card (Sept 2026 card redesign) —
- *  cycling the dashboard's five brand tones (CHIP_TONE in dashboard/page.tsx), keyed off the
- *  name so it stays stable across a reload. Kept as its own local copy rather than a shared
- *  import, matching how initialsOf is already duplicated locally in EmployeesAdminView. */
 const AVATAR_TONES = [
   { bg: "bg-[color-mix(in_srgb,var(--ttc-blue)_15%,white)]", text: "text-[var(--ttc-blue-ink)]" },
   { bg: "bg-[color-mix(in_srgb,var(--ttc-pink)_15%,white)]", text: "text-[var(--ttc-pink-ink)]" },
@@ -31,19 +28,20 @@ function initialsOf(name: string): string {
   return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
 }
 
-/**
- * The HR-wide PTO dashboard's actual card list — fetch, Approve/Deny, Pending/Upcoming
- * sections — extracted from PtoAdminView (Sept 2026) so it can be dropped straight onto the
- * dashboard's own Availability widget page for admins, not just the standalone /admin/pto
- * page. Same reasoning as TeamAvailabilityCards: one card implementation, reused in both
- * places, rather than two copies to keep in sync.
- */
-export default function TeamPtoCards() {
+const TYPE_TONE: Record<PtoType, { bg: string; text: string }> = {
+  VACATION: { bg: "bg-[color-mix(in_srgb,var(--ttc-blue)_15%,white)]", text: "text-[var(--ttc-blue-ink)]" },
+  SICK: { bg: "bg-rose-100", text: "text-rose-800" },
+  PERSONAL: { bg: "bg-violet-100", text: "text-violet-800" },
+  OTHER_APPROVED_LEAVE: { bg: "bg-amber-100", text: "text-amber-800" },
+};
+
+export default function TeamPtoCards({ viewerId }: { viewerId: string }) {
   const [summary, setSummary] = useState<AdminPtoSummaryDTO | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [denyingId, setDenyingId] = useState<string | null>(null);
   const [denyComment, setDenyComment] = useState("");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   async function load() {
     setLoadState("loading");
@@ -79,11 +77,21 @@ export default function TeamPtoCards() {
     }
   }
 
+  async function undo(id: string) {
+    setBusyId(id);
+    try {
+      await fetch(`/api/pto/requests/${id}/undecide`, { method: "POST" });
+    } finally {
+      setBusyId(null);
+      load();
+    }
+  }
+
   if (loadState === "loading") {
     return (
       <div className="space-y-2.5">
         {[0, 1, 2].map((i) => (
-          <div key={i} className="h-20 rounded-2xl border border-border bg-surface animate-pulse" />
+          <div key={i} className="h-24 rounded-2xl border border-border bg-surface animate-pulse" />
         ))}
       </div>
     );
@@ -110,15 +118,19 @@ export default function TeamPtoCards() {
         ) : (
           <div className="space-y-2.5">
             {summary.pending.map((r) => (
-              <PendingCard
+              <Card
                 key={r.id}
-                request={r}
+                row={r}
+                viewerId={viewerId}
                 busy={busyId === r.id}
                 denying={denyingId === r.id}
                 denyComment={denyComment}
+                expanded={expandedId === r.id}
+                onToggleExpand={() => setExpandedId(expandedId === r.id ? null : r.id)}
                 onDenyToggle={() => setDenyingId(denyingId === r.id ? null : r.id)}
                 onDenyCommentChange={setDenyComment}
                 onDecide={decide}
+                onUndo={undo}
               />
             ))}
           </div>
@@ -127,43 +139,30 @@ export default function TeamPtoCards() {
 
       <section>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted mb-2.5">
-          Upcoming approved leave ({summary.upcoming.length})
+          Decided ({summary.decided.length})
         </h2>
-        {summary.upcoming.length === 0 ? (
+        {summary.decided.length === 0 ? (
           <div className="rounded-2xl border border-border bg-surface p-4 text-sm text-muted">
-            No approved time off scheduled from today onward.
+            Nothing decided yet.
           </div>
         ) : (
           <div className="space-y-2.5">
-            {summary.upcoming.map((r) => {
-              const tone = toneForName(r.employeeName);
-              return (
-                <div
-                  key={r.id}
-                  className="bg-surface border border-border rounded-2xl px-4 py-3.5 flex items-center justify-between gap-3"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span
-                      className={`h-9 w-9 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 ${tone.bg} ${tone.text}`}
-                    >
-                      {initialsOf(r.employeeName)}
-                    </span>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">
-                        <Link href={`/team/${r.employeeId}`} className="hover:underline">
-                          {r.employeeName}
-                        </Link>{" "}
-                        · {PTO_TYPE_LABEL[r.type]} · {formatDateRange(r.startDate, r.endDate)}
-                      </p>
-                      <p className="text-xs text-muted">
-                        {r.hours} hours{r.reason ? ` — ${r.reason}` : ""}
-                      </p>
-                    </div>
-                  </div>
-                  <PtoStatusPill status={r.status} />
-                </div>
-              );
-            })}
+            {summary.decided.map((r) => (
+              <Card
+                key={r.id}
+                row={r}
+                viewerId={viewerId}
+                busy={busyId === r.id}
+                denying={false}
+                denyComment=""
+                expanded={expandedId === r.id}
+                onToggleExpand={() => setExpandedId(expandedId === r.id ? null : r.id)}
+                onDenyToggle={() => {}}
+                onDenyCommentChange={() => {}}
+                onDecide={() => {}}
+                onUndo={undo}
+              />
+            ))}
           </div>
         )}
       </section>
@@ -171,75 +170,120 @@ export default function TeamPtoCards() {
   );
 }
 
-function PendingCard({
-  request: r,
+function Card({
+  row: r,
+  viewerId,
   busy,
   denying,
   denyComment,
+  expanded,
+  onToggleExpand,
   onDenyToggle,
   onDenyCommentChange,
   onDecide,
+  onUndo,
 }: {
-  request: AdminPtoRequestDTO;
+  row: AdminPtoRequestDTO;
+  viewerId: string;
   busy: boolean;
   denying: boolean;
   denyComment: string;
+  expanded: boolean;
+  onToggleExpand: () => void;
   onDenyToggle: () => void;
   onDenyCommentChange: (v: string) => void;
   onDecide: (id: string, decision: "APPROVED" | "DENIED", comment?: string) => void;
+  onUndo: (id: string) => void;
 }) {
-  const tone = toneForName(r.employeeName);
+  const avatarTone = toneForName(r.employeeName);
+  const typeTone = TYPE_TONE[r.type];
+  const isPending = r.status === "PENDING";
+
   return (
-    <div className="bg-surface border border-border rounded-2xl p-4 sm:p-5 shadow-sm">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <span
-            className={`h-10 w-10 rounded-full flex items-center justify-center text-sm font-semibold shrink-0 ${tone.bg} ${tone.text}`}
+    <div className="bg-surface border border-border rounded-2xl shadow-sm overflow-hidden">
+      <div className="p-4 sm:p-5">
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+          <button
+            type="button"
+            onClick={onToggleExpand}
+            className="flex items-start gap-3 min-w-0 text-left flex-1"
           >
-            {initialsOf(r.employeeName)}
-          </span>
-          <div className="min-w-0">
-            <p className="text-sm font-medium truncate">
-              <Link href={`/team/${r.employeeId}`} className="hover:underline">
+            <span
+              className={`h-10 w-10 rounded-full flex items-center justify-center text-sm font-semibold shrink-0 ${avatarTone.bg} ${avatarTone.text}`}
+            >
+              {initialsOf(r.employeeName)}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-base font-semibold truncate flex items-center gap-1.5">
                 {r.employeeName}
-              </Link>{" "}
-              · {PTO_TYPE_LABEL[r.type]} · {formatDateRange(r.startDate, r.endDate)}
-            </p>
-            <p className="text-xs text-muted">
-              {r.hours} hours{r.reason ? ` — ${r.reason}` : ""}
-            </p>
+                <ChatIcon className={`h-3.5 w-3.5 shrink-0 ${expanded ? "text-accent-ink" : "text-muted"}`} />
+                <ChevronDownIcon
+                  className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${expanded ? "rotate-180" : ""}`}
+                />
+              </p>
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                <span className={`inline-flex items-center rounded-lg px-2.5 py-1 text-xs font-semibold leading-tight ${typeTone.bg} ${typeTone.text}`}>
+                  {PTO_TYPE_LABEL[r.type]}
+                </span>
+                <span className="text-sm text-muted">
+                  {formatDateRange(r.startDate, r.endDate)} · {r.hours} hrs
+                </span>
+              </div>
+              {r.reason && <p className="text-sm text-muted italic mt-1.5">&ldquo;{r.reason}&rdquo;</p>}
+              {!isPending && r.reviewComment && (
+                <p className="text-sm text-muted italic mt-1.5">Reviewer note: &ldquo;{r.reviewComment}&rdquo;</p>
+              )}
+            </div>
+          </button>
+
+          <div className="flex items-center gap-2 shrink-0 sm:pl-2">
+            {isPending ? (
+              <>
+                <button onClick={() => onDecide(r.id, "APPROVED")} disabled={busy} className="btn-primary text-sm px-4 py-2">
+                  Approve
+                </button>
+                <button onClick={onDenyToggle} disabled={busy} className="btn-neutral text-sm px-4 py-2">
+                  Deny
+                </button>
+              </>
+            ) : (
+              <>
+                <PtoStatusPill status={r.status} />
+                <button
+                  onClick={() => onUndo(r.id)}
+                  disabled={busy}
+                  className="text-xs font-medium text-muted hover:text-accent-ink underline shrink-0"
+                >
+                  Undo
+                </button>
+              </>
+            )}
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={() => onDecide(r.id, "APPROVED")}
-            disabled={busy}
-            className="btn-primary text-sm px-4 py-2"
-          >
-            Approve
-          </button>
-          <button onClick={onDenyToggle} disabled={busy} className="btn-neutral text-sm px-4 py-2">
-            Deny
-          </button>
-        </div>
+
+        {denying && (
+          <div className="mt-3 flex flex-col sm:flex-row gap-2 bg-black/[0.02] rounded-lg p-3">
+            <textarea
+              value={denyComment}
+              onChange={(e) => onDenyCommentChange(e.target.value)}
+              placeholder="Optional note for the team member…"
+              rows={2}
+              className="flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
+            />
+            <button
+              onClick={() => onDecide(r.id, "DENIED", denyComment.trim() || undefined)}
+              disabled={busy}
+              className="btn-primary text-sm px-4 py-2 self-start"
+            >
+              Confirm deny
+            </button>
+          </div>
+        )}
       </div>
 
-      {denying && (
-        <div className="mt-3 flex flex-col sm:flex-row gap-2 bg-black/[0.02] rounded-lg p-3">
-          <textarea
-            value={denyComment}
-            onChange={(e) => onDenyCommentChange(e.target.value)}
-            placeholder="Optional note for the team member…"
-            rows={2}
-            className="flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
-          />
-          <button
-            onClick={() => onDecide(r.id, "DENIED", denyComment.trim() || undefined)}
-            disabled={busy}
-            className="btn-primary text-sm px-4 py-2 self-start"
-          >
-            Confirm deny
-          </button>
+      {expanded && (
+        <div className="border-t border-border bg-black/[0.02] p-4 sm:p-5">
+          <TeamNotesThread employeeId={r.employeeId} viewerId={viewerId} />
         </div>
       )}
     </div>
