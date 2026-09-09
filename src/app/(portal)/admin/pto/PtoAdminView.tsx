@@ -8,12 +8,39 @@ import type { AdminPtoRequestDTO, AdminPtoSummaryDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
 
+/** Same avatar-tone treatment as AvailabilityAdminView's Card (Sept 2026 card redesign) —
+ *  cycling the dashboard's five brand tones (CHIP_TONE in dashboard/page.tsx), keyed off the
+ *  name so it stays stable across a reload. Kept as its own local copy rather than a shared
+ *  import, matching how initialsOf is already duplicated locally in EmployeesAdminView. */
+const AVATAR_TONES = [
+  { bg: "bg-[color-mix(in_srgb,var(--ttc-blue)_15%,white)]", text: "text-[var(--ttc-blue-ink)]" },
+  { bg: "bg-[color-mix(in_srgb,var(--ttc-pink)_15%,white)]", text: "text-[var(--ttc-pink-ink)]" },
+  { bg: "bg-amber-100", text: "text-amber-800" },
+  { bg: "bg-emerald-100", text: "text-emerald-800" },
+  { bg: "bg-violet-100", text: "text-violet-800" },
+];
+
+function toneForName(name: string) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return AVATAR_TONES[hash % AVATAR_TONES.length];
+}
+
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
+}
+
 /**
  * HR-wide PTO dashboard — a Pending queue for HR to act on directly (deciding here reuses
  * /api/pto/requests/[id]/decide, the same endpoint a supervisor uses on TeamPtoSection — an
  * HR/Super Admin passes assertCanReviewTimesheet's admin bypass for any employee), plus an
  * Upcoming section so HR can see who's already approved to be out before it becomes a
  * same-day surprise.
+ *
+ * CB, Sept 2026: same card/widget redesign as the Team Availability admin page right after
+ * it, "so both admin review pages look consistent" — one card per person instead of a dense
+ * divided list.
  */
 export default function PtoAdminView() {
   const [summary, setSummary] = useState<AdminPtoSummaryDTO | null>(null);
@@ -64,9 +91,9 @@ export default function PtoAdminView() {
       </p>
 
       {loadState === "loading" && (
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="h-16 rounded-xl border border-border bg-surface animate-pulse" />
+            <div key={i} className="h-20 rounded-2xl border border-border bg-surface animate-pulse" />
           ))}
         </div>
       )}
@@ -80,17 +107,17 @@ export default function PtoAdminView() {
       {loadState === "ready" && summary && (
         <>
           <section className="mb-8">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted mb-2">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted mb-2.5">
               Pending ({summary.pending.length})
             </h2>
             {summary.pending.length === 0 ? (
-              <div className="rounded-xl border border-border bg-surface p-4 text-sm text-muted">
+              <div className="rounded-2xl border border-border bg-surface p-4 text-sm text-muted">
                 Nothing pending right now.
               </div>
             ) : (
-              <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
+              <div className="space-y-2.5">
                 {summary.pending.map((r) => (
-                  <PendingRow
+                  <PendingCard
                     key={r.id}
                     request={r}
                     busy={busyId === r.id}
@@ -106,29 +133,44 @@ export default function PtoAdminView() {
           </section>
 
           <section>
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted mb-2">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted mb-2.5">
               Upcoming approved leave ({summary.upcoming.length})
             </h2>
             {summary.upcoming.length === 0 ? (
-              <div className="rounded-xl border border-border bg-surface p-4 text-sm text-muted">
+              <div className="rounded-2xl border border-border bg-surface p-4 text-sm text-muted">
                 No approved time off scheduled from today onward.
               </div>
             ) : (
-              <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
-                {summary.upcoming.map((r) => (
-                  <div key={r.id} className="px-4 py-3.5 flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium">
-                        <Link href={`/team/${r.employeeId}`} className="hover:underline">
-                          {r.employeeName}
-                        </Link>{" "}
-                        · {PTO_TYPE_LABEL[r.type]} · {formatDateRange(r.startDate, r.endDate)}
-                      </p>
-                      <p className="text-xs text-muted">{r.hours} hours{r.reason ? ` — ${r.reason}` : ""}</p>
+              <div className="space-y-2.5">
+                {summary.upcoming.map((r) => {
+                  const tone = toneForName(r.employeeName);
+                  return (
+                    <div
+                      key={r.id}
+                      className="bg-surface border border-border rounded-2xl px-4 py-3.5 flex items-center justify-between gap-3"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span
+                          className={`h-9 w-9 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 ${tone.bg} ${tone.text}`}
+                        >
+                          {initialsOf(r.employeeName)}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">
+                            <Link href={`/team/${r.employeeId}`} className="hover:underline">
+                              {r.employeeName}
+                            </Link>{" "}
+                            · {PTO_TYPE_LABEL[r.type]} · {formatDateRange(r.startDate, r.endDate)}
+                          </p>
+                          <p className="text-xs text-muted">
+                            {r.hours} hours{r.reason ? ` — ${r.reason}` : ""}
+                          </p>
+                        </div>
+                      </div>
+                      <PtoStatusPill status={r.status} />
                     </div>
-                    <PtoStatusPill status={r.status} />
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </section>
@@ -138,7 +180,7 @@ export default function PtoAdminView() {
   );
 }
 
-function PendingRow({
+function PendingCard({
   request: r,
   busy,
   denying,
@@ -155,29 +197,37 @@ function PendingRow({
   onDenyCommentChange: (v: string) => void;
   onDecide: (id: string, decision: "APPROVED" | "DENIED", comment?: string) => void;
 }) {
+  const tone = toneForName(r.employeeName);
   return (
-    <div className="px-4 py-3.5">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-sm font-medium">
-            <Link href={`/team/${r.employeeId}`} className="hover:underline">
-              {r.employeeName}
-            </Link>{" "}
-            · {PTO_TYPE_LABEL[r.type]} · {formatDateRange(r.startDate, r.endDate)}
-          </p>
-          <p className="text-xs text-muted">
-            {r.hours} hours{r.reason ? ` — ${r.reason}` : ""}
-          </p>
+    <div className="bg-surface border border-border rounded-2xl p-4 sm:p-5 shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <span
+            className={`h-10 w-10 rounded-full flex items-center justify-center text-sm font-semibold shrink-0 ${tone.bg} ${tone.text}`}
+          >
+            {initialsOf(r.employeeName)}
+          </span>
+          <div className="min-w-0">
+            <p className="text-sm font-medium truncate">
+              <Link href={`/team/${r.employeeId}`} className="hover:underline">
+                {r.employeeName}
+              </Link>{" "}
+              · {PTO_TYPE_LABEL[r.type]} · {formatDateRange(r.startDate, r.endDate)}
+            </p>
+            <p className="text-xs text-muted">
+              {r.hours} hours{r.reason ? ` — ${r.reason}` : ""}
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={() => onDecide(r.id, "APPROVED")}
             disabled={busy}
-            className="btn-primary text-xs px-3 py-1.5"
+            className="btn-primary text-sm px-4 py-2"
           >
             Approve
           </button>
-          <button onClick={onDenyToggle} disabled={busy} className="btn-neutral text-xs px-3 py-1.5">
+          <button onClick={onDenyToggle} disabled={busy} className="btn-neutral text-sm px-4 py-2">
             Deny
           </button>
         </div>
@@ -195,7 +245,7 @@ function PendingRow({
           <button
             onClick={() => onDecide(r.id, "DENIED", denyComment.trim() || undefined)}
             disabled={busy}
-            className="btn-primary text-xs px-3 py-1.5 self-start"
+            className="btn-primary text-sm px-4 py-2 self-start"
           >
             Confirm deny
           </button>
