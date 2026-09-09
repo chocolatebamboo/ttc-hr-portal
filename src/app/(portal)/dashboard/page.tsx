@@ -10,19 +10,19 @@ import { listMyAvailability, listAdminAvailability } from "@/lib/availability";
 import TimeClockCard from "@/components/TimeClockCard";
 import TimeOffSection from "@/components/TimeOffSection";
 import AvailabilityStatusSection from "@/components/AvailabilityStatusSection";
-import { CalendarIcon, FolderIcon, ChecklistIcon, MegaphoneIcon, ChartIcon, BellIcon } from "@/components/icons";
+import { FolderIcon, ChecklistIcon, MegaphoneIcon, ChartIcon, BellIcon, type IconProps } from "@/components/icons";
 import { formatHoursCompact } from "@/lib/time";
 import type { AnnouncementDTO, DocumentDTO } from "@/types";
 
 // CB, Sept 2026: "I want you to remove the quick action my time because we already have my
 // time within the mobile view" — My Time is now reachable directly from BottomNav on mobile
 // (and from the sidebar on desktop, same as it always was there too), so it came out of this
-// list entirely rather than just on mobile. Availability and Reports were added earlier the
-// same session. Reports has no employee-facing view (see admin/reports/page.tsx's own
-// redirect) so it's appended only for admins — see quickActions below — instead of living in
-// this shared base list everyone gets.
+// list entirely rather than just on mobile. Availability came out the same way once the pink
+// dashboard tile and the bottom-nav tab both already got you there — "that availability
+// within the quick actions could go, for right now." Reports has no employee-facing view
+// (see admin/reports/page.tsx's own redirect) so it's appended only for admins — see
+// quickActions below — instead of living in this shared base list everyone gets.
 const QUICK_ACTIONS = [
-  { label: "Availability", href: "/availability", icon: CalendarIcon, tone: "pink" as const },
   { label: "View Documents", href: "/documents", icon: FolderIcon, tone: "amber" as const },
   { label: "View Onboarding", href: "/onboarding", icon: ChecklistIcon, tone: "emerald" as const },
 ];
@@ -127,7 +127,15 @@ export default async function DashboardPage() {
             tone="pink"
             href="/dashboard/availability"
           />
-          <StatCard label="Docs to review" value={String(pendingAcknowledgments.length)} tone="amber" href="/documents" />
+          {/* CB, Sept 2026: "for admins, I want that to be replaced... switch them out for
+              reports... keep it yellow" — an admin's yellow tile becomes a straight tap-through
+              to Reports instead of their own doc acknowledgments (still visible either way,
+              under Needs your attention below). Everyone else keeps Docs to review as-is. */}
+          {isAdmin(employee) ? (
+            <StatCard label="Reports" icon={ChartIcon} tone="amber" href="/admin/reports" />
+          ) : (
+            <StatCard label="Docs to review" value={String(pendingAcknowledgments.length)} tone="amber" href="/documents" />
+          )}
         </div>
 
         <div className="animate-in animate-in-4">
@@ -212,19 +220,27 @@ export default async function DashboardPage() {
   );
 }
 
-// CB, Sept 2026: these three tiles should be tappable straight through to whatever they're
-// summarizing — "This week" and "Pending PTO" to My Time (hours and PTO both live there),
-// "Docs to review" to Documents — rather than sitting there as plain readouts with nowhere to
-// go. transition-transform + active:scale gives the same tap feedback Quick Actions already
-// has, so tapping a stat tile feels like the same kind of control, not a different one.
+// CB, Sept 2026: these tiles should be tappable straight through to whatever they're
+// summarizing — "This week" to its own widget breakdown, "Availability" (Pending PTO +
+// availability combined) to its own widget page, "Docs to review"/"Reports" to Documents or
+// Reports — rather than sitting there as plain readouts with nowhere to go.
+// transition-transform + active:scale gives the same tap feedback Quick Actions already has,
+// so tapping a stat tile feels like the same kind of control, not a different one.
+//
+// `icon` is the admin "Reports" tile's escape hatch: Reports has no natural pending-count
+// number to headline (it's a generate-on-demand report, not a queue), so that tile shows its
+// Quick Actions icon at the same visual weight the other tiles give their number instead of a
+// number that would be either fake or misleading.
 function StatCard({
   label,
   value,
+  icon: Icon,
   tone,
   href,
 }: {
   label: string;
-  value: string;
+  value?: string;
+  icon?: (props: IconProps) => React.ReactElement;
   tone: "blue" | "pink" | "amber";
   href: string;
 }) {
@@ -245,7 +261,11 @@ function StatCard({
       className={`block rounded-2xl p-4 transition-transform active:scale-95 ${TONE[tone]}`}
       style={style}
     >
-      <p className="text-xl font-bold leading-none tabular-nums">{value}</p>
+      {Icon ? (
+        <Icon className="h-6 w-6" />
+      ) : (
+        <p className="text-xl font-bold leading-none tabular-nums">{value}</p>
+      )}
       <p className="text-[11px] font-medium mt-1.5 opacity-90 leading-tight">{label}</p>
     </Link>
   );
