@@ -8,5 +8,5 @@ export default async function AdminAvailabilityPage() {
   if (!employee) redirect("/login");
   if (!isAdmin(employee)) redirect("/dashboard");
 
-  return <AvailabilityAdminView />;
+  return <AvailabilityAdminView viewerId={employee.id} />;
 }
