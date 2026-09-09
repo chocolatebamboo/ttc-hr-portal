@@ -39,6 +39,34 @@ export async function uploadDocumentFile(file: File, documentId: string): Promis
 }
 
 /**
+ * Uploads a file attached to a team-notes message (src/lib/team-notes.ts) and returns the
+ * storage key to save on the TeamNote row. Reuses the same private "documents" bucket as
+ * uploadDocumentFile above rather than a new bucket — these attachments aren't part of the
+ * formal company Documents library (no category/visibility/acknowledgment), just files
+ * dropped into a conversation, so a "team-notes/" key prefix is enough to keep them out of
+ * each other's way without provisioning separate storage. Callers must already have confirmed
+ * (via assertCanAccessEmployeeRecords) that the caller may post to this employee's thread —
+ * this function performs no authorization of its own, same convention as the other uploaders
+ * in this file.
+ */
+export async function uploadTeamNoteFile(file: File, employeeId: string): Promise<string> {
+  const admin = createSupabaseAdminClient();
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_") || "file";
+  const storageKey = `team-notes/${employeeId}/${Date.now()}-${safeName}`;
+
+  const bytes = await file.arrayBuffer();
+  const { error } = await admin.storage.from(BUCKET).upload(storageKey, bytes, {
+    contentType: file.type || "application/octet-stream",
+    upsert: false,
+  });
+
+  if (error) {
+    throw new DocumentUploadError(`Couldn't upload the file: ${error.message}`);
+  }
+  return storageKey;
+}
+
+/**
  * Mints a short-lived signed URL for a document's file. Callers MUST resolve the Document
  * row through withRlsContext (src/lib/documents.ts) first and confirm it's visible to the
  * caller — that read is the actual authorization check; this function trusts its input
