@@ -3,9 +3,15 @@ import Link from "next/link";
 import { getCurrentEmployee } from "@/lib/auth";
 import { canAccessEmployeeRecords } from "@/lib/authorization";
 import { withRlsContext } from "@/lib/db";
+import TeamNotesThread from "@/components/TeamNotesThread";
 import ReviewTimesheetView from "./ReviewTimesheetView";
 import TeamPtoSection from "./TeamPtoSection";
 import TeamAvailabilitySection from "./TeamAvailabilitySection";
+
+/** Hand-declared rather than relying on inference through withRlsContext's callback — same
+ *  convention src/lib/availability.ts's AvailabilityRow and dashboard/week/page.tsx's
+ *  WeekEntryRow follow — narrowed to just the fields this page's select actually reads. */
+type ReviewTarget = { id: string; firstName: string; lastName: string; preferredName: string | null; jobTitle: string };
 
 export default async function ReviewEmployeePage(
   props: PageProps<"/team/[employeeId]">
@@ -21,11 +27,14 @@ export default async function ReviewEmployeePage(
     notFound();
   }
 
-  const target = await withRlsContext({ employeeId: reviewer.id, role: reviewer.role }, (tx) =>
-    tx.employee.findUnique({
-      where: { id: employeeId },
-      select: { id: true, firstName: true, lastName: true, preferredName: true, jobTitle: true },
-    })
+  const target: ReviewTarget | null = await withRlsContext(
+    { employeeId: reviewer.id, role: reviewer.role },
+    async (tx) => {
+      return tx.employee.findUnique({
+        where: { id: employeeId },
+        select: { id: true, firstName: true, lastName: true, preferredName: true, jobTitle: true },
+      });
+    }
   );
   if (!target) notFound();
 
@@ -47,6 +56,13 @@ export default async function ReviewEmployeePage(
 
       <h2 className="text-sm font-medium text-muted mb-2 mt-8">Availability</h2>
       <TeamAvailabilitySection employeeId={target.id} />
+
+      {/* CB, Sept 2026: "say I accept it, then I would be able to, like, add notes, add
+          documents... so we could communicate through there." Same thread whichever side you
+          view it from — this employee, reviewing it here, sees the exact messages the person
+          themselves sees on their own /notes page. */}
+      <h2 className="text-sm font-medium text-muted mb-2 mt-8">Notes</h2>
+      <TeamNotesThread employeeId={target.id} viewerId={reviewer.id} />
     </div>
   );
 }
