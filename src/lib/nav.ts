@@ -11,6 +11,7 @@ import {
   IdCardIcon,
   ChartIcon,
   GearIcon,
+  ChatIcon,
   type IconProps,
 } from "@/components/icons";
 
@@ -26,6 +27,10 @@ export const EMPLOYEE_NAV: NavItem[] = [
   { label: "Availability", href: "/availability", icon: CalendarIcon },
   { label: "Documents", href: "/documents", icon: FolderIcon },
   { label: "Onboarding", href: "/onboarding", icon: ChecklistIcon },
+  // CB, Sept 2026: the employee-facing side of the notes/messaging thread — "we would be
+  // able to communicate back and forth" — their own /notes, always reachable, same as
+  // every other personal section here.
+  { label: "Notes", href: "/notes", icon: ChatIcon },
   { label: "Directory", href: "/directory", icon: UsersIcon },
   { label: "Announcements", href: "/announcements", icon: MegaphoneIcon },
   { label: "My Profile", href: "/profile", icon: UserCircleIcon },
