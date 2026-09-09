@@ -1,6 +1,5 @@
 import { withRlsContext } from "@/lib/db";
 import { isAdmin, ForbiddenError } from "@/lib/authorization";
-import { todayDateKey } from "@/lib/time";
 import type { AdminPtoRequestDTO, AdminPtoSummaryDTO, CurrentEmployee } from "@/types";
 
 export class InvalidPtoRequestError extends Error {
@@ -18,7 +17,6 @@ export interface PtoRequestInput {
   reason?: string;
 }
 
-/** Employee submits a new PTO request — always for themselves; status starts Pending. */
 export async function submitPtoRequest(actor: CurrentEmployee, input: PtoRequestInput) {
   if (input.endDate < input.startDate) {
     throw new InvalidPtoRequestError("End date must be on or after the start date.");
@@ -42,7 +40,6 @@ export async function submitPtoRequest(actor: CurrentEmployee, input: PtoRequest
   );
 }
 
-/** Employee cancels their own request — only while it's still Pending. */
 export async function cancelPtoRequest(actor: CurrentEmployee, requestId: string) {
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const existing = await tx.ptoRequest.findUnique({ where: { id: requestId } });
@@ -58,12 +55,6 @@ export async function cancelPtoRequest(actor: CurrentEmployee, requestId: string
 
 type Decision = "APPROVED" | "DENIED";
 
-/**
- * Supervisor/HR decides on a request. Authorization (is the reviewer actually this
- * employee's supervisor, or HR/Super Admin?) is checked by the caller
- * (assertCanReviewTimesheet reused — the relationship is identical to timesheet review) and
- * enforced again here via withRlsContext under the REVIEWER's identity.
- */
 export async function decidePtoRequest(
   reviewer: CurrentEmployee,
   requestId: string,
@@ -89,28 +80,42 @@ export async function decidePtoRequest(
 }
 
 /**
- * HR-wide PTO dashboard (src/app/(portal)/admin/pto) — admin-only, like listAdminAttendance:
- * no new RLS policy needed since is_admin() already grants pto_select full org-wide read
- * access (prisma/rls.sql). Returns two lists: every still-Pending request (the queue HR needs
- * to act on) and every already-Approved request starting today or later (so HR can see
- * upcoming coverage gaps before they happen, not just the backlog).
+ * Reviewer walks back a decision they already made — same "unapprove" capability as
+ * undecideAvailability, for PTO. Puts the request back to Pending and clears the review
+ * fields, so it shows up in the Pending queue again exactly as if it had never been decided.
  */
+export async function undecidePtoRequest(reviewer: CurrentEmployee, requestId: string) {
+  return withRlsContext({ employeeId: reviewer.id, role: reviewer.role }, async (tx) => {
+    const existing = await tx.ptoRequest.findUnique({ where: { id: requestId } });
+    if (!existing || (existing.status !== "APPROVED" && existing.status !== "DENIED")) {
+      throw new InvalidPtoRequestError('Only an "Approved" or "Denied" request can be reopened.');
+    }
+
+    return tx.ptoRequest.update({
+      where: { id: requestId },
+      data: { status: "PENDING", reviewedById: null, reviewedAt: null, reviewComment: null },
+    });
+  });
+}
+
+/** GET /api/admin/pto — a Pending queue HR needs to act on, and everything already Decided
+ *  (Approved or Denied), most recent 200 by reviewedAt. Same pending/decided shape
+ *  listAdminAvailability uses. */
 export async function listAdminPto(actor: CurrentEmployee): Promise<AdminPtoSummaryDTO> {
   if (!isAdmin(actor)) throw new ForbiddenError();
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
-    const today = new Date(`${todayDateKey()}T00:00:00.000Z`);
-
-    const [pending, upcoming] = await Promise.all([
+    const [pending, decided] = await Promise.all([
       tx.ptoRequest.findMany({
         where: { status: "PENDING" },
         include: { employee: { select: { firstName: true, lastName: true, preferredName: true } } },
         orderBy: { createdAt: "asc" },
       }),
       tx.ptoRequest.findMany({
-        where: { status: "APPROVED", endDate: { gte: today } },
+        where: { status: { in: ["APPROVED", "DENIED"] } },
         include: { employee: { select: { firstName: true, lastName: true, preferredName: true } } },
-        orderBy: { startDate: "asc" },
+        orderBy: { reviewedAt: "desc" },
+        take: 200,
       }),
     ]);
 
@@ -129,6 +134,6 @@ export async function listAdminPto(actor: CurrentEmployee): Promise<AdminPtoSumm
       createdAt: r.createdAt.toISOString(),
     });
 
-    return { pending: pending.map(toDTO), upcoming: upcoming.map(toDTO) };
+    return { pending: pending.map(toDTO), decided: decided.map(toDTO) };
   });
 }
