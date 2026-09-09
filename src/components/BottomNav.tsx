@@ -2,12 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { HomeIcon, ClockIcon, FolderIcon, MoreIcon } from "@/components/icons";
+import { HomeIcon, ClockIcon, CalendarIcon, MoreIcon } from "@/components/icons";
 
+// CB, Sept 2026: "I wanna replace [Documents] with the availability tab instead for easy
+// access... the documents could be in the more section" — Documents drops out of the fixed
+// bar (still reachable one tap away on /more, see that page's own filter) and Availability
+// takes its slot instead.
 const ITEMS = [
   { label: "Home", href: "/dashboard", Icon: HomeIcon },
   { label: "My Time", href: "/time", Icon: ClockIcon },
-  { label: "Documents", href: "/documents", Icon: FolderIcon },
+  { label: "Availability", href: "/availability", Icon: CalendarIcon },
   { label: "More", href: "/more", Icon: MoreIcon },
 ];
 
