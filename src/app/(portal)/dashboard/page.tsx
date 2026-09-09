@@ -11,7 +11,7 @@ import { formatSlotDate } from "@/lib/availability-format";
 import TimeClockCard from "@/components/TimeClockCard";
 import PtoStatusPill from "@/components/PtoStatusPill";
 import AvailabilityStatusPill from "@/components/AvailabilityStatusPill";
-import { ClockIcon, CalendarIcon, FolderIcon, ChecklistIcon, MegaphoneIcon, ChartIcon, BellIcon } from "@/components/icons";
+import { CalendarIcon, FolderIcon, ChecklistIcon, MegaphoneIcon, ChartIcon, BellIcon } from "@/components/icons";
 import { PTO_TYPE_LABEL, formatDateRange, formatHoursCompact } from "@/lib/time";
 import type { AnnouncementDTO, AvailabilityDTO, AvailabilitySlot, DocumentDTO, PtoStatus, PtoType } from "@/types";
 
@@ -21,15 +21,14 @@ import type { AnnouncementDTO, AvailabilityDTO, AvailabilitySlot, DocumentDTO, P
  *  actually reads. */
 type RecentPtoRow = { id: string; type: PtoType; status: PtoStatus; startDate: Date; endDate: Date };
 
-// CB, Sept 2026: "we need the availability to show up there... we need the my time, and we
-// need the reports to be on there as well" — Request Time Off and View Timesheet both already
-// pointed at /time (a leftover from before Time Off was merged into My Time), so that pair
-// collapses into one "My Time" entry rather than keeping two links to the same page; Availability
-// and Reports are new. Reports has no employee-facing view (see admin/reports/page.tsx's own
+// CB, Sept 2026: "I want you to remove the quick action my time because we already have my
+// time within the mobile view" — My Time is now reachable directly from BottomNav on mobile
+// (and from the sidebar on desktop, same as it always was there too), so it came out of this
+// list entirely rather than just on mobile. Availability and Reports were added earlier the
+// same session. Reports has no employee-facing view (see admin/reports/page.tsx's own
 // redirect) so it's appended only for admins — see quickActions below — instead of living in
 // this shared base list everyone gets.
 const QUICK_ACTIONS = [
-  { label: "My Time", href: "/time", icon: ClockIcon, tone: "blue" as const },
   { label: "Availability", href: "/availability", icon: CalendarIcon, tone: "pink" as const },
   { label: "View Documents", href: "/documents", icon: FolderIcon, tone: "amber" as const },
   { label: "View Onboarding", href: "/onboarding", icon: ChecklistIcon, tone: "emerald" as const },
