@@ -8,5 +8,5 @@ export default async function AdminPtoPage() {
   if (!employee) redirect("/login");
   if (!isAdmin(employee)) redirect("/dashboard");
 
-  return <PtoAdminView />;
+  return <PtoAdminView viewerId={employee.id} />;
 }
