@@ -10,9 +10,10 @@ export default async function MorePage() {
   if (!employee) redirect("/login");
 
   const { primary, extra } = navForRole(employee.role);
-  // Home/My Time/Documents already live in the bottom bar — this screen is everything
-  // past those, plus the admin section for roles that have one.
-  const rest = primary.filter((i) => !["/dashboard", "/time", "/documents"].includes(i.href));
+  // Home/My Time/Availability already live in the bottom bar (CB, Sept 2026: swapped in for
+  // Documents, which now surfaces here instead) — this screen is everything past those, plus
+  // the admin section for roles that have one.
+  const rest = primary.filter((i) => !["/dashboard", "/time", "/availability"].includes(i.href));
 
   // Same live attention flag BottomNav puts a dot on "More" for — repeated here on the actual
   // Onboarding row, since this is the screen that dot is pointing at.
