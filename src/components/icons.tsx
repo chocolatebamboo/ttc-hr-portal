@@ -254,3 +254,14 @@ export function BellIcon({ className = base }: IconProps) {
     </svg>
   );
 }
+
+// CB, Sept 2026: the notes/messaging thread between admin and team member ("a texting
+// feature to where we would be able to communicate back and forth") — a plain chat bubble,
+// same hand-authored stroke style as every other icon here.
+export function ChatIcon({ className = base }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
+      <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7A2.5 2.5 0 0 1 17.5 16H10l-4.5 4v-4H6.5A2.5 2.5 0 0 1 4 13.5v-7Z" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
