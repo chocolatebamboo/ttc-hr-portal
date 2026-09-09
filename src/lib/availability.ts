@@ -187,6 +187,31 @@ export async function decideAvailability(
   });
 }
 
+/**
+ * Reviewer walks back a decision they already made — CB (Sept 2026), on the redesigned admin
+ * card view: "I see approved, but I should be able to, like, unapprove it." Puts the
+ * submission back to Pending (never CANCELLED — that status means the EMPLOYEE withdrew it,
+ * see cancelAvailabilitySubmission; this is the reviewer reopening their own decision) and
+ * clears the review fields, so it shows up in the Pending queue again exactly as if it had
+ * never been decided, ready to be approved or denied again. Same authorization shape as
+ * decideAvailability: the route checks assertCanReviewAvailability first, and this runs under
+ * the reviewer's own RLS identity as a second, independent check.
+ */
+export async function undecideAvailability(reviewer: CurrentEmployee, submissionId: string): Promise<AvailabilityDTO> {
+  return withRlsContext({ employeeId: reviewer.id, role: reviewer.role }, async (tx) => {
+    const existing = await tx.availabilitySubmission.findUnique({ where: { id: submissionId } });
+    if (!existing || (existing.status !== "APPROVED" && existing.status !== "DENIED")) {
+      throw new InvalidAvailabilityError('Only an "Approved" or "Denied" submission can be reopened.');
+    }
+
+    const row = await tx.availabilitySubmission.update({
+      where: { id: submissionId },
+      data: { status: "PENDING", reviewedById: null, reviewedAt: null, reviewComment: null },
+    });
+    return toDTO(row);
+  });
+}
+
 /** Looks up which employee a submission belongs to, without any authorization check of its
  *  own — used by the decide route to resolve the employeeId assertCanReviewAvailability needs
  *  before it can decide whether the caller may act on it at all. Runs under the CALLER's own
@@ -203,7 +228,7 @@ export async function findAvailabilitySubmissionEmployeeId(actor: CurrentEmploye
 /** HR-wide availability roster (src/app/(portal)/admin/availability) — admin-only, like
  *  listAdminPto: no new RLS policy needed since is_admin() already grants availability_select
  *  full org-wide read access (prisma/rls.sql). Split into a Pending queue HR needs to act on
- *  and everything already Decided, same shape listAdminPto uses for pending/upcoming. Decided
+ *  and everything already Decided, same shape listAdminPto uses for pending/decided. Decided
  *  is capped to the most recent 200 so this stays one page rather than growing forever. */
 export async function listAdminAvailability(
   actor: CurrentEmployee
