@@ -1,18 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
+import { useState, useEffect } from "react";
 import AvailabilityStatusPill from "@/components/AvailabilityStatusPill";
-import { describeSlots } from "@/lib/availability-format";
+import TeamNotesThread from "@/components/TeamNotesThread";
+import { ChevronDownIcon, ChatIcon } from "@/components/icons";
+import { slotChips } from "@/lib/availability-format";
 import type { AdminAvailabilityDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
 
-/** Cycles the same five brand tones the dashboard's Quick Actions chips already use
- *  (CHIP_TONE in dashboard/page.tsx), keyed off the name so a given person's avatar color is
- *  stable across a reload rather than reshuffling. AdminAvailabilityDTO only carries
- *  employeeName (not a photo or id-stable field worth hashing on), so the name is what's
- *  available to key off of here. */
 const AVATAR_TONES = [
   { bg: "bg-[color-mix(in_srgb,var(--ttc-blue)_15%,white)]", text: "text-[var(--ttc-blue-ink)]" },
   { bg: "bg-[color-mix(in_srgb,var(--ttc-pink)_15%,white)]", text: "text-[var(--ttc-pink-ink)]" },
@@ -32,22 +28,14 @@ function initialsOf(name: string): string {
   return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
 }
 
-/**
- * The HR-wide availability roster's actual card list — fetch, Approve/Deny, Pending/Decided
- * sections — extracted from AvailabilityAdminView (Sept 2026) so it can be dropped straight
- * onto the dashboard's own Availability widget page for admins, not just the standalone
- * /admin/availability page. CB: "when we go on the pink availability block, that's where I
- * want those things to show... it's not supposed to be a whole different thing where we have
- * to do extra steps." AvailabilityAdminView and this dashboard widget page both just render
- * this component now, so there's one card implementation, not two to keep in sync.
- */
-export default function TeamAvailabilityCards() {
+export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }) {
   const [pending, setPending] = useState<AdminAvailabilityDTO[]>([]);
   const [decided, setDecided] = useState<AdminAvailabilityDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [denyingId, setDenyingId] = useState<string | null>(null);
   const [denyComment, setDenyComment] = useState("");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   async function load() {
     setLoadState("loading");
@@ -80,6 +68,16 @@ export default function TeamAvailabilityCards() {
       setBusyId(null);
       setDenyingId(null);
       setDenyComment("");
+      load();
+    }
+  }
+
+  async function undo(submissionId: string) {
+    setBusyId(submissionId);
+    try {
+      await fetch(`/api/availability/${submissionId}/undecide`, { method: "POST" });
+    } finally {
+      setBusyId(null);
       load();
     }
   }
@@ -118,12 +116,16 @@ export default function TeamAvailabilityCards() {
               <Card
                 key={r.id}
                 row={r}
+                viewerId={viewerId}
                 busy={busyId === r.id}
                 denying={denyingId === r.id}
                 denyComment={denyComment}
+                expanded={expandedId === r.id}
+                onToggleExpand={() => setExpandedId(expandedId === r.id ? null : r.id)}
                 onDenyToggle={() => setDenyingId(denyingId === r.id ? null : r.id)}
                 onDenyCommentChange={setDenyComment}
                 onDecide={decide}
+                onUndo={undo}
               />
             ))}
           </div>
@@ -141,7 +143,20 @@ export default function TeamAvailabilityCards() {
         ) : (
           <div className="space-y-2.5">
             {decided.map((r) => (
-              <Card key={r.id} row={r} busy={false} denying={false} denyComment="" onDenyToggle={() => {}} onDenyCommentChange={() => {}} onDecide={() => {}} />
+              <Card
+                key={r.id}
+                row={r}
+                viewerId={viewerId}
+                busy={busyId === r.id}
+                denying={false}
+                denyComment=""
+                expanded={expandedId === r.id}
+                onToggleExpand={() => setExpandedId(expandedId === r.id ? null : r.id)}
+                onDenyToggle={() => {}}
+                onDenyCommentChange={() => {}}
+                onDecide={() => {}}
+                onUndo={undo}
+              />
             ))}
           </div>
         )}
@@ -152,93 +167,125 @@ export default function TeamAvailabilityCards() {
 
 function Card({
   row: r,
+  viewerId,
   busy,
   denying,
   denyComment,
+  expanded,
+  onToggleExpand,
   onDenyToggle,
   onDenyCommentChange,
   onDecide,
+  onUndo,
 }: {
   row: AdminAvailabilityDTO;
+  viewerId: string;
   busy: boolean;
   denying: boolean;
   denyComment: string;
+  expanded: boolean;
+  onToggleExpand: () => void;
   onDenyToggle: () => void;
   onDenyCommentChange: (v: string) => void;
   onDecide: (submissionId: string, decision: "APPROVED" | "DENIED", comment?: string) => void;
+  onUndo: (submissionId: string) => void;
 }) {
-  const lines = describeSlots(r.slots);
+  const chips = slotChips(r.slots);
   const tone = toneForName(r.employeeName);
   const isPending = r.status === "PENDING";
 
   return (
-    <div className="bg-surface border border-border rounded-2xl p-4 sm:p-5 shadow-sm">
-      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-        <div className="flex items-start gap-3 min-w-0">
-          <span
-            className={`h-10 w-10 rounded-full flex items-center justify-center text-sm font-semibold shrink-0 ${tone.bg} ${tone.text}`}
+    <div className="bg-surface border border-border rounded-2xl shadow-sm overflow-hidden">
+      <div className="p-4 sm:p-5">
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+          <button
+            type="button"
+            onClick={onToggleExpand}
+            className="flex items-start gap-3 min-w-0 text-left flex-1"
           >
-            {initialsOf(r.employeeName)}
-          </span>
-          <div className="min-w-0">
-            <p className="text-base font-semibold truncate">
-              <Link href={`/team/${r.employeeId}`} className="hover:underline">
+            <span
+              className={`h-10 w-10 rounded-full flex items-center justify-center text-sm font-semibold shrink-0 ${tone.bg} ${tone.text}`}
+            >
+              {initialsOf(r.employeeName)}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-base font-semibold truncate flex items-center gap-1.5">
                 {r.employeeName}
-              </Link>
-            </p>
-            {/* Each submitted day on its own line rather than one long "Mon ... · Wed ... ·
-                Fri ..." run-on string — CB (Sept 2026) flagged that a multi-day submission
-                read as one dense, hard-to-scan line here. */}
-            <div className="mt-1 space-y-0.5">
-              {lines.length > 0 ? (
-                lines.map((line, i) => (
-                  <p key={i} className="text-sm text-muted">
-                    {line}
-                  </p>
-                ))
+                <ChatIcon className={`h-3.5 w-3.5 shrink-0 ${expanded ? "text-accent-ink" : "text-muted"}`} />
+                <ChevronDownIcon
+                  className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${expanded ? "rotate-180" : ""}`}
+                />
+              </p>
+              {chips.length > 0 ? (
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {chips.map((c, i) => (
+                    <span
+                      key={i}
+                      className={`inline-flex flex-col items-start rounded-lg px-2.5 py-1 leading-tight ${tone.bg} ${tone.text}`}
+                    >
+                      <span className="text-xs font-semibold">{c.dateLabel}</span>
+                      <span className="text-[11px] opacity-80">{c.timeLabel}</span>
+                    </span>
+                  ))}
+                </div>
               ) : (
-                <p className="text-sm text-muted">No dates marked available.</p>
+                <p className="text-sm text-muted mt-1">No dates marked available.</p>
+              )}
+              {r.note && <p className="text-sm text-muted italic mt-1.5">&ldquo;{r.note}&rdquo;</p>}
+              {!isPending && r.reviewComment && (
+                <p className="text-sm text-muted italic mt-1.5">Reviewer note: &ldquo;{r.reviewComment}&rdquo;</p>
               )}
             </div>
-            {r.note && <p className="text-sm text-muted italic mt-1.5">&ldquo;{r.note}&rdquo;</p>}
-            {!isPending && r.reviewComment && (
-              <p className="text-sm text-muted italic mt-1.5">Reviewer note: &ldquo;{r.reviewComment}&rdquo;</p>
+          </button>
+
+          <div className="flex items-center gap-2 shrink-0 sm:pl-2">
+            {isPending ? (
+              <>
+                <button onClick={() => onDecide(r.id, "APPROVED")} disabled={busy} className="btn-primary text-sm px-4 py-2">
+                  Approve
+                </button>
+                <button onClick={onDenyToggle} disabled={busy} className="btn-neutral text-sm px-4 py-2">
+                  Deny
+                </button>
+              </>
+            ) : (
+              <>
+                <AvailabilityStatusPill status={r.status} />
+                <button
+                  onClick={() => onUndo(r.id)}
+                  disabled={busy}
+                  className="text-xs font-medium text-muted hover:text-accent-ink underline shrink-0"
+                >
+                  Undo
+                </button>
+              </>
             )}
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0 sm:pl-2">
-          {isPending ? (
-            <>
-              <button onClick={() => onDecide(r.id, "APPROVED")} disabled={busy} className="btn-primary text-sm px-4 py-2">
-                Approve
-              </button>
-              <button onClick={onDenyToggle} disabled={busy} className="btn-neutral text-sm px-4 py-2">
-                Deny
-              </button>
-            </>
-          ) : (
-            <AvailabilityStatusPill status={r.status} />
-          )}
-        </div>
+        {denying && (
+          <div className="mt-3 flex flex-col sm:flex-row gap-2 bg-black/[0.02] rounded-lg p-3">
+            <textarea
+              value={denyComment}
+              onChange={(e) => onDenyCommentChange(e.target.value)}
+              placeholder="Optional note for the team member…"
+              rows={2}
+              className="flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
+            />
+            <button
+              onClick={() => onDecide(r.id, "DENIED", denyComment.trim() || undefined)}
+              disabled={busy}
+              className="btn-primary text-sm px-4 py-2 self-start"
+            >
+              Confirm deny
+            </button>
+          </div>
+        )}
       </div>
 
-      {denying && (
-        <div className="mt-3 flex flex-col sm:flex-row gap-2 bg-black/[0.02] rounded-lg p-3">
-          <textarea
-            value={denyComment}
-            onChange={(e) => onDenyCommentChange(e.target.value)}
-            placeholder="Optional note for the team member…"
-            rows={2}
-            className="flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
-          />
-          <button
-            onClick={() => onDecide(r.id, "DENIED", denyComment.trim() || undefined)}
-            disabled={busy}
-            className="btn-primary text-sm px-4 py-2 self-start"
-          >
-            Confirm deny
-          </button>
+      {expanded && (
+        <div className="border-t border-border bg-black/[0.02] p-4 sm:p-5">
+          <TeamNotesThread employeeId={r.employeeId} viewerId={viewerId} />
         </div>
       )}
     </div>
