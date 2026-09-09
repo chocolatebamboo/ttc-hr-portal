@@ -242,3 +242,15 @@ export function AwardIcon({ className = base }: IconProps) {
     </svg>
   );
 }
+
+// CB, Sept 2026: admin "notification" banner on the dashboard for pending availability
+// requests (dashboard/page.tsx's PendingApprovalsBanner) — a plain bell, matching the same
+// hand-authored stroke style as every other icon in this file rather than pulling in a library.
+export function BellIcon({ className = base }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
+      <path d="M6 10.5a6 6 0 0 1 12 0v3.8l1.6 2.7a1 1 0 0 1-.86 1.5H5.26a1 1 0 0 1-.86-1.5L6 14.3v-3.8Z" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M9.5 18.5a2.5 2.5 0 0 0 5 0" strokeLinecap="round" />
+    </svg>
+  );
+}
