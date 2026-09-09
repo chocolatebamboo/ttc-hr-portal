@@ -224,6 +224,22 @@ export interface AdminAvailabilityDTO extends AvailabilityDTO {
   employeeName: string;
 }
 
+/** One message in a team member's notes/messaging thread (src/lib/team-notes.ts) — see
+ *  TeamNote in prisma/schema.prisma for the full "why one thread per person" reasoning.
+ *  attachmentName is shown to the client; the underlying storage key never is — downloading
+ *  goes through /api/team-notes/[employeeId]/[noteId]/download, which re-checks access and
+ *  mints a short-lived signed URL rather than exposing the key itself. */
+export interface TeamNoteDTO {
+  id: string;
+  employeeId: string;
+  authorId: string;
+  authorName: string;
+  body: string;
+  hasAttachment: boolean;
+  attachmentName: string | null;
+  createdAt: string; // ISO
+}
+
 export type DocumentCategory =
   | "EMPLOYEE_HANDBOOK"
   | "HR_POLICY"
