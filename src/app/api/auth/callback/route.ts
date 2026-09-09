@@ -16,9 +16,18 @@ import { getCurrentEmployee } from "@/lib/auth";
  * be the wrong message for them even if they're now deactivated.
  */
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = new URL(request.url);
+  const { searchParams, origin: requestOrigin } = new URL(request.url);
   const code = searchParams.get("code");
   const next = searchParams.get("next") ?? "/dashboard";
+
+  // On Render, `new URL(request.url).origin` has been observed to resolve to the container's
+  // internal bind address (http://localhost:10000) instead of the public domain the browser
+  // actually used — password-reset links that verified and exchanged a session successfully
+  // server-side, then bounced the browser to a dead localhost:10000 redirect right here.
+  // SITE_URL is already the trusted source of truth for this exact problem elsewhere (see
+  // inviteRedirectUrl in employees-admin.ts) — prefer it, and only fall back to the
+  // request-derived origin for local dev, where SITE_URL is typically unset.
+  const origin = process.env.SITE_URL?.replace(/\/$/, "") || requestOrigin;
 
   if (code) {
     const supabase = await createSupabaseServerClient();
