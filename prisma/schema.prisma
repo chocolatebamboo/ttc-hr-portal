@@ -99,6 +99,8 @@ model Employee {
   onboarding           EmployeeOnboarding?
   availabilitySubmissions AvailabilitySubmission[] @relation("AvailabilitySubject")
   availabilityReviewed    AvailabilitySubmission[] @relation("AvailabilityReviewer")
+  teamNotesAsSubject      TeamNote[]                @relation("TeamNoteSubject")
+  teamNotesWritten        TeamNote[]                @relation("TeamNoteAuthor")
   onboardingReadinessItems OnboardingReadinessItem[]
   onboardingCheckpoints    OnboardingCheckpoint[]
   certificationAttempts    CertificationAttempt[]
@@ -327,6 +329,36 @@ model AvailabilityShiftReminder {
   sentAt       DateTime               @default(now())
 
   @@unique([submissionId, date])
+}
+
+// ---------------------------------------------------------------------------
+// Team notes (admin/supervisor <-> team member messaging)
+// ---------------------------------------------------------------------------
+
+// CB, Sept 2026: "I would be able to add notes, add documents, or anything like that within
+// there. So we could communicate through there" — one ongoing thread per team member (not one
+// per PTO/availability request), readable and postable by that employee themselves, their
+// supervisor, or an admin — same three-way access shape PtoRequest and AvailabilitySubmission
+// already use (see prisma/rls.sql's team_note_select/team_note_write and
+// assertCanAccessEmployeeRecords in src/lib/authorization.ts). Attachments are simple files
+// dropped into the thread (attachmentKey/attachmentName), stored in the same private
+// "documents" Supabase bucket under a "team-notes/" prefix (src/lib/storage.ts) rather than a
+// new bucket — they're not part of the formal company Documents library (no category,
+// visibility, or acknowledgment tracking), just whatever's attached to a message.
+model TeamNote {
+  id         String   @id @default(uuid())
+  employeeId String // whose thread this belongs to
+  employee   Employee @relation("TeamNoteSubject", fields: [employeeId], references: [id])
+  authorId   String // who wrote this message — the employee themselves, their supervisor, or an admin
+  author     Employee @relation("TeamNoteAuthor", fields: [authorId], references: [id])
+
+  body           String
+  attachmentKey  String?
+  attachmentName String?
+
+  createdAt DateTime @default(now())
+
+  @@index([employeeId, createdAt])
 }
 
 // ---------------------------------------------------------------------------
