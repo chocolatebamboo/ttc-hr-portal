@@ -315,6 +315,31 @@ create policy availability_write on "AvailabilitySubmission" for all using (
 );
 
 
+-- Same three-way row shape as PtoRequest/AvailabilitySubmission again: the thread's own
+-- employee, their supervisor, or an admin. Keyed off "employeeId" (whose thread this is)
+-- only, same as those two tables key off employeeId rather than reviewedById/authorId — who
+-- actually WROTE a given message is an app-layer/display concern (src/lib/team-notes.ts sets
+-- authorId from the verified caller, never client-supplied), not a row-visibility one.
+alter table "TeamNote" enable row level security;
+alter table "TeamNote" force row level security;
+
+drop policy if exists team_note_select on "TeamNote";
+create policy team_note_select on "TeamNote" for select using (
+  is_admin()
+  or "employeeId" = current_employee_id()
+  or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+);
+
+drop policy if exists team_note_write on "TeamNote";
+create policy team_note_write on "TeamNote" for all using (
+  "employeeId" = current_employee_id() or is_admin()
+  or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+) with check (
+  "employeeId" = current_employee_id() or is_admin()
+  or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+);
+
+
 alter table "Document" enable row level security;
 alter table "Document" force row level security;
 
