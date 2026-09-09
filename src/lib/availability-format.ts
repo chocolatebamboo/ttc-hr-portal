@@ -24,3 +24,23 @@ export function describeSlots(slots: AvailabilitySlot[]): string[] {
     .sort((a, b) => a.date.localeCompare(b.date))
     .map((s) => `${formatSlotDate(s.date)}: ${formatTime12h(s.startTime)} – ${formatTime12h(s.endTime)}`);
 }
+
+export interface SlotChip {
+  dateLabel: string;
+  timeLabel: string;
+}
+
+/** Same slots, split into a {date, time} pair per entry rather than one combined string — CB
+ *  (Sept 2026), after the first admin card redesign: a multi-date submission rendered as a
+ *  dense stack of "Thu, Sep 17: 9:00 AM – 5:00 PM" lines read as "just a bunch of words and
+ *  letters." TeamAvailabilityCards/TeamPtoCards render each of these as its own small colored
+ *  chip instead — the date bold on top, the time range beneath it — so a five-date submission
+ *  reads as a scannable row of chips rather than five run-on sentences. */
+export function slotChips(slots: AvailabilitySlot[]): SlotChip[] {
+  return [...slots]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((s) => ({
+      dateLabel: formatSlotDate(s.date),
+      timeLabel: `${formatTime12h(s.startTime)} – ${formatTime12h(s.endTime)}`,
+    }));
+}
