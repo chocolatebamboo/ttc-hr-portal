@@ -4,7 +4,7 @@ import { assertIsAdmin } from "@/lib/authorization";
 import { listAdminPto } from "@/lib/pto-actions";
 import { toErrorResponse } from "@/lib/api-errors";
 
-/** GET /api/admin/pto — HR/Super Admin only. Pending queue + upcoming approved leave. */
+/** GET /api/admin/pto — HR/Super Admin only. Pending queue + everything already decided. */
 export async function GET() {
   try {
     const employee = await requireEmployee();
