@@ -8,6 +8,30 @@ import type { AdminAvailabilityDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
 
+/** Cycles the same five brand tones the dashboard's Quick Actions chips already use
+ *  (CHIP_TONE in dashboard/page.tsx), keyed off the name so a given person's avatar color is
+ *  stable across a reload rather than reshuffling. AdminAvailabilityDTO only carries
+ *  employeeName (not a photo or id-stable field worth hashing on), so the name is what's
+ *  available to key off of here. */
+const AVATAR_TONES = [
+  { bg: "bg-[color-mix(in_srgb,var(--ttc-blue)_15%,white)]", text: "text-[var(--ttc-blue-ink)]" },
+  { bg: "bg-[color-mix(in_srgb,var(--ttc-pink)_15%,white)]", text: "text-[var(--ttc-pink-ink)]" },
+  { bg: "bg-amber-100", text: "text-amber-800" },
+  { bg: "bg-emerald-100", text: "text-emerald-800" },
+  { bg: "bg-violet-100", text: "text-violet-800" },
+];
+
+function toneForName(name: string) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return AVATAR_TONES[hash % AVATAR_TONES.length];
+}
+
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
+}
+
 /**
  * HR-wide availability roster — every submitted-availability record, org-wide, not just one
  * supervisor's team (same relationship PtoAdminView has to TeamPtoSection). One row per
@@ -16,6 +40,12 @@ type LoadState = "loading" | "ready" | "error";
  * /api/availability/[submissionId]/decide, the same endpoint a supervisor uses on
  * TeamAvailabilitySection — an HR/Super Admin passes assertCanReviewAvailability's admin
  * bypass for any employee.
+ *
+ * CB, Sept 2026: "if I'm an administrator... I should see an aesthetic view that shows each
+ * person in a clean way... in cards... that widget type of feel" — the plain divided-list
+ * rows became individual cards with a colored initials avatar per person, matching the same
+ * card language the dashboard widget pages already use, rather than a dense settings-style
+ * table.
  */
 export default function AvailabilityAdminView() {
   const [pending, setPending] = useState<AdminAvailabilityDTO[]>([]);
@@ -69,9 +99,9 @@ export default function AvailabilityAdminView() {
       </p>
 
       {loadState === "loading" && (
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="h-16 rounded-xl border border-border bg-surface animate-pulse" />
+            <div key={i} className="h-24 rounded-2xl border border-border bg-surface animate-pulse" />
           ))}
         </div>
       )}
@@ -85,17 +115,17 @@ export default function AvailabilityAdminView() {
       {loadState === "ready" && (
         <>
           <section className="mb-8">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted mb-2">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted mb-2.5">
               Pending ({pending.length})
             </h2>
             {pending.length === 0 ? (
-              <div className="rounded-xl border border-border bg-surface p-4 text-sm text-muted">
+              <div className="rounded-2xl border border-border bg-surface p-4 text-sm text-muted">
                 Nothing pending right now.
               </div>
             ) : (
-              <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
+              <div className="space-y-2.5">
                 {pending.map((r) => (
-                  <Row
+                  <Card
                     key={r.id}
                     row={r}
                     busy={busyId === r.id}
@@ -111,43 +141,18 @@ export default function AvailabilityAdminView() {
           </section>
 
           <section>
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted mb-2">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted mb-2.5">
               Decided ({decided.length})
             </h2>
             {decided.length === 0 ? (
-              <div className="rounded-xl border border-border bg-surface p-4 text-sm text-muted">
+              <div className="rounded-2xl border border-border bg-surface p-4 text-sm text-muted">
                 Nothing decided yet.
               </div>
             ) : (
-              <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
-                {decided.map((r) => {
-                  const lines = describeSlots(r.slots);
-                  return (
-                    <div key={r.id} className="px-5 py-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-medium">
-                          <Link href={`/team/${r.employeeId}`} className="hover:underline">
-                            {r.employeeName}
-                          </Link>
-                        </p>
-                        <AvailabilityStatusPill status={r.status} />
-                      </div>
-                      {/* One line per submitted day (see the matching comment on Row below) —
-                          same layout treatment as Pending so the page reads consistently. */}
-                      <div className="mt-1.5 space-y-0.5">
-                        {lines.length > 0 ? (
-                          lines.map((line, i) => (
-                            <p key={i} className="text-sm text-muted">
-                              {line}
-                            </p>
-                          ))
-                        ) : (
-                          <p className="text-sm text-muted">No dates marked available.</p>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+              <div className="space-y-2.5">
+                {decided.map((r) => (
+                  <Card key={r.id} row={r} busy={false} denying={false} denyComment="" onDenyToggle={() => {}} onDenyCommentChange={() => {}} onDecide={() => {}} />
+                ))}
               </div>
             )}
           </section>
@@ -157,7 +162,7 @@ export default function AvailabilityAdminView() {
   );
 }
 
-function Row({
+function Card({
   row: r,
   busy,
   denying,
@@ -175,38 +180,58 @@ function Row({
   onDecide: (submissionId: string, decision: "APPROVED" | "DENIED", comment?: string) => void;
 }) {
   const lines = describeSlots(r.slots);
+  const tone = toneForName(r.employeeName);
+  const isPending = r.status === "PENDING";
+
   return (
-    <div className="px-5 py-4">
+    <div className="bg-surface border border-border rounded-2xl p-4 sm:p-5 shadow-sm">
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-        <div>
-          <p className="text-base font-semibold">
-            <Link href={`/team/${r.employeeId}`} className="hover:underline">
-              {r.employeeName}
-            </Link>
-          </p>
-          {/* Each submitted day on its own line rather than one long "Mon ... · Wed ... · Fri
-              ..." run-on string — CB (Sept 2026) flagged that a multi-day submission read as
-              one dense, hard-to-scan line here. Same fix applied to the Decided list above. */}
-          <div className="mt-1.5 space-y-0.5">
-            {lines.length > 0 ? (
-              lines.map((line, i) => (
-                <p key={i} className="text-sm text-muted">
-                  {line}
-                </p>
-              ))
-            ) : (
-              <p className="text-sm text-muted">No dates marked available.</p>
+        <div className="flex items-start gap-3 min-w-0">
+          <span
+            className={`h-10 w-10 rounded-full flex items-center justify-center text-sm font-semibold shrink-0 ${tone.bg} ${tone.text}`}
+          >
+            {initialsOf(r.employeeName)}
+          </span>
+          <div className="min-w-0">
+            <p className="text-base font-semibold truncate">
+              <Link href={`/team/${r.employeeId}`} className="hover:underline">
+                {r.employeeName}
+              </Link>
+            </p>
+            {/* Each submitted day on its own line rather than one long "Mon ... · Wed ... ·
+                Fri ..." run-on string — CB (Sept 2026) flagged that a multi-day submission
+                read as one dense, hard-to-scan line here. */}
+            <div className="mt-1 space-y-0.5">
+              {lines.length > 0 ? (
+                lines.map((line, i) => (
+                  <p key={i} className="text-sm text-muted">
+                    {line}
+                  </p>
+                ))
+              ) : (
+                <p className="text-sm text-muted">No dates marked available.</p>
+              )}
+            </div>
+            {r.note && <p className="text-sm text-muted italic mt-1.5">&ldquo;{r.note}&rdquo;</p>}
+            {!isPending && r.reviewComment && (
+              <p className="text-sm text-muted italic mt-1.5">Reviewer note: &ldquo;{r.reviewComment}&rdquo;</p>
             )}
           </div>
-          {r.note && <p className="text-sm text-muted italic mt-1.5">&ldquo;{r.note}&rdquo;</p>}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button onClick={() => onDecide(r.id, "APPROVED")} disabled={busy} className="btn-primary text-sm px-4 py-2">
-            Approve
-          </button>
-          <button onClick={onDenyToggle} disabled={busy} className="btn-neutral text-sm px-4 py-2">
-            Deny
-          </button>
+
+        <div className="flex items-center gap-2 shrink-0 sm:pl-2">
+          {isPending ? (
+            <>
+              <button onClick={() => onDecide(r.id, "APPROVED")} disabled={busy} className="btn-primary text-sm px-4 py-2">
+                Approve
+              </button>
+              <button onClick={onDenyToggle} disabled={busy} className="btn-neutral text-sm px-4 py-2">
+                Deny
+              </button>
+            </>
+          ) : (
+            <AvailabilityStatusPill status={r.status} />
+          )}
         </div>
       </div>
 
