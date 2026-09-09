@@ -10,15 +10,6 @@ import AvailabilityStatusSection from "@/components/AvailabilityStatusSection";
 import TeamAvailabilityCards from "@/components/TeamAvailabilityCards";
 import TeamPtoCards from "@/components/TeamPtoCards";
 
-/**
- * CB, Sept 2026, on the pink dashboard tile: "when we go on the pink availability block,
- * that's where I want those things to show... it's not supposed to be a whole different thing
- * where we have to do extra steps." Tapping the tile now takes an admin straight to the same
- * Approve/Deny card roster that used to live only behind Team Availability / PTO Management in
- * the nav — same TeamAvailabilityCards/TeamPtoCards components those pages render, so there's
- * one card implementation whichever way you got here. A regular employee still lands on their
- * own personal summary below, unchanged from before.
- */
 export default async function AvailabilityStatusPage() {
   const employee = await getCurrentEmployee();
   if (!employee) redirect("/login");
@@ -36,9 +27,6 @@ export default async function AvailabilityStatusPage() {
           ← Home
         </Link>
 
-        {/* Same big-number, solid-color "widget" face as the employee view below and
-            /dashboard/week — just counting org-wide pending decisions instead of one person's
-            own. */}
         <div className="rounded-3xl p-6 text-white shadow-lg" style={{ background: "var(--ttc-pink)" }}>
           <p className="text-xs uppercase tracking-wide text-white/70 mb-1">Availability</p>
           <p className="text-5xl font-bold tabular-nums leading-none tracking-tight">{pendingTotal}</p>
@@ -49,12 +37,12 @@ export default async function AvailabilityStatusPage() {
 
         <div className="mt-6">
           <h2 className="text-sm font-medium text-muted mb-2">Availability requests</h2>
-          <TeamAvailabilityCards />
+          <TeamAvailabilityCards viewerId={employee.id} />
         </div>
 
         <div className="mt-6">
           <h2 className="text-sm font-medium text-muted mb-2">Time off requests</h2>
-          <TeamPtoCards />
+          <TeamPtoCards viewerId={employee.id} />
         </div>
       </div>
     );
@@ -82,8 +70,6 @@ export default async function AvailabilityStatusPage() {
         ← Home
       </Link>
 
-      {/* Same big-number, solid-color "widget" face as /dashboard/week and TimeClockCard's
-          hero variant. */}
       <div className="rounded-3xl p-6 text-white shadow-lg" style={{ background: "var(--ttc-pink)" }}>
         <p className="text-xs uppercase tracking-wide text-white/70 mb-1">Availability</p>
         <p className="text-5xl font-bold tabular-nums leading-none tracking-tight">{pendingTotal}</p>
