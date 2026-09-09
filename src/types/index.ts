@@ -184,11 +184,15 @@ export interface AdminPtoRequestDTO extends PtoRequestDTO {
   employeeName: string;
 }
 
-/** GET /api/admin/pto's response — a pending queue for HR to act on, and a forward-looking
- *  view of who's already approved to be out, so HR can see coverage gaps before they happen. */
+/** GET /api/admin/pto's response — a pending queue for HR to act on, and everything already
+ *  decided (Approved or Denied), most recent first. Mirrors AdminAvailabilityDTO's own
+ *  pending/decided split (Sept 2026 admin card redesign) so both admin views share one shape
+ *  — Approved requests still double as "who's already cleared to be out," the same purpose
+ *  the old `upcoming` field served, just no longer limited to future dates only: a reviewer
+ *  can now Undo a recent Denied decision too, which needs it visible here to act on. */
 export interface AdminPtoSummaryDTO {
   pending: AdminPtoRequestDTO[];
-  upcoming: AdminPtoRequestDTO[];
+  decided: AdminPtoRequestDTO[];
 }
 
 export type AvailabilityStatus = "PENDING" | "APPROVED" | "DENIED" | "CANCELLED";
