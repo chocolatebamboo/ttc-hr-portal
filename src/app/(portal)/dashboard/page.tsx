@@ -7,19 +7,12 @@ import { listDocumentsForEmployee } from "@/lib/documents";
 import { listAnnouncementsForEmployee } from "@/lib/announcements";
 import { getOnboardingAttention } from "@/lib/onboarding";
 import { listMyAvailability, listAdminAvailability } from "@/lib/availability";
-import { formatSlotDate } from "@/lib/availability-format";
 import TimeClockCard from "@/components/TimeClockCard";
-import PtoStatusPill from "@/components/PtoStatusPill";
-import AvailabilityStatusPill from "@/components/AvailabilityStatusPill";
+import TimeOffSection from "@/components/TimeOffSection";
+import AvailabilityStatusSection from "@/components/AvailabilityStatusSection";
 import { CalendarIcon, FolderIcon, ChecklistIcon, MegaphoneIcon, ChartIcon, BellIcon } from "@/components/icons";
-import { PTO_TYPE_LABEL, formatDateRange, formatHoursCompact } from "@/lib/time";
-import type { AnnouncementDTO, AvailabilityDTO, AvailabilitySlot, DocumentDTO, PtoStatus, PtoType } from "@/types";
-
-/** recentPto is read straight off Prisma (tx.ptoRequest.findMany below), not converted to a
- *  DTO — it never leaves the server, so the extra round-trip through a string-dates shape
- *  buys nothing. This is that raw row's shape, just narrowed to the fields TimeOffSection
- *  actually reads. */
-type RecentPtoRow = { id: string; type: PtoType; status: PtoStatus; startDate: Date; endDate: Date };
+import { formatHoursCompact } from "@/lib/time";
+import type { AnnouncementDTO, DocumentDTO } from "@/types";
 
 // CB, Sept 2026: "I want you to remove the quick action my time because we already have my
 // time within the mobile view" — My Time is now reachable directly from BottomNav on mobile
@@ -48,17 +41,6 @@ function formatAnnouncementDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-/** "Thu, Sep 17" for a single-date submission, "Thu, Sep 17 +2 more" for a multi-date one —
- *  compact enough for one line next to a status pill (AvailabilityStatusSection below), same
- *  spirit as TimeOffSection's PTO_TYPE_LABEL + formatDateRange pairing just without a fixed
- *  end date to range against, since a submission's dates aren't necessarily consecutive
- *  (see AvailabilitySlot's doc comment in src/types/index.ts). */
-function summarizeSlots(slots: AvailabilitySlot[]): string {
-  const sorted = [...slots].sort((a, b) => a.date.localeCompare(b.date));
-  const first = formatSlotDate(sorted[0].date);
-  return sorted.length === 1 ? first : `${first} +${sorted.length - 1} more`;
-}
-
 export default async function DashboardPage() {
   const employee = await getCurrentEmployee();
   if (!employee) redirect("/login");
@@ -83,27 +65,31 @@ export default async function DashboardPage() {
   const announcements = (await listAnnouncementsForEmployee(employee)).slice(0, 3);
   const [featuredAnnouncement, ...otherAnnouncements] = announcements;
 
-  // One transaction, three reads: recent PTO history (existing), plus two numbers the
-  // mobile stat row needs (Sept 2026 aesthetic pass) that nothing on this page fetched
-  // before. "This week" is a rolling last-7-days window, not a calendar week — TTC has no
-  // fixed schedules (see clockout-reminders.ts's doc comment), so there's no natural
-  // Mon-Sun boundary to anchor to; a rolling window needs no such boundary.
+  // One transaction, four reads: recent PTO history (existing), plus the numbers the mobile
+  // stat row needs (Sept 2026 aesthetic pass) that nothing on this page fetched before.
+  // "This week" is a rolling last-7-days window, not a calendar week — TTC has no fixed
+  // schedules (see clockout-reminders.ts's doc comment), so there's no natural Mon-Sun
+  // boundary to anchor to; a rolling window needs no such boundary.
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 6);
   sevenDaysAgo.setUTCHours(0, 0, 0, 0);
 
-  const { recentPto, weekMinutes, pendingPtoCount } = await withRlsContext(
+  const { recentPto, weekMinutes, pendingPtoCount, pendingMyAvailabilityCount } = await withRlsContext(
     { employeeId: employee.id, role: employee.role },
     async (tx) => {
-      const [recentPto, weekAgg, pendingPtoCount] = await Promise.all([
+      const [recentPto, weekAgg, pendingPtoCount, pendingMyAvailabilityCount] = await Promise.all([
         tx.ptoRequest.findMany({ where: { employeeId: employee.id }, orderBy: { createdAt: "desc" }, take: 3 }),
         tx.timeEntry.aggregate({
           where: { employeeId: employee.id, workDate: { gte: sevenDaysAgo } },
           _sum: { totalMinutes: true },
         }),
         tx.ptoRequest.count({ where: { employeeId: employee.id, status: "PENDING" } }),
+        // CB, Sept 2026: "I'm not sure if pending PTO and availability... maybe we could
+        // combine them... it'd be, like, availability" — the pink stat tile below now reads
+        // one combined "pending" count across both, rather than PTO alone.
+        tx.availabilitySubmission.count({ where: { employeeId: employee.id, status: "PENDING" } }),
       ]);
-      return { recentPto, weekMinutes: weekAgg._sum.totalMinutes ?? 0, pendingPtoCount };
+      return { recentPto, weekMinutes: weekAgg._sum.totalMinutes ?? 0, pendingPtoCount, pendingMyAvailabilityCount };
     }
   );
 
@@ -134,8 +120,13 @@ export default async function DashboardPage() {
         </div>
 
         <div className="animate-in animate-in-3 grid grid-cols-3 gap-3">
-          <StatCard label="This week" value={formatHoursCompact(weekMinutes)} tone="blue" href="/time" />
-          <StatCard label="Pending PTO" value={String(pendingPtoCount)} tone="pink" href="/time" />
+          <StatCard label="This week" value={formatHoursCompact(weekMinutes)} tone="blue" href="/dashboard/week" />
+          <StatCard
+            label="Availability"
+            value={String(pendingPtoCount + pendingMyAvailabilityCount)}
+            tone="pink"
+            href="/dashboard/availability"
+          />
           <StatCard label="Docs to review" value={String(pendingAcknowledgments.length)} tone="amber" href="/documents" />
         </div>
 
@@ -344,76 +335,6 @@ function AnnouncementsSection({
               ))}
             </div>
           )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function TimeOffSection({
-  className,
-  recentPto,
-}: {
-  className?: string;
-  recentPto: RecentPtoRow[];
-}) {
-  return (
-    <div className={className}>
-      <h2 className="text-sm font-medium text-muted mb-2">Time off</h2>
-      {recentPto.length === 0 ? (
-        <div className="rounded-xl border border-border bg-surface px-4 py-4 text-sm text-muted">
-          No time-off requests yet.
-        </div>
-      ) : (
-        <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
-          {recentPto.map((r) => (
-            <div key={r.id} className="flex items-center justify-between px-4 py-3">
-              <p className="text-sm">
-                {PTO_TYPE_LABEL[r.type]} · {formatDateRange(r.startDate.toISOString(), r.endDate.toISOString())}
-              </p>
-              <PtoStatusPill status={r.status} />
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// CB, Sept 2026: the employee-facing half of the availability notification — always visible
-// once there's history, same "Time off" pattern above rather than something that has to be
-// dismissed, so an approval or denial is just sitting there on the dashboard next time the
-// team member looks, no separate unread state to track. Reuses AvailabilityStatusPill (already
-// used on /availability and admin/availability) rather than PtoStatusPill even though the two
-// status enums share the same four values — this section is specifically about availability,
-// and "Pending approval" (AvailabilityStatusPill's own PENDING label) reads better here than
-// PtoStatusPill's bare "Pending".
-function AvailabilityStatusSection({
-  className,
-  recentAvailability,
-}: {
-  className?: string;
-  recentAvailability: AvailabilityDTO[];
-}) {
-  return (
-    <div className={className}>
-      <h2 className="text-sm font-medium text-muted mb-2">Availability</h2>
-      {recentAvailability.length === 0 ? (
-        <div className="rounded-xl border border-border bg-surface px-4 py-4 text-sm text-muted">
-          No availability submitted yet.
-        </div>
-      ) : (
-        <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
-          {recentAvailability.map((a) => (
-            <Link
-              key={a.id}
-              href="/availability"
-              className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-black/[0.02] transition-colors"
-            >
-              <span className="truncate">{summarizeSlots(a.slots)}</span>
-              <AvailabilityStatusPill status={a.status} />
-            </Link>
-          ))}
         </div>
       )}
     </div>
