@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentEmployee } from "@/lib/auth";
+import { isAdmin } from "@/lib/authorization";
 import { withRlsContext } from "@/lib/db";
 import { listDocumentsForEmployee } from "@/lib/documents";
 import { listAnnouncementsForEmployee } from "@/lib/announcements";
 import { getOnboardingAttention } from "@/lib/onboarding";
 import TimeClockCard from "@/components/TimeClockCard";
 import PtoStatusPill from "@/components/PtoStatusPill";
-import { ClockIcon, CalendarIcon, FolderIcon, ChecklistIcon, MegaphoneIcon } from "@/components/icons";
+import { ClockIcon, CalendarIcon, FolderIcon, ChecklistIcon, MegaphoneIcon, ChartIcon } from "@/components/icons";
 import { PTO_TYPE_LABEL, formatDateRange, formatHoursCompact } from "@/lib/time";
 import type { AnnouncementDTO, DocumentDTO, PtoStatus, PtoType } from "@/types";
 
@@ -17,18 +18,28 @@ import type { AnnouncementDTO, DocumentDTO, PtoStatus, PtoType } from "@/types";
  *  actually reads. */
 type RecentPtoRow = { id: string; type: PtoType; status: PtoStatus; startDate: Date; endDate: Date };
 
+// CB, Sept 2026: "we need the availability to show up there... we need the my time, and we
+// need the reports to be on there as well" — Request Time Off and View Timesheet both already
+// pointed at /time (a leftover from before Time Off was merged into My Time), so that pair
+// collapses into one "My Time" entry rather than keeping two links to the same page; Availability
+// and Reports are new. Reports has no employee-facing view (see admin/reports/page.tsx's own
+// redirect) so it's appended only for admins — see quickActions below — instead of living in
+// this shared base list everyone gets.
 const QUICK_ACTIONS = [
-  { label: "Request Time Off", href: "/time", icon: CalendarIcon, tone: "blue" as const },
-  { label: "View Timesheet", href: "/time", icon: ClockIcon, tone: "pink" as const },
+  { label: "My Time", href: "/time", icon: ClockIcon, tone: "blue" as const },
+  { label: "Availability", href: "/availability", icon: CalendarIcon, tone: "pink" as const },
   { label: "View Documents", href: "/documents", icon: FolderIcon, tone: "amber" as const },
   { label: "View Onboarding", href: "/onboarding", icon: ChecklistIcon, tone: "emerald" as const },
 ];
+
+const ADMIN_QUICK_ACTION = { label: "Reports", href: "/admin/reports", icon: ChartIcon, tone: "violet" as const };
 
 const CHIP_TONE: Record<string, string> = {
   blue: "bg-[color-mix(in_srgb,var(--ttc-blue)_12%,white)] text-[var(--ttc-blue-ink)]",
   pink: "bg-[color-mix(in_srgb,var(--ttc-pink)_12%,white)] text-[var(--ttc-pink-ink)]",
   amber: "bg-amber-100 text-amber-800",
   emerald: "bg-emerald-100 text-emerald-800",
+  violet: "bg-violet-100 text-violet-800",
 };
 
 function formatAnnouncementDate(iso: string): string {
@@ -38,6 +49,8 @@ function formatAnnouncementDate(iso: string): string {
 export default async function DashboardPage() {
   const employee = await getCurrentEmployee();
   if (!employee) redirect("/login");
+
+  const quickActions = isAdmin(employee) ? [...QUICK_ACTIONS, ADMIN_QUICK_ACTION] : QUICK_ACTIONS;
 
   const documents = await listDocumentsForEmployee(employee);
   const pendingAcknowledgments = documents.filter((d) => d.requiresAcknowledgment && !d.acknowledgedAt);
@@ -96,7 +109,7 @@ export default async function DashboardPage() {
           <div className="bg-surface border border-border rounded-2xl p-5">
             <h2 className="text-sm font-medium text-muted mb-3">Quick actions</h2>
             <div className="grid grid-cols-4 gap-2">
-              {QUICK_ACTIONS.map((action) => (
+              {quickActions.map((action) => (
                 <Link
                   key={action.label}
                   href={action.href}
@@ -138,7 +151,7 @@ export default async function DashboardPage() {
             <div className="bg-surface border border-border rounded-2xl p-5">
               <h2 className="text-sm font-medium text-muted mb-3">Quick actions</h2>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                {QUICK_ACTIONS.map((action) => (
+                {quickActions.map((action) => (
                   <Link
                     key={action.href + action.label}
                     href={action.href}
