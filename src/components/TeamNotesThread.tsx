@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { DownloadIcon } from "@/components/icons";
-import type { TeamNoteDTO } from "@/types";
+import type { TeamNoteDTO, TeamNoteTopicType } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -15,16 +15,48 @@ function formatNoteTime(iso: string): string {
   return `${date}, ${time}`;
 }
 
+function topicQuery(topicType?: TeamNoteTopicType, topicId?: string, topicDate?: string): string {
+  if (!topicType || !topicId) return "";
+  const params = new URLSearchParams({ topicType, topicId });
+  if (topicDate) params.set("topicDate", topicDate);
+  return `?${params.toString()}`;
+}
+
 /**
  * CB, Sept 2026: "a texting feature to where we would be able to communicate back and forth...
- * add notes, add documents." One ongoing thread per team member — used both on the employee's
- * own /notes page and on /team/[employeeId] for whoever's allowed to see that person's thread
- * (self, their supervisor, or an admin; enforced server-side by src/lib/team-notes.ts and
- * backed up independently by prisma/rls.sql's team_note_select/team_note_write). `viewerId`
- * decides which side of the chat a given message renders on — it's never used for access
- * control, only left/right alignment.
+ * add notes, add documents." One thread per team member — used on the employee's own /notes
+ * page, on /team/[employeeId], and (with `topicType`/`topicId`/`topicDate` set) as a narrower
+ * conversation scoped to one specific availability date or PTO request on the admin card
+ * views. Access is enforced server-side by src/lib/team-notes.ts either way (self, that
+ * employee's supervisor, or an admin; backed up independently by prisma/rls.sql's
+ * team_note_select/team_note_write). `viewerId` decides which side of the chat a given message
+ * renders on — it's never used for access control, only left/right alignment.
+ *
+ * Omit the topic props entirely for the general thread. When set, they must describe exactly
+ * one topic (an availability date needs topicDate too; a PTO request never does) — see
+ * TeamNoteTopic in src/lib/team-notes.ts.
  */
-export default function TeamNotesThread({ employeeId, viewerId }: { employeeId: string; viewerId: string }) {
+export default function TeamNotesThread({
+  employeeId,
+  viewerId,
+  topicType,
+  topicId,
+  topicDate,
+  placeholder = "Write a message…",
+  onMessagePosted,
+}: {
+  employeeId: string;
+  viewerId: string;
+  topicType?: TeamNoteTopicType;
+  topicId?: string;
+  topicDate?: string;
+  placeholder?: string;
+  /** Fires after a message is successfully posted in this thread — lets a parent that shows a
+   *  message-count badge for this same topic (TeamAvailabilityCards, TeamPtoCards,
+   *  AvailabilityCalendar, TimesheetView) refresh its count right away instead of waiting for
+   *  the next full page load. */
+  onMessagePosted?: () => void;
+}) {
   const [notes, setNotes] = useState<TeamNoteDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [body, setBody] = useState("");
@@ -38,7 +70,7 @@ export default function TeamNotesThread({ employeeId, viewerId }: { employeeId: 
   async function load() {
     setLoadState("loading");
     try {
-      const res = await fetch(`/api/team-notes/${employeeId}`);
+      const res = await fetch(`/api/team-notes/${employeeId}${topicQuery(topicType, topicId, topicDate)}`);
       if (!res.ok) throw new Error();
       const data: { notes: TeamNoteDTO[] } = await res.json();
       setNotes(data.notes);
@@ -52,7 +84,7 @@ export default function TeamNotesThread({ employeeId, viewerId }: { employeeId: 
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [employeeId]);
+  }, [employeeId, topicType, topicId, topicDate]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "nearest" });
@@ -68,6 +100,11 @@ export default function TeamNotesThread({ employeeId, viewerId }: { employeeId: 
       const form = new FormData();
       form.set("body", body);
       if (file) form.set("file", file);
+      if (topicType && topicId) {
+        form.set("topicType", topicType);
+        form.set("topicId", topicId);
+        if (topicDate) form.set("topicDate", topicDate);
+      }
 
       const res = await fetch(`/api/team-notes/${employeeId}`, { method: "POST", body: form });
       const data = await res.json().catch(() => ({}));
@@ -79,6 +116,7 @@ export default function TeamNotesThread({ employeeId, viewerId }: { employeeId: 
       setFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       load();
+      onMessagePosted?.();
     } catch {
       setSendError("Couldn't reach the server. Check your connection and try again.");
     } finally {
@@ -148,7 +186,7 @@ export default function TeamNotesThread({ employeeId, viewerId }: { employeeId: 
         <textarea
           value={body}
           onChange={(e) => setBody(e.target.value)}
-          placeholder="Write a message…"
+          placeholder={placeholder}
           rows={2}
           className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent resize-none"
         />
