@@ -3,45 +3,66 @@
 import { useState, useEffect } from "react";
 import PtoStatusPill from "@/components/PtoStatusPill";
 import TeamNotesThread from "@/components/TeamNotesThread";
-import { ChevronDownIcon, ChatIcon } from "@/components/icons";
+import { ChatIcon } from "@/components/icons";
 import { PTO_TYPE_LABEL, formatDateRange } from "@/lib/time";
-import type { AdminPtoRequestDTO, AdminPtoSummaryDTO, PtoType } from "@/types";
+import type { AdminPtoRequestDTO, AdminPtoSummaryDTO, PtoType, TeamNoteTopicCountDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
-
-const AVATAR_TONES = [
-  { bg: "bg-[color-mix(in_srgb,var(--ttc-blue)_15%,white)]", text: "text-[var(--ttc-blue-ink)]" },
-  { bg: "bg-[color-mix(in_srgb,var(--ttc-pink)_15%,white)]", text: "text-[var(--ttc-pink-ink)]" },
-  { bg: "bg-amber-100", text: "text-amber-800" },
-  { bg: "bg-emerald-100", text: "text-emerald-800" },
-  { bg: "bg-violet-100", text: "text-violet-800" },
-];
-
-function toneForName(name: string) {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
-  return AVATAR_TONES[hash % AVATAR_TONES.length];
-}
 
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/);
   return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
 }
 
-const TYPE_TONE: Record<PtoType, { bg: string; text: string }> = {
-  VACATION: { bg: "bg-[color-mix(in_srgb,var(--ttc-blue)_15%,white)]", text: "text-[var(--ttc-blue-ink)]" },
-  SICK: { bg: "bg-rose-100", text: "text-rose-800" },
-  PERSONAL: { bg: "bg-violet-100", text: "text-violet-800" },
-  OTHER_APPROVED_LEAVE: { bg: "bg-amber-100", text: "text-amber-800" },
+/** employeeId+requestId -> total message count, built from
+ *  GET /api/admin/team-notes/topic-counts — same idea as TeamAvailabilityCards' countsByDate,
+ *  just keyed on PTO_REQUEST rows (which have no topicDate) instead of AVAILABILITY_DATE. */
+function countsByRequest(counts: TeamNoteTopicCountDTO[]): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const c of counts) {
+    if (c.topicType !== "PTO_REQUEST") continue;
+    map.set(`${c.employeeId}:${c.topicId}`, c.total);
+  }
+  return map;
+}
+
+/** Same bold-gradient treatment as TeamAvailabilityCards' CARD_TONES, but keyed by PTO type
+ *  rather than by person — CB (Sept 2026, round two): "PTO cards get one tone per leave type
+ *  instead of per person, same as today," so "Sick" reads the same shade everywhere on this
+ *  page rather than shifting with whichever employee happens to have it, same reasoning the
+ *  original per-type chip coloring used. Same hue family as the old TYPE_TONE (blue/rose/
+ *  violet/amber), just as a full-card gradient now. */
+const TYPE_TONE: Record<PtoType, { from: string; to: string }> = {
+  VACATION: { from: "var(--ttc-blue)", to: "var(--ttc-blue-ink)" },
+  SICK: { from: "#f43f5e", to: "#be123c" }, // rose-500 → rose-700
+  PERSONAL: { from: "#8b5cf6", to: "#6d28d9" }, // violet-500 → violet-700
+  OTHER_APPROVED_LEAVE: { from: "#f59e0b", to: "#b45309" }, // amber-500 → amber-700
 };
 
+/**
+ * The HR-wide PTO dashboard's actual card list — fetch, Approve/Deny/Undo, Pending/Decided
+ * sections, and a conversation scoped to each request — extracted from PtoAdminView (Sept
+ * 2026) so it can be dropped straight onto the dashboard's own Availability widget page for
+ * admins, not just the standalone /admin/pto page. Same reasoning as TeamAvailabilityCards:
+ * one card implementation, reused in both places, rather than two copies to keep in sync.
+ *
+ * Round two (Sept 2026): a PTO request is already a single date range rather than several
+ * independent dates, so unlike TeamAvailabilityCards there's nothing to split a conversation
+ * across — tapping the card's one chip opens a single conversation scoped to that request
+ * (TeamNotesThread's topicType="PTO_REQUEST"), the direct equivalent of "tap a date" for a
+ * request that only ever has the one range.
+ *
+ * `viewerId` is the signed-in admin/supervisor viewing this list — see TeamAvailabilityCards
+ * for why it's needed and why it plays no part in access control here.
+ */
 export default function TeamPtoCards({ viewerId }: { viewerId: string }) {
   const [summary, setSummary] = useState<AdminPtoSummaryDTO | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [denyingId, setDenyingId] = useState<string | null>(null);
   const [denyComment, setDenyComment] = useState("");
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [messageCounts, setMessageCounts] = useState<Map<string, number>>(new Map());
 
   async function load() {
     setLoadState("loading");
@@ -56,9 +77,23 @@ export default function TeamPtoCards({ viewerId }: { viewerId: string }) {
     }
   }
 
+  // Best-effort, same reasoning as TeamAvailabilityCards' loadCounts — a missing badge isn't
+  // worth failing the whole card list over.
+  async function loadCounts() {
+    try {
+      const res = await fetch("/api/admin/team-notes/topic-counts");
+      if (!res.ok) return;
+      const data: { counts: TeamNoteTopicCountDTO[] } = await res.json();
+      setMessageCounts(countsByRequest(data.counts));
+    } catch {
+      // ignored — see comment above
+    }
+  }
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
+    loadCounts();
   }, []);
 
   async function decide(id: string, decision: "APPROVED" | "DENIED", comment?: string) {
@@ -116,7 +151,7 @@ export default function TeamPtoCards({ viewerId }: { viewerId: string }) {
             Nothing pending right now.
           </div>
         ) : (
-          <div className="space-y-2.5">
+          <div className="space-y-3">
             {summary.pending.map((r) => (
               <Card
                 key={r.id}
@@ -125,12 +160,14 @@ export default function TeamPtoCards({ viewerId }: { viewerId: string }) {
                 busy={busyId === r.id}
                 denying={denyingId === r.id}
                 denyComment={denyComment}
-                expanded={expandedId === r.id}
-                onToggleExpand={() => setExpandedId(expandedId === r.id ? null : r.id)}
+                open={openId === r.id}
+                messageCounts={messageCounts}
+                onToggleOpen={() => setOpenId(openId === r.id ? null : r.id)}
                 onDenyToggle={() => setDenyingId(denyingId === r.id ? null : r.id)}
                 onDenyCommentChange={setDenyComment}
                 onDecide={decide}
                 onUndo={undo}
+                onMessagePosted={loadCounts}
               />
             ))}
           </div>
@@ -146,7 +183,7 @@ export default function TeamPtoCards({ viewerId }: { viewerId: string }) {
             Nothing decided yet.
           </div>
         ) : (
-          <div className="space-y-2.5">
+          <div className="space-y-3">
             {summary.decided.map((r) => (
               <Card
                 key={r.id}
@@ -155,12 +192,14 @@ export default function TeamPtoCards({ viewerId }: { viewerId: string }) {
                 busy={busyId === r.id}
                 denying={false}
                 denyComment=""
-                expanded={expandedId === r.id}
-                onToggleExpand={() => setExpandedId(expandedId === r.id ? null : r.id)}
+                open={openId === r.id}
+                messageCounts={messageCounts}
+                onToggleOpen={() => setOpenId(openId === r.id ? null : r.id)}
                 onDenyToggle={() => {}}
                 onDenyCommentChange={() => {}}
                 onDecide={() => {}}
                 onUndo={undo}
+                onMessagePosted={loadCounts}
               />
             ))}
           </div>
@@ -176,114 +215,149 @@ function Card({
   busy,
   denying,
   denyComment,
-  expanded,
-  onToggleExpand,
+  open,
+  messageCounts,
+  onToggleOpen,
   onDenyToggle,
   onDenyCommentChange,
   onDecide,
   onUndo,
+  onMessagePosted,
 }: {
   row: AdminPtoRequestDTO;
   viewerId: string;
   busy: boolean;
   denying: boolean;
   denyComment: string;
-  expanded: boolean;
-  onToggleExpand: () => void;
+  open: boolean;
+  messageCounts: Map<string, number>;
+  onToggleOpen: () => void;
   onDenyToggle: () => void;
   onDenyCommentChange: (v: string) => void;
   onDecide: (id: string, decision: "APPROVED" | "DENIED", comment?: string) => void;
   onUndo: (id: string) => void;
+  onMessagePosted: () => void;
 }) {
-  const avatarTone = toneForName(r.employeeName);
-  const typeTone = TYPE_TONE[r.type];
+  const tone = TYPE_TONE[r.type];
   const isPending = r.status === "PENDING";
+  const msgCount = messageCounts.get(`${r.employeeId}:${r.id}`) ?? 0;
 
   return (
-    <div className="bg-surface border border-border rounded-2xl shadow-sm overflow-hidden">
-      <div className="p-4 sm:p-5">
-        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-          <button
-            type="button"
-            onClick={onToggleExpand}
-            className="flex items-start gap-3 min-w-0 text-left flex-1"
-          >
-            <span
-              className={`h-10 w-10 rounded-full flex items-center justify-center text-sm font-semibold shrink-0 ${avatarTone.bg} ${avatarTone.text}`}
-            >
-              {initialsOf(r.employeeName)}
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-base font-semibold truncate flex items-center gap-1.5">
-                {r.employeeName}
-                <ChatIcon className={`h-3.5 w-3.5 shrink-0 ${expanded ? "text-accent-ink" : "text-muted"}`} />
-                <ChevronDownIcon
-                  className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${expanded ? "rotate-180" : ""}`}
-                />
-              </p>
-              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                <span className={`inline-flex items-center rounded-lg px-2.5 py-1 text-xs font-semibold leading-tight ${typeTone.bg} ${typeTone.text}`}>
-                  {PTO_TYPE_LABEL[r.type]}
-                </span>
-                <span className="text-sm text-muted">
-                  {formatDateRange(r.startDate, r.endDate)} · {r.hours} hrs
-                </span>
-              </div>
-              {r.reason && <p className="text-sm text-muted italic mt-1.5">&ldquo;{r.reason}&rdquo;</p>}
-              {!isPending && r.reviewComment && (
-                <p className="text-sm text-muted italic mt-1.5">Reviewer note: &ldquo;{r.reviewComment}&rdquo;</p>
+    <div
+      className="rounded-3xl shadow-lg overflow-hidden p-4 sm:p-5"
+      style={{ background: `linear-gradient(150deg, ${tone.from} 0%, ${tone.to} 100%)` }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3 min-w-0 flex-1">
+          <span className="h-10 w-10 rounded-full bg-white/25 border border-white/40 flex items-center justify-center text-sm font-semibold text-white shrink-0">
+            {initialsOf(r.employeeName)}
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-base font-semibold text-white truncate">{r.employeeName}</p>
+            <div className="flex items-center gap-2 mt-0.5">
+              {isPending ? (
+                <span className="text-xs font-medium text-white/80">Awaiting your decision</span>
+              ) : (
+                <>
+                  <PtoStatusPill status={r.status} />
+                  <button onClick={() => onUndo(r.id)} disabled={busy} className="text-xs font-medium text-white/85 hover:text-white underline underline-offset-2">
+                    Undo
+                  </button>
+                </>
               )}
             </div>
-          </button>
-
-          <div className="flex items-center gap-2 shrink-0 sm:pl-2">
-            {isPending ? (
-              <>
-                <button onClick={() => onDecide(r.id, "APPROVED")} disabled={busy} className="btn-primary text-sm px-4 py-2">
-                  Approve
-                </button>
-                <button onClick={onDenyToggle} disabled={busy} className="btn-neutral text-sm px-4 py-2">
-                  Deny
-                </button>
-              </>
-            ) : (
-              <>
-                <PtoStatusPill status={r.status} />
-                <button
-                  onClick={() => onUndo(r.id)}
-                  disabled={busy}
-                  className="text-xs font-medium text-muted hover:text-accent-ink underline shrink-0"
-                >
-                  Undo
-                </button>
-              </>
-            )}
           </div>
         </div>
-
-        {denying && (
-          <div className="mt-3 flex flex-col sm:flex-row gap-2 bg-black/[0.02] rounded-lg p-3">
-            <textarea
-              value={denyComment}
-              onChange={(e) => onDenyCommentChange(e.target.value)}
-              placeholder="Optional note for the team member…"
-              rows={2}
-              className="flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
-            />
-            <button
-              onClick={() => onDecide(r.id, "DENIED", denyComment.trim() || undefined)}
-              disabled={busy}
-              className="btn-primary text-sm px-4 py-2 self-start"
-            >
-              Confirm deny
-            </button>
-          </div>
-        )}
+        <span className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center shrink-0" title="Tap below to message about this request">
+          <ChatIcon className="h-4 w-4 text-white" />
+        </span>
       </div>
 
-      {expanded && (
-        <div className="border-t border-border bg-black/[0.02] p-4 sm:p-5">
-          <TeamNotesThread employeeId={r.employeeId} viewerId={viewerId} />
+      <button
+        type="button"
+        onClick={onToggleOpen}
+        className={`relative mt-3.5 flex flex-col items-start rounded-xl px-2.5 py-1.5 leading-tight transition-colors ${
+          open ? "bg-white" : "bg-white/15 hover:bg-white/25 border border-white/25"
+        }`}
+        style={open ? { color: tone.to } : undefined}
+      >
+        <span className={`text-xs font-semibold ${open ? "" : "text-white"}`}>{PTO_TYPE_LABEL[r.type]}</span>
+        <span className={`text-[11px] ${open ? "opacity-70" : "text-white/80"}`}>
+          {formatDateRange(r.startDate, r.endDate)} · {r.hours} hrs
+        </span>
+        {/* Same "read cleanly" reasoning as TeamAvailabilityCards' date chips — a request with
+            a conversation on it says so at a glance, open or not. */}
+        {msgCount > 0 && (
+          <span
+            className="absolute -top-1.5 -right-1.5 flex items-center gap-0.5 rounded-full bg-white px-1.5 py-0.5 text-[10px] font-bold shadow-sm"
+            style={{ color: tone.to }}
+            title={`${msgCount} message${msgCount === 1 ? "" : "s"} on this request`}
+          >
+            <ChatIcon className="h-2.5 w-2.5" />
+            {msgCount}
+          </span>
+        )}
+      </button>
+
+      {r.reason && <p className="text-sm text-white/85 italic mt-2.5">&ldquo;{r.reason}&rdquo;</p>}
+      {!isPending && r.reviewComment && (
+        <p className="text-sm text-white/85 italic mt-2">Reviewer note: &ldquo;{r.reviewComment}&rdquo;</p>
+      )}
+
+      {isPending && (
+        <div className="flex items-center gap-2 mt-3.5">
+          <button
+            onClick={() => onDecide(r.id, "APPROVED")}
+            disabled={busy}
+            className="rounded-full bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:brightness-95 disabled:opacity-60"
+            style={{ color: tone.to }}
+          >
+            Approve
+          </button>
+          <button
+            onClick={onDenyToggle}
+            disabled={busy}
+            className="rounded-full bg-white/15 border border-white/35 px-4 py-2 text-sm font-semibold text-white hover:bg-white/25 disabled:opacity-60"
+          >
+            Deny
+          </button>
+        </div>
+      )}
+
+      {denying && (
+        <div className="mt-3 flex flex-col sm:flex-row gap-2 bg-white/15 rounded-xl p-3">
+          <textarea
+            value={denyComment}
+            onChange={(e) => onDenyCommentChange(e.target.value)}
+            placeholder="Optional note for the team member…"
+            rows={2}
+            className="flex-1 rounded-md border border-white/30 bg-white/90 px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-white placeholder:text-muted"
+          />
+          <button
+            onClick={() => onDecide(r.id, "DENIED", denyComment.trim() || undefined)}
+            disabled={busy}
+            className="rounded-full bg-white px-4 py-2 text-sm font-semibold self-start shadow-sm"
+            style={{ color: tone.to }}
+          >
+            Confirm deny
+          </button>
+        </div>
+      )}
+
+      {open && (
+        <div className="mt-3.5">
+          <p className="text-xs font-semibold text-white/80 mb-1.5 flex items-center gap-1.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-white/80" />
+            {PTO_TYPE_LABEL[r.type]} — conversation
+          </p>
+          <TeamNotesThread
+            employeeId={r.employeeId}
+            viewerId={viewerId}
+            topicType="PTO_REQUEST"
+            topicId={r.id}
+            placeholder="Write a message about this request…"
+            onMessagePosted={onMessagePosted}
+          />
         </div>
       )}
     </div>
