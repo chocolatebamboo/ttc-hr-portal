@@ -3,10 +3,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AvailabilityStatusPill from "@/components/AvailabilityStatusPill";
 import JumpToTodayButton from "@/components/JumpToTodayButton";
+import TeamNotesThread from "@/components/TeamNotesThread";
+import { ChatIcon } from "@/components/icons";
 import { formatSlotDate, formatTime12h } from "@/lib/availability-format";
 import { todayDateKey } from "@/lib/time";
 import { getMonth, type Month } from "@/lib/month";
-import type { AvailabilityDTO, AvailabilitySlot } from "@/types";
+import type { AvailabilityDTO, AvailabilitySlot, TeamNoteTopicCountDTO } from "@/types";
 
 const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
 
@@ -59,6 +61,11 @@ function submissionsByDate(submissions: AvailabilityDTO[]): Map<string, Availabi
 }
 
 export interface AvailabilityCalendarControls {
+  /** The signed-in team member's own id — this calendar is always self-service, so it's both
+   *  the employeeId and the viewerId every per-date TeamNotesThread needs (CB, Sept 2026: "I
+   *  don't see where Sean could see those messages" — this is the fix, the same per-date
+   *  conversation admin cards already open, now reachable from the employee's own side). */
+  employeeId: string;
   /** The signed-in team member's own submissions — newest first. This calendar is always
    *  self-service (submit your own availability); a supervisor/HR reviewing someone else's
    *  submissions uses a plain list instead (TeamAvailabilitySection, AvailabilityAdminView),
@@ -136,7 +143,34 @@ export interface AvailabilityCalendarControls {
  * Cancel button.
  */
 export default function AvailabilityCalendar({ controls }: { controls: AvailabilityCalendarControls }) {
-  const { submissions } = controls;
+  const { submissions, employeeId } = controls;
+
+  // Per-date message counts for this person's own conversations, keyed "submissionId:date" —
+  // fetched once here (rather than inside SubmissionDetail, which remounts every time a
+  // different submission is viewed thanks to Panel's key prop below) so switching between
+  // submissions doesn't re-fetch on every click. Best-effort: a missing badge isn't worth
+  // failing the calendar over.
+  const [messageCounts, setMessageCounts] = useState<Map<string, number>>(new Map());
+  async function loadCounts() {
+    try {
+      const res = await fetch(`/api/team-notes/${employeeId}/topic-counts`);
+      if (!res.ok) return;
+      const data: { counts: TeamNoteTopicCountDTO[] } = await res.json();
+      const map = new Map<string, number>();
+      for (const c of data.counts) {
+        if (c.topicType !== "AVAILABILITY_DATE") continue;
+        map.set(`${c.topicId}:${c.topicDate ?? ""}`, c.total);
+      }
+      setMessageCounts(map);
+    } catch {
+      // ignored — see comment above
+    }
+  }
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadCounts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employeeId]);
 
   // Ascending offset order (PAST_OFFSET .. MAX_FUTURE_OFFSET) so the array is already in
   // top-to-bottom render order with no reordering logic needed — past months first, current
@@ -284,6 +318,9 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
         <Panel
           key={viewingSubmission?.id ?? "draft"}
           viewingSubmission={viewingSubmission}
+          employeeId={employeeId}
+          messageCounts={messageCounts}
+          onMessagePosted={loadCounts}
           draftDates={draftDates}
           draft={draft}
           onUpdateTime={(dateKey, field, value) => setDraft((d) => ({ ...d, [dateKey]: { ...d[dateKey], [field]: value } }))}
@@ -415,6 +452,9 @@ function MonthSection({
 
 function Panel({
   viewingSubmission,
+  employeeId,
+  messageCounts,
+  onMessagePosted,
   draftDates,
   draft,
   onUpdateTime,
@@ -429,6 +469,9 @@ function Panel({
   cancelling,
 }: {
   viewingSubmission: AvailabilityDTO | undefined;
+  employeeId: string;
+  messageCounts: Map<string, number>;
+  onMessagePosted: () => void;
   draftDates: string[];
   draft: Record<string, { startTime: string; endTime: string }>;
   onUpdateTime: (dateKey: string, field: "startTime" | "endTime", value: string) => void;
@@ -489,7 +532,15 @@ function Panel({
       </div>
 
       {viewingSubmission ? (
-        <SubmissionDetail submission={viewingSubmission} onResubmit={onResubmit} onCancel={onCancel} cancelling={cancelling} />
+        <SubmissionDetail
+          submission={viewingSubmission}
+          employeeId={employeeId}
+          messageCounts={messageCounts}
+          onMessagePosted={onMessagePosted}
+          onResubmit={onResubmit}
+          onCancel={onCancel}
+          cancelling={cancelling}
+        />
       ) : (
         <DraftForm
           draftDates={draftDates}
@@ -507,17 +558,28 @@ function Panel({
 
 function SubmissionDetail({
   submission,
+  employeeId,
+  messageCounts,
+  onMessagePosted,
   onResubmit,
   onCancel,
   cancelling,
 }: {
   submission: AvailabilityDTO;
+  employeeId: string;
+  messageCounts: Map<string, number>;
+  onMessagePosted: () => void;
   onResubmit?: () => void;
   onCancel?: () => void;
   cancelling?: boolean;
 }) {
   const lines = [...submission.slots].sort((a, b) => a.date.localeCompare(b.date));
   const canClear = submission.status === "PENDING" || submission.status === "DENIED";
+  // Which date's conversation is open — local to this one submission's panel rather than lifted
+  // up, since Panel remounts this component fresh (key={viewingSubmission?.id ?? "draft"})
+  // every time a different submission is opened, so there's never a stale open date to carry
+  // over from one submission to the next.
+  const [openDate, setOpenDate] = useState<string | null>(null);
 
   return (
     <div className="space-y-3">
@@ -527,11 +589,48 @@ function SubmissionDetail({
           <AvailabilityStatusPill status={submission.status} />
         </div>
         <ul className="text-sm space-y-1">
-          {lines.map((s) => (
-            <li key={s.date}>
-              {formatSlotDate(s.date)}: {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
-            </li>
-          ))}
+          {/* CB, Sept 2026: "I send it to Sean, I don't see where Sean could see those
+              messages that I put for that specific day" — this is that missing other half.
+              Tapping a date opens the exact same per-date conversation
+              (topicType="AVAILABILITY_DATE") a supervisor/admin opens from their own card for
+              this same submission, so a message posted from either side lands in one shared
+              thread instead of two that never meet. */}
+          {lines.map((s) => {
+            const msgCount = messageCounts.get(`${submission.id}:${s.date}`) ?? 0;
+            const active = openDate === s.date;
+            return (
+              <li key={s.date}>
+                <button
+                  type="button"
+                  onClick={() => setOpenDate(active ? null : s.date)}
+                  className={`w-full flex items-center justify-between gap-2 rounded-lg -mx-2 px-2 py-1.5 text-left transition-colors ${
+                    active ? "bg-white/15" : "hover:bg-white/10"
+                  }`}
+                >
+                  <span>
+                    {formatSlotDate(s.date)}: {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
+                  </span>
+                  <span className="flex items-center gap-1 shrink-0 text-xs text-white/60">
+                    <ChatIcon className="h-3 w-3" />
+                    {msgCount > 0 ? msgCount : "Message"}
+                  </span>
+                </button>
+                {active && (
+                  <div className="mt-1.5 mb-2">
+                    <TeamNotesThread
+                      employeeId={employeeId}
+                      viewerId={employeeId}
+                      topicType="AVAILABILITY_DATE"
+                      topicId={submission.id}
+                      topicDate={s.date}
+                      placeholder="Message your supervisor or HR about this date…"
+                      onMessagePosted={onMessagePosted}
+                    />
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ul>
         {submission.note && <p className="text-sm text-white/70 mt-2">&ldquo;{submission.note}&rdquo;</p>}
         {submission.status === "DENIED" && submission.reviewComment && (
