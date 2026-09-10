@@ -18,7 +18,7 @@ type LoadState = "loading" | "ready" | "error";
  * worked hours and time-off requests, and this is conceptually the same *kind* of thing (dates
  * on a calendar, submit, get approved) but a different subject entirely.
  */
-export default function AvailabilityView() {
+export default function AvailabilityView({ employeeId }: { employeeId: string }) {
   const [submissions, setSubmissions] = useState<AvailabilityDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [submitting, setSubmitting] = useState(false);
@@ -107,7 +107,7 @@ export default function AvailabilityView() {
 
       {loadState === "ready" && (
         <AvailabilityCalendar
-          controls={{ submissions, onSubmit: handleSubmit, submitting, error, onCancel: handleCancel, cancellingId }}
+          controls={{ employeeId, submissions, onSubmit: handleSubmit, submitting, error, onCancel: handleCancel, cancellingId }}
         />
       )}
     </div>
