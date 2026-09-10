@@ -233,6 +233,8 @@ export interface AdminAvailabilityDTO extends AvailabilityDTO {
  *  attachmentName is shown to the client; the underlying storage key never is — downloading
  *  goes through /api/team-notes/[employeeId]/[noteId]/download, which re-checks access and
  *  mints a short-lived signed URL rather than exposing the key itself. */
+export type TeamNoteTopicType = "AVAILABILITY_DATE" | "PTO_REQUEST";
+
 export interface TeamNoteDTO {
   id: string;
   employeeId: string;
@@ -242,6 +244,33 @@ export interface TeamNoteDTO {
   hasAttachment: boolean;
   attachmentName: string | null;
   createdAt: string; // ISO
+  /** All three null = the general thread (src/app/(portal)/team/[employeeId], /notes) —
+   *  unchanged from before. See TeamNote's doc comment in prisma/schema.prisma for what each
+   *  topicType pairs topicId/topicDate with. */
+  topicType: TeamNoteTopicType | null;
+  topicId: string | null;
+  topicDate: string | null;
+}
+
+/**
+ * How many messages exist for one specific date/request conversation — CB, Sept 2026: "I send
+ * it to Sean, I don't see where Sean could see those messages... it needs to kinda read
+ * cleanly," so both sides need a visible signal for which chip/date/request actually has a
+ * conversation on it, not just the ability to open one blind. `total` badges the chip itself
+ * (src/components/TeamAvailabilityCards.tsx, TeamPtoCards.tsx, AvailabilityCalendar.tsx,
+ * TimesheetView.tsx) so a conversation is discoverable at a glance. `fromOthers` is the count
+ * authored by anyone other than the viewer — used for the home-page notification
+ * (src/app/(portal)/dashboard/page.tsx) as a "someone said something to you" signal. Neither
+ * one is true read/unread tracking (nothing records when a viewer last opened a thread) — a
+ * count that's already been read stays counted until the conversation moves again.
+ */
+export interface TeamNoteTopicCountDTO {
+  employeeId: string;
+  topicType: TeamNoteTopicType;
+  topicId: string;
+  topicDate: string | null;
+  total: number;
+  fromOthers: number;
 }
 
 export type DocumentCategory =
