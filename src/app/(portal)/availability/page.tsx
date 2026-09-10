@@ -6,5 +6,5 @@ export default async function AvailabilityPage() {
   const employee = await getCurrentEmployee();
   if (!employee) redirect("/login");
 
-  return <AvailabilityView />;
+  return <AvailabilityView employeeId={employee.id} />;
 }
