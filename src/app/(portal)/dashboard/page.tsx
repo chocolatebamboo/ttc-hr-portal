@@ -7,10 +7,11 @@ import { listDocumentsForEmployee } from "@/lib/documents";
 import { listAnnouncementsForEmployee } from "@/lib/announcements";
 import { getOnboardingAttention } from "@/lib/onboarding";
 import { listMyAvailability, listAdminAvailability } from "@/lib/availability";
+import { listTeamNoteTopicCounts, listAllTeamNoteTopicCounts } from "@/lib/team-notes";
 import TimeClockCard from "@/components/TimeClockCard";
 import TimeOffSection from "@/components/TimeOffSection";
 import AvailabilityStatusSection from "@/components/AvailabilityStatusSection";
-import { FolderIcon, ChecklistIcon, MegaphoneIcon, ChartIcon, BellIcon, type IconProps } from "@/components/icons";
+import { FolderIcon, ChecklistIcon, MegaphoneIcon, ChartIcon, BellIcon, ChatIcon, type IconProps } from "@/components/icons";
 import { formatHoursCompact } from "@/lib/time";
 import type { AnnouncementDTO, DocumentDTO } from "@/types";
 
@@ -58,6 +59,20 @@ export default async function DashboardPage() {
   const pendingAvailabilityCount = isAdmin(employee)
     ? (await listAdminAvailability(employee)).pending.length
     : 0;
+
+  // CB, Sept 2026: "on the receiving end... on the home page and on the availability page...
+  // I send it to Sean, I don't see where Sean could see those messages" — a home-page signal
+  // for BOTH directions that a per-date/per-request conversation has something waiting,
+  // mirroring pendingAvailabilityCount's admin-only banner just above. `fromOthers` (not
+  // `total`) is what a notification should count — messages the viewer didn't write
+  // themselves — see TeamNoteTopicCountDTO's doc comment in src/types/index.ts for why this
+  // isn't true unread tracking. Admins see it across every employee's conversations
+  // (listAllTeamNoteTopicCounts, same org-wide reach as listAdminAvailability); everyone else
+  // sees it for just their own.
+  const teamNoteCounts = isAdmin(employee)
+    ? await listAllTeamNoteTopicCounts(employee)
+    : await listTeamNoteTopicCounts(employee, employee.id);
+  const messagesFromOthers = teamNoteCounts.reduce((sum, c) => sum + c.fromOthers, 0);
 
   const documents = await listDocumentsForEmployee(employee);
   const pendingAcknowledgments = documents.filter((d) => d.requiresAcknowledgment && !d.acknowledgedAt);
@@ -109,6 +124,17 @@ export default async function DashboardPage() {
           home page." */}
       {isAdmin(employee) && pendingAvailabilityCount > 0 && (
         <PendingApprovalsBanner className="animate-in animate-in-2 mt-4" count={pendingAvailabilityCount} />
+      )}
+
+      {/* Same "shows while true" shape as the approvals banner above — the admin side links
+          into the card list where every conversation lives; the employee side links into their
+          own Availability summary, which is where both the Availability and Time Off sections
+          (and, from there, the actual per-date/per-request threads) live. */}
+      {messagesFromOthers > 0 && (
+        <MessagesBanner
+          className={`animate-in mt-3 ${isAdmin(employee) ? "animate-in-3" : "animate-in-2"}`}
+          count={messagesFromOthers}
+        />
       )}
 
       {/* Mobile: bold color-block layout (CB's Sept 2026 aesthetic ask, reference screenshots
@@ -381,6 +407,31 @@ function PendingApprovalsBanner({ className, count }: { className?: string; coun
         {count} availability {count === 1 ? "request" : "requests"} waiting for your review
       </p>
       <span className="ml-auto text-xs font-medium whitespace-nowrap shrink-0 opacity-90">Review →</span>
+    </Link>
+  );
+}
+
+// CB, Sept 2026: the other half of the per-date/per-request conversation feature — "I send it
+// to Sean, I don't see where Sean could see those messages... it needs to kinda read cleanly."
+// Deliberately a distinct violet (not blue, which PendingApprovalsBanner already owns, and not
+// pink, which Announcements owns below) so the two home-page banners never read as the same
+// kind of thing at a glance — this one is "someone said something," not "something needs a
+// decision." Shown to admins and employees alike (unlike the approvals banner, which is
+// admin-only) since a message can come from either side.
+function MessagesBanner({ className, count }: { className?: string; count: number }) {
+  return (
+    <Link
+      href="/dashboard/availability"
+      className={`flex items-center gap-3 rounded-2xl px-4 py-3.5 text-white transition-transform hover:-translate-y-0.5 ${className ?? ""}`}
+      style={{ background: "linear-gradient(135deg, #6d28d9, #8b5cf6)" }}
+    >
+      <span className="h-9 w-9 shrink-0 rounded-full bg-white/15 flex items-center justify-center">
+        <ChatIcon className="h-4.5 w-4.5" />
+      </span>
+      <p className="text-sm font-medium">
+        {count} {count === 1 ? "message" : "messages"} on your availability & time off
+      </p>
+      <span className="ml-auto text-xs font-medium whitespace-nowrap shrink-0 opacity-90">View →</span>
     </Link>
   );
 }
