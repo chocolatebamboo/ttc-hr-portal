@@ -26,6 +26,9 @@ export function describeSlots(slots: AvailabilitySlot[]): string[] {
 }
 
 export interface SlotChip {
+  /** Raw "YYYY-MM-DD" — the stable key used to scope a conversation to this specific date
+   *  (see TeamNote.topicDate in prisma/schema.prisma), never shown to the user directly. */
+  date: string;
   dateLabel: string;
   timeLabel: string;
 }
@@ -35,11 +38,15 @@ export interface SlotChip {
  *  dense stack of "Thu, Sep 17: 9:00 AM – 5:00 PM" lines read as "just a bunch of words and
  *  letters." TeamAvailabilityCards/TeamPtoCards render each of these as its own small colored
  *  chip instead — the date bold on top, the time range beneath it — so a five-date submission
- *  reads as a scannable row of chips rather than five run-on sentences. */
+ *  reads as a scannable row of chips rather than five run-on sentences. Each chip is now also
+ *  its own tap target for a per-date conversation (Sept 2026, round two of the redesign) — CB:
+ *  "each scheduled day may have different requests... I wanted to make comments under each day
+ *  that was selected" — which is why the raw date comes along, not just its display label. */
 export function slotChips(slots: AvailabilitySlot[]): SlotChip[] {
   return [...slots]
     .sort((a, b) => a.date.localeCompare(b.date))
     .map((s) => ({
+      date: s.date,
       dateLabel: formatSlotDate(s.date),
       timeLabel: `${formatTime12h(s.startTime)} – ${formatTime12h(s.endTime)}`,
     }));
