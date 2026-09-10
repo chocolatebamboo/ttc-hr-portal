@@ -6,5 +6,5 @@ export default async function TimePage() {
   const employee = await getCurrentEmployee();
   if (!employee) redirect("/login");
 
-  return <TimesheetView />;
+  return <TimesheetView employeeId={employee.id} />;
 }
