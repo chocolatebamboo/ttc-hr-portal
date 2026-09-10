@@ -356,9 +356,27 @@ model TeamNote {
   attachmentKey  String?
   attachmentName String?
 
+  // Sept 2026, round two of the admin card redesign — CB: "each scheduled day may have
+  // different requests... I wanted to make comments under each day that was selected." Every
+  // note still belongs to one employee (employeeId, access rule unchanged), but can now also be
+  // scoped to a specific thing about that employee rather than one big general thread. All three
+  // null (the default — every note posted before this) is the original general thread, unchanged,
+  // still what src/app/(portal)/team/[employeeId] and /notes render. "AVAILABILITY_DATE" pairs
+  // topicId (an AvailabilitySubmission id) with topicDate (one "YYYY-MM-DD" from that
+  // submission's slots) — one conversation per selected day, not per whole submission.
+  // "PTO_REQUEST" sets topicId to a PtoRequest id and leaves topicDate null — a PTO request is
+  // already a single date range, so the request itself is the scope. No formal @relation to
+  // either table (both are optional and only ever set together with topicType by
+  // src/lib/team-notes.ts) — kept as plain columns so this table doesn't need a new RLS policy;
+  // access is still governed entirely by employeeId, same as before.
+  topicType String?
+  topicId   String?
+  topicDate String?
+
   createdAt DateTime @default(now())
 
   @@index([employeeId, createdAt])
+  @@index([employeeId, topicType, topicId, topicDate, createdAt])
 }
 
 // ---------------------------------------------------------------------------
