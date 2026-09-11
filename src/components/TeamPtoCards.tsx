@@ -5,7 +5,7 @@ import PtoStatusPill from "@/components/PtoStatusPill";
 import TeamNotesThread from "@/components/TeamNotesThread";
 import { ChatIcon } from "@/components/icons";
 import { PTO_TYPE_LABEL, formatDateRange } from "@/lib/time";
-import { toneForStatus } from "@/lib/status-tone";
+import { toneForStatus, YOU_TONE } from "@/lib/status-tone";
 import type { AdminPtoRequestDTO, AdminPtoSummaryDTO, TeamNoteTopicCountDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
@@ -228,7 +228,10 @@ function Card({
 }) {
   // CB, Sept 2026, round three: same status-driven tone as TeamAvailabilityCards now uses —
   // Approved is pink, Pending is amber/yellow — replacing the old per-leave-type coloring.
-  const tone = toneForStatus(r.status);
+  // CB, round five: the viewer's own card always reads in brand blue, regardless of status —
+  // see YOU_TONE's doc comment in src/lib/status-tone.ts.
+  const isSelf = r.employeeId === viewerId;
+  const tone = isSelf ? YOU_TONE : toneForStatus(r.status);
   const isPending = r.status === "PENDING";
   const msgCount = messageCounts.get(`${r.employeeId}:${r.id}`) ?? 0;
 
@@ -245,7 +248,7 @@ function Card({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
               <p className="text-base font-semibold text-white truncate">{r.employeeName}</p>
-              {r.employeeId === viewerId && (
+              {isSelf && (
                 <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-white bg-white/25 border border-white/40 rounded-full px-1.5 py-0.5">
                   You
                 </span>
