@@ -168,7 +168,14 @@ export async function getTeamNoteAttachmentUrl(
   return getSignedDownloadUrl(row.attachmentKey);
 }
 
-type TopicRow = { employeeId: string; topicType: string | null; topicId: string | null; topicDate: string | null; authorId: string };
+type TopicRow = {
+  employeeId: string;
+  topicType: string | null;
+  topicId: string | null;
+  topicDate: string | null;
+  authorId: string;
+  employee: { firstName: string; lastName: string; preferredName: string | null };
+};
 
 /** Folds raw note rows down to one count per (employeeId, topicType, topicId, topicDate) —
  *  shared by both listTeamNoteTopicCounts (one employee) and listAllTeamNoteTopicCounts (every
@@ -181,6 +188,7 @@ function aggregateTopicCounts(rows: TopicRow[], viewerId: string): TeamNoteTopic
     const key = `${row.employeeId}:${row.topicType}:${row.topicId}:${row.topicDate ?? ""}`;
     const entry = byKey.get(key) ?? {
       employeeId: row.employeeId,
+      employeeName: `${row.employee.preferredName || row.employee.firstName} ${row.employee.lastName}`,
       topicType: row.topicType as TeamNoteTopicType,
       topicId: row.topicId,
       topicDate: row.topicDate,
@@ -207,7 +215,14 @@ export async function listTeamNoteTopicCounts(
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const rows = await tx.teamNote.findMany({
       where: { employeeId, topicType: { not: null } },
-      select: { employeeId: true, topicType: true, topicId: true, topicDate: true, authorId: true },
+      select: {
+        employeeId: true,
+        topicType: true,
+        topicId: true,
+        topicDate: true,
+        authorId: true,
+        employee: { select: { firstName: true, lastName: true, preferredName: true } },
+      },
     });
     return aggregateTopicCounts(rows, actor.id);
   });
@@ -224,7 +239,14 @@ export async function listAllTeamNoteTopicCounts(actor: CurrentEmployee): Promis
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const rows = await tx.teamNote.findMany({
       where: { topicType: { not: null } },
-      select: { employeeId: true, topicType: true, topicId: true, topicDate: true, authorId: true },
+      select: {
+        employeeId: true,
+        topicType: true,
+        topicId: true,
+        topicDate: true,
+        authorId: true,
+        employee: { select: { firstName: true, lastName: true, preferredName: true } },
+      },
     });
     return aggregateTopicCounts(rows, actor.id);
   });
