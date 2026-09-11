@@ -8,6 +8,7 @@ import { listAnnouncementsForEmployee } from "@/lib/announcements";
 import { getOnboardingAttention } from "@/lib/onboarding";
 import { listMyAvailability, listAdminAvailability } from "@/lib/availability";
 import { listTeamNoteTopicCounts, listAllTeamNoteTopicCounts } from "@/lib/team-notes";
+import { listConversationSummaries } from "@/lib/direct-messages";
 import TimeClockCard from "@/components/TimeClockCard";
 import TimeOffSection from "@/components/TimeOffSection";
 import AvailabilityStatusSection from "@/components/AvailabilityStatusSection";
@@ -45,11 +46,16 @@ export default async function DashboardPage() {
   // themselves — see TeamNoteTopicCountDTO's doc comment in src/types/index.ts for why this
   // isn't true unread tracking. Admins see it across every employee's conversations
   // (listAllTeamNoteTopicCounts, same org-wide reach as listAdminAvailability); everyone else
-  // sees it for just their own.
-  const teamNoteCounts = isAdmin(employee)
-    ? await listAllTeamNoteTopicCounts(employee)
-    : await listTeamNoteTopicCounts(employee, employee.id);
-  const messagesFromOthers = teamNoteCounts.reduce((sum, c) => sum + c.fromOthers, 0);
+  // sees it for just their own. Extended this round for real peer-to-peer DMs (listConversationSummaries)
+  // — the badge on the dashboard's message icon, and this banner, now cover every kind of
+  // conversation the unified My Messages inbox lists, not just topic threads.
+  const [teamNoteCounts, directConversations] = await Promise.all([
+    isAdmin(employee) ? listAllTeamNoteTopicCounts(employee) : listTeamNoteTopicCounts(employee, employee.id),
+    listConversationSummaries(employee),
+  ]);
+  const messagesFromOthers =
+    teamNoteCounts.reduce((sum, c) => sum + c.fromOthers, 0) +
+    directConversations.reduce((sum, c) => sum + c.fromOthers, 0);
 
   const documents = await listDocumentsForEmployee(employee);
   const pendingAcknowledgments = documents.filter((d) => d.requiresAcknowledgment && !d.acknowledgedAt);
@@ -380,17 +386,20 @@ function PendingApprovalsBanner({ className, count }: { className?: string; coun
   );
 }
 
-// CB, Sept 2026: the other half of the per-date/per-request conversation feature — "I send it
-// to Sean, I don't see where Sean could see those messages... it needs to kinda read cleanly."
-// Deliberately a distinct violet (not blue, which PendingApprovalsBanner already owns, and not
-// pink, which Announcements owns below) so the two home-page banners never read as the same
-// kind of thing at a glance — this one is "someone said something," not "something needs a
-// decision." Shown to admins and employees alike (unlike the approvals banner, which is
-// admin-only) since a message can come from either side.
+// CB, Sept 2026: the other half of the messaging feature — "I send it to Sean, I don't see
+// where Sean could see those messages... it needs to kinda read cleanly," extended this round
+// to "instead of notes, I want it to be messages... have an internal conversation." Links
+// straight into the unified My Messages inbox (not just the availability page) since a waiting
+// message can now be a topic thread OR a real peer-to-peer DM. Deliberately a distinct violet
+// (not blue, which PendingApprovalsBanner already owns, and not pink, which Announcements owns
+// below) so the two home-page banners never read as the same kind of thing at a glance — this
+// one is "someone said something," not "something needs a decision." Shown to admins and
+// employees alike (unlike the approvals banner, which is admin-only) since a message can come
+// from either side.
 function MessagesBanner({ className, count }: { className?: string; count: number }) {
   return (
     <Link
-      href="/dashboard/availability"
+      href="/messages"
       className={`flex items-center gap-3 rounded-2xl px-4 py-3.5 text-white transition-transform hover:-translate-y-0.5 ${className ?? ""}`}
       style={{ background: "linear-gradient(135deg, #6d28d9, #8b5cf6)" }}
     >
@@ -398,7 +407,7 @@ function MessagesBanner({ className, count }: { className?: string; count: numbe
         <ChatIcon className="h-4.5 w-4.5" />
       </span>
       <p className="text-sm font-medium">
-        {count} {count === 1 ? "message" : "messages"} on your availability & time off
+        {count} new {count === 1 ? "message" : "messages"} waiting for you
       </p>
       <span className="ml-auto text-xs font-medium whitespace-nowrap shrink-0 opacity-90">View →</span>
     </Link>
