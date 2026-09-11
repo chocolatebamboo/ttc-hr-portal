@@ -1,167 +1,420 @@
-"use client";
-
-import { useEffect, useState } from "react";
-import {
-  CheckCircleIcon,
-  ChecklistIcon,
-  FolderIcon,
-  GraduationCapIcon,
-  AwardIcon,
-  UsersIcon,
-  LockIcon,
-  TrashIcon,
-} from "@/components/icons";
-import OnboardingStatusPill from "@/components/OnboardingStatusPill";
-import type {
-  CertificationAnswerInput,
-  CertificationAttemptDTO,
-  CertificationQuestionAdminDTO,
-  CertificationQuestionDTO,
-  CertificationReviewOutcome,
-  DocumentAdminSummaryDTO,
-  EmployeeOnboardingDTO,
-  OnboardingAdminSummaryDTO,
-  OnboardingCheckpointDTO,
-  OnboardingItemDTO,
-  OnboardingItemType,
-  OnboardingReadinessItemDTO,
-  OnboardingTemplateDTO,
-  OnboardingTemplateSummaryDTO,
-} from "@/types";
-
-type LoadState = "loading" | "ready" | "error";
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-const TYPE_ICON: Record<OnboardingItemType, (props: { className?: string }) => React.ReactElement> = {
-  TASK: ChecklistIcon,
-  DOCUMENT: FolderIcon,
-  TRAINING: GraduationCapIcon,
-  MEETING: UsersIcon,
-  CERTIFICATION: AwardIcon,
-};
-
-const TYPE_LABEL: Record<OnboardingItemType, string> = {
-  TASK: "Task",
-  DOCUMENT: "Document",
-  TRAINING: "Training",
-  MEETING: "Meeting",
-  CERTIFICATION: "Certification",
-};
-
-// "What happens after" copy for the current-step card — answers the second of the three
-// questions this redesign is built around, without the employee having to guess or ask HR.
-const AFTER_COPY: Record<OnboardingItemType, string> = {
-  TASK: "This finishes the moment you check it off — the next step unlocks right away.",
-  DOCUMENT:
-    "Once you acknowledge this document, it goes to HR or your supervisor for approval before the next step unlocks.",
-  TRAINING: "Once you mark this done, it goes to HR or your supervisor for approval before the next step unlocks.",
-  MEETING: "Once you confirm this happened, it goes to HR or your supervisor for approval before the next step unlocks.",
-  CERTIFICATION:
-    "Once you submit the test, it goes to HR or your supervisor for review — some answers are graded instantly, others are read by a person before this step unlocks the next one.",
-};
-
-/** Same two-tab pattern as the Documents page: one route, "My Onboarding" for everyone and a
- *  "Manage" tab admins/supervisors also get, since both views are the same underlying
- *  checklist concept. `canStart` is narrower than `canManage` — only HR/Super Admin may start
- *  a brand-new checklist; a supervisor can review one already in progress but shouldn't be the
- *  one kicking off a new hire's record. */
-export default function OnboardingView({ canManage, canStart }: { canManage: boolean; canStart: boolean }) {
-  const [tab, setTab] = useState<"mine" | "manage">("mine");
-
-  return (
-    <div className="max-w-2xl">
-      <h1 className="page-title text-2xl mb-4">Onboarding</h1>
-
-      {canManage && (
-        <div className="flex gap-1.5 mb-5 border-b border-border">
-          <TabButton active={tab === "mine"} onClick={() => setTab("mine")}>
-            My Onboarding
-          </TabButton>
-          <TabButton active={tab === "manage"} onClick={() => setTab("manage")}>
-            Manage
-          </TabButton>
-        </div>
-      )}
-
-      {tab === "mine" ? <MyOnboarding /> : <AdminOnboardingPanel canStart={canStart} />}
-    </div>
-  );
-}
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-        active ? "border-accent text-accent-ink" : "border-transparent text-muted hover:text-foreground"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function StatusBadge({ item }: { item: OnboardingItemDTO }) {
-  if (item.locked) {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-black/5 text-muted">
-        <LockIcon className="h-3 w-3" /> Locked
-      </span>
-    );
-  }
-  switch (item.status) {
-    case "COMPLETED":
-      return (
-        <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-800">
-          <CheckCircleIcon className="h-3 w-3" /> Completed
-        </span>
-      );
-    case "AWAITING_APPROVAL":
-      return (
-        <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-800">
-          Awaiting approval
-        </span>
-      );
-    case "RETURNED":
-      return (
-        <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-rose-100 text-rose-800">
-          Needs attention
-        </span>
-      );
-    default:
-      return (
-        <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-800">
-          Up next
-        </span>
-      );
-  }
-}
-
 // ---------------------------------------------------------------------------
-// Employee-facing: My Onboarding (guided, one-step-at-a-time)
+// Admin: certification answer-key editor. Only the KEY fields are editable here — question
+// wording, order, and points are code-seeded (see CertificationQuestion's doc comment in
+// schema.prisma) since they mirror the real source document; this is deliberately narrower than
+// TemplateEditor above, which builds whole steps from scratch.
 // ---------------------------------------------------------------------------
 
-function MyOnboarding() {
-  const [onboarding, setOnboarding] = useState<EmployeeOnboardingDTO | null>(null);
+type CertKeyDraft = {
+  correctOptionKeys: string[];
+  acceptedAnswers: string; // comma-separated for editing; split/joined on save
+  requiredMatchCount: string;
+  rubric: string;
+};
+
+function CertificationQuestionBankEditor() {
+  const [questions, setQuestions] = useState<CertificationQuestionAdminDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
-  const [busy, setBusy] = useState(false);
-  const [actionError, setActionError] = useState("");
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, CertKeyDraft>>({});
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState("");
 
   async function load() {
     setLoadState("loading");
     try {
-      const res = await fetch("/api/onboarding");
+      const res = await fetch("/api/onboarding/certification/questions");
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setQuestions(data.questions);
+      setLoadState("ready");
+    } catch {
+      setLoadState("error");
+    }
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+  }, []);
+
+  function openDraft(q: CertificationQuestionAdminDTO) {
+    setDrafts((d) => ({
+      ...d,
+      [q.id]: {
+        correctOptionKeys: q.correctOptionKeys,
+        acceptedAnswers: q.acceptedAnswers.join(", "),
+        requiredMatchCount: q.requiredMatchCount != null ? String(q.requiredMatchCount) : "",
+        rubric: q.rubric ?? "",
+      },
+    }));
+    setOpenId(openId === q.id ? null : q.id);
+    setError("");
+  }
+
+  function setSingleCorrect(id: string, key: string) {
+    setDrafts((d) => ({ ...d, [id]: { ...d[id], correctOptionKeys: [key] } }));
+  }
+
+  function toggleCorrect(id: string, key: string) {
+    setDrafts((d) => {
+      const current = d[id].correctOptionKeys;
+      const next = current.includes(key) ? current.filter((k) => k !== key) : [...current, key];
+      return { ...d, [id]: { ...d[id], correctOptionKeys: next } };
+    });
+  }
+
+  async function save(q: CertificationQuestionAdminDTO) {
+    const draft = drafts[q.id];
+    if (!draft) return;
+    setBusyId(q.id);
+    setError("");
+    try {
+      const body: Record<string, unknown> = { rubric: draft.rubric || null };
+      if (q.type === "MULTIPLE_CHOICE" || q.type === "CHECKBOX_ALL") {
+        body.correctOptionKeys = draft.correctOptionKeys;
+      }
+      if (q.type === "FILL_IN_BLANK" || q.type === "LIST_MATCH") {
+        body.acceptedAnswers = draft.acceptedAnswers
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (q.type === "LIST_MATCH") {
+          body.requiredMatchCount = draft.requiredMatchCount ? Number(draft.requiredMatchCount) : null;
+        }
+      }
+      const res = await fetch(`/api/onboarding/certification/questions/${q.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error ?? "Unable to save this question's answer key.");
+        return;
+      }
+      setOpenId(null);
+      await load();
+    } catch {
+      setError("Unable to reach the server. Check your connection and try again.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  if (loadState === "loading") {
+    return <div className="h-20 rounded-xl border border-border bg-background animate-pulse" />;
+  }
+  if (loadState === "error") {
+    return (
+      <div className="rounded-xl border border-border bg-background p-4 text-sm text-accent">
+        Unable to load the certification question bank.
+      </div>
+    );
+  }
+
+  let currentSection = "";
+
+  return (
+    <div className="rounded-xl border border-border bg-background p-4 space-y-2">
+      <p className="text-xs text-muted mb-1">
+        Only the answer key is editable here — question wording and order mirror TTC&rsquo;s real
+        certification test. A fill-in-the-blank or list question with no accepted answers yet
+        (like &ldquo;Name three TTC programs&rdquo;) falls back to manual review until you set one.
+      </p>
+      <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
+        {questions.map((q) => {
+          const showSectionHeader = q.section !== currentSection;
+          currentSection = q.section;
+          const isOpen = openId === q.id;
+          const draft = drafts[q.id];
+          const busy = busyId === q.id;
+          const unconfigured =
+            (q.type === "FILL_IN_BLANK" || q.type === "LIST_MATCH") && q.acceptedAnswers.length === 0;
+          return (
+            <div key={q.id}>
+              {showSectionHeader && (
+                <p className="px-4 pt-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                  {q.section}
+                </p>
+              )}
+              <button onClick={() => openDraft(q)} className="w-full text-left px-4 py-2.5">
+                <p className="text-sm truncate">
+                  {q.number}. {q.prompt}
+                </p>
+                <p className="text-xs text-muted">
+                  {q.type === "SHORT_ANSWER" ? "Manual review only" : q.type.replace(/_/g, " ").toLowerCase()}
+                  {unconfigured && <span className="text-amber-700"> · Key not configured — manual review for now</span>}
+                </p>
+              </button>
+              {isOpen && draft && (
+                <div className="px-4 pb-3.5 space-y-2">
+                  {q.type === "MULTIPLE_CHOICE" && q.options && (
+                    <div className="space-y-1">
+                      {q.options.map((opt) => (
+                        <label key={opt.key} className="flex items-center gap-2 text-sm">
+                          <input
+                            type="radio"
+                            checked={draft.correctOptionKeys[0] === opt.key}
+                            onChange={() => setSingleCorrect(q.id, opt.key)}
+                          />
+                          {opt.label}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {q.type === "CHECKBOX_ALL" && q.options && (
+                    <div className="space-y-1">
+                      {q.options.map((opt) => (
+                        <label key={opt.key} className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={draft.correctOptionKeys.includes(opt.key)}
+                            onChange={() => toggleCorrect(q.id, opt.key)}
+                          />
+                          {opt.label}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {(q.type === "FILL_IN_BLANK" || q.type === "LIST_MATCH") && (
+                    <>
+                      <label className="block text-xs text-muted">Accepted answers (comma-separated)</label>
+                      <input
+                        type="text"
+                        value={draft.acceptedAnswers}
+                        onChange={(e) =>
+                          setDrafts((d) => ({ ...d, [q.id]: { ...draft, acceptedAnswers: e.target.value } }))
+                        }
+                        placeholder="e.g. PUSH Leadership Academy, Camp Talent, Youth Mentorship Circle"
+                        className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
+                      />
+                      {q.type === "LIST_MATCH" && (
+                        <>
+                          <label className="block text-xs text-muted">Entries required to pass this question</label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={draft.requiredMatchCount}
+                            onChange={(e) =>
+                              setDrafts((d) => ({ ...d, [q.id]: { ...draft, requiredMatchCount: e.target.value } }))
+                            }
+                            className="w-24 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
+                          />
+                        </>
+                      )}
+                    </>
+                  )}
+                  <label className="block text-xs text-muted">Reviewer rubric (shown when grading manually)</label>
+                  <textarea
+                    value={draft.rubric}
+                    onChange={(e) => setDrafts((d) => ({ ...d, [q.id]: { ...draft, rubric: e.target.value } }))}
+                    rows={2}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
+                  />
+                  <div className="flex justify-end">
+                    <button onClick={() => save(q)} disabled={busy} className="btn-primary text-xs px-3 py-1.5">
+                      {busy ? "Saving…" : "Save"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {error && (
+        <p role="alert" className="text-sm text-accent">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// Admin/supervisor grading UI for one CERTIFICATION step's attempt history — embedded inline
+// under that item's row in EmployeeChecklistDetail (below). Fetches independently, same pattern
+// as ReadinessChecklistPanel/CheckpointsPanel: this has nothing to do with the plain-item
+// approve/return flow above it beyond sharing a row.
+function CertificationReviewPanel({ itemId, onGraded }: { itemId: string; onGraded: () => void }) {
+  const [attempts, setAttempts] = useState<CertificationAttemptDTO[]>([]);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [expandedAttemptId, setExpandedAttemptId] = useState<string | null>(null);
+  const [comments, setComments] = useState<Record<string, string>>({});
+  const [busyResponseId, setBusyResponseId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  async function load() {
+    setLoadState("loading");
+    try {
+      const res = await fetch(`/api/onboarding/items/${itemId}/certification/attempts`);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setAttempts(data.attempts);
+      if (data.attempts.length > 0) setExpandedAttemptId((id: string | null) => id ?? data.attempts[0].id);
+      setLoadState("ready");
+    } catch {
+      setLoadState("error");
+    }
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-fetch only when the selected step changes
+  }, [itemId]);
+
+  async function grade(responseId: string, outcome: CertificationReviewOutcome) {
+    setBusyResponseId(responseId);
+    setError("");
+    try {
+      const res = await fetch(`/api/onboarding/certification/responses/${responseId}/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ outcome, comment: comments[responseId] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error ?? "Unable to save this grade.");
+        return;
+      }
+      await load();
+      onGraded();
+    } finally {
+      setBusyResponseId(null);
+    }
+  }
+
+  if (loadState === "loading") {
+    return <div className="mx-4 mb-3 h-16 rounded-lg border border-border bg-surface animate-pulse" />;
+  }
+  if (loadState === "error") {
+    return (
+      <p className="mx-4 mb-3 text-sm text-accent">Unable to load this team member&rsquo;s certification attempts.</p>
+    );
+  }
+  if (attempts.length === 0) {
+    return <p className="mx-4 mb-3 text-sm text-muted">No attempts submitted yet.</p>;
+  }
+
+  return (
+    <div className="mx-4 mb-3 rounded-lg border border-border bg-surface p-3 space-y-2.5">
+      {attempts.map((attempt, i) => {
+        const isOpen = expandedAttemptId === attempt.id;
+        const isLatest = i === 0;
+        return (
+          <div key={attempt.id} className={i > 0 ? "pt-2.5 border-t border-border" : ""}>
+            <button
+              onClick={() => setExpandedAttemptId(isOpen ? null : attempt.id)}
+              className="w-full flex items-center justify-between gap-3 text-left"
+            >
+              <span className="text-xs text-muted">
+                {isLatest ? "Latest attempt" : "Earlier attempt"} · {new Date(attempt.submittedAt).toLocaleString()}
+              </span>
+              <span
+                className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                  attempt.status === "PASSED"
+                    ? "bg-emerald-100 text-emerald-800"
+                    : attempt.status === "FAILED"
+                      ? "bg-rose-100 text-rose-800"
+                      : "bg-amber-100 text-amber-800"
+                }`}
+              >
+                {attempt.status === "SUBMITTED"
+                  ? "Needs review"
+                  : `${attempt.status === "PASSED" ? "Passed" : "Failed"} · ${Math.round(attempt.finalScorePercent ?? 0)}%`}
+              </span>
+            </button>
+            {isOpen && (
+              <div className="mt-2 space-y-2">
+                {attempt.responses.map((r) => (
+                  <div key={r.id} className="rounded-lg border border-border bg-background p-2.5">
+                    <p className="text-xs font-medium mb-1">
+                      {r.number}. {r.prompt}
+                    </p>
+                    <p className="text-xs text-muted mb-1.5">
+                      {r.selectedKeys.length > 0 ? r.selectedKeys.join(", ") : r.answerText || "(no answer)"}
+                    </p>
+                    {r.isAutoScored ? (
+                      <span
+                        className={`text-xs font-medium ${r.isCorrect ? "text-emerald-700" : "text-rose-700"}`}
+                      >
+                        {r.isCorrect ? "Correct" : "Incorrect"} ({r.pointsEarned}/{r.pointsPossible} pts)
+                      </span>
+                    ) : r.reviewedAt ? (
+                      <p className="text-xs">
+                        <span className={r.reviewOutcome === "MEETS" ? "text-emerald-700" : "text-rose-700"}>
+                          {r.reviewOutcome === "MEETS" ? "Meets expectations" : "Does not meet expectations"}
+                        </span>
+                        {r.reviewComment && <span className="text-muted"> — {r.reviewComment}</span>}
+                      </p>
+                    ) : attempt.status === "SUBMITTED" ? (
+                      <div className="space-y-1.5">
+                        {r.rubric && <p className="text-[11px] text-muted italic">{r.rubric}</p>}
+                        <input
+                          type="text"
+                          value={comments[r.id] ?? ""}
+                          onChange={(e) => setComments((c) => ({ ...c, [r.id]: e.target.value }))}
+                          placeholder="Comment (optional)"
+                          className="w-full rounded-lg border border-border bg-surface px-2.5 py-1 text-xs outline-none focus:ring-2 focus:ring-accent"
+                        />
+                        <div className="flex gap-1.5">
+                          <button
+                            onClick={() => grade(r.id, "MEETS")}
+                            disabled={busyResponseId === r.id}
+                            className="btn-primary text-xs px-2.5 py-1"
+                          >
+                            Meets Expectations
+                          </button>
+                          <button
+                            onClick={() => grade(r.id, "DOES_NOT_MEET")}
+                            disabled={busyResponseId === r.id}
+                            className="btn-neutral text-xs px-2.5 py-1"
+                          >
+                            Does Not Meet
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted">Not graded (attempt already finalized).</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {error && (
+        <p role="alert" className="text-sm text-accent">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function EmployeeChecklistDetail({
+  employeeId,
+  canAddItems,
+  onChanged,
+}: {
+  employeeId: string;
+  canAddItems: boolean;
+  onChanged: () => void;
+}) {
+  const [onboarding, setOnboarding] = useState<EmployeeOnboardingDTO | null>(null);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [busyItemId, setBusyItemId] = useState<string | null>(null);
+  const [returningId, setReturningId] = useState<string | null>(null);
+  const [returnReason, setReturnReason] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [certOpenItemId, setCertOpenItemId] = useState<string | null>(null);
+
+  async function load() {
+    setLoadState("loading");
+    try {
+      const res = await fetch(`/api/onboarding/manage/${employeeId}`);
       if (!res.ok) throw new Error();
       const data = await res.json();
       setOnboarding(data.onboarding);
@@ -174,803 +427,211 @@ function MyOnboarding() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-fetch only when the selected employee changes
+  }, [employeeId]);
 
-  async function advance(itemId: string) {
-    setBusy(true);
+  async function toggleTask(itemId: string) {
+    setBusyItemId(itemId);
     setActionError("");
     try {
       const res = await fetch(`/api/onboarding/items/${itemId}/advance`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
+      if (!res.ok) setActionError(data.error ?? "Unable to update this step.");
+      await load();
+      onChanged();
+    } finally {
+      setBusyItemId(null);
+    }
+  }
+
+  async function approve(itemId: string) {
+    setBusyItemId(itemId);
+    setActionError("");
+    try {
+      const res = await fetch(`/api/onboarding/items/${itemId}/approve`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) setActionError(data.error ?? "Unable to approve this step.");
+      await load();
+      onChanged();
+    } finally {
+      setBusyItemId(null);
+    }
+  }
+
+  // CB, Sept 2026: onboarding steps "shouldn't feel like it's final" — sends a COMPLETED
+  // DOCUMENT/TRAINING/MEETING/CERTIFICATION step back to NOT_STARTED so the employee goes
+  // through it again. A TASK's own Undo button above already covers that item type.
+  async function revert(itemId: string) {
+    setBusyItemId(itemId);
+    setActionError("");
+    try {
+      const res = await fetch(`/api/onboarding/items/${itemId}/revert`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) setActionError(data.error ?? "Unable to revert this step.");
+      await load();
+      onChanged();
+    } finally {
+      setBusyItemId(null);
+    }
+  }
+
+  async function submitReturn(itemId: string) {
+    if (!returnReason.trim()) return;
+    setBusyItemId(itemId);
+    setActionError("");
+    try {
+      const res = await fetch(`/api/onboarding/items/${itemId}/return`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: returnReason }),
+      });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setActionError(data.error ?? "Unable to update this step. Please try again.");
-        return;
+        setActionError(data.error ?? "Unable to return this step.");
+      } else {
+        setReturningId(null);
+        setReturnReason("");
       }
       await load();
-    } catch {
-      setActionError("Unable to reach the server. Check your connection and try again.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  if (loadState === "loading") {
-    return (
-      <div className="space-y-2">
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="h-14 rounded-xl border border-border bg-surface animate-pulse" />
-        ))}
-      </div>
-    );
-  }
-
-  if (loadState === "error") {
-    return (
-      <div className="rounded-xl border border-border bg-surface p-6 text-sm text-accent">
-        Unable to load your onboarding checklist. Please try again or contact HR.
-      </div>
-    );
-  }
-
-  if (!onboarding) {
-    return (
-      <div className="rounded-xl border border-border bg-surface p-6 text-sm text-muted">
-        Your onboarding checklist hasn&apos;t been set up yet. Check back soon, or ask HR.
-      </div>
-    );
-  }
-
-  const completedCount = onboarding.items.filter((i) => i.status === "COMPLETED").length;
-  const currentItem = onboarding.items.find((i) => i.id === onboarding.currentItemId) ?? null;
-
-  return (
-    <div>
-      {onboarding.completedAt ? (
-        <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 mb-5">
-          <CheckCircleIcon className="h-4 w-4 shrink-0" />
-          Onboarding complete — nice work!
-        </div>
-      ) : (
-        <p className="text-sm text-muted mb-4">
-          Step {completedCount + 1} of {onboarding.items.length}
-        </p>
-      )}
-
-      {currentItem && (
-        <CurrentStepCard
-          item={currentItem}
-          busy={busy}
-          error={actionError}
-          onAdvance={() => advance(currentItem.id)}
-          onReload={load}
-        />
-      )}
-
-      <h2 className="text-sm font-medium text-muted mb-2 mt-5">All steps</h2>
-      <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
-        {onboarding.items.map((item) => {
-          const Icon = TYPE_ICON[item.itemType];
-          const isCurrent = item.id === onboarding.currentItemId;
-          return (
-            <div
-              key={item.id}
-              className={`flex items-center gap-3 px-4 py-3 ${item.locked ? "opacity-50" : ""} ${
-                isCurrent ? "bg-black/[0.02]" : ""
-              }`}
-            >
-              <Icon className="h-4 w-4 text-muted shrink-0" />
-              <p className={`text-sm min-w-0 flex-1 truncate ${item.status === "COMPLETED" ? "text-muted line-through" : "text-foreground"}`}>
-                {item.label}
-              </p>
-              <StatusBadge item={item} />
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function CurrentStepCard({
-  item,
-  busy,
-  error,
-  onAdvance,
-  onReload,
-}: {
-  item: OnboardingItemDTO;
-  busy: boolean;
-  error: string;
-  onAdvance: () => void;
-  onReload: () => void;
-}) {
-  const Icon = TYPE_ICON[item.itemType];
-  const [viewError, setViewError] = useState("");
-
-  async function viewDocument() {
-    if (!item.documentId) return;
-    setViewError("");
-    try {
-      const res = await fetch(`/api/documents/${item.documentId}/download`);
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.url) {
-        setViewError(data.error ?? "Unable to open that document right now.");
-        return;
-      }
-      window.open(data.url, "_blank", "noopener,noreferrer");
-    } catch {
-      setViewError("Unable to reach the server. Check your connection and try again.");
-    }
-  }
-
-  return (
-    <div className="rounded-2xl border-2 border-accent/25 bg-surface p-5">
-      <div className="flex items-center gap-2 text-xs font-medium text-accent-ink uppercase tracking-wide mb-2">
-        <Icon className="h-3.5 w-3.5" />
-        {TYPE_LABEL[item.itemType]} · What you need to do right now
-      </div>
-      <p className="text-base font-semibold mb-1">{item.label}</p>
-      {item.description && <p className="text-sm text-muted mb-3">{item.description}</p>}
-      {item.dueDate && <p className="text-xs text-muted mb-3">Due {formatDate(item.dueDate)}</p>}
-
-      {item.status === "RETURNED" && item.returnReason && (
-        <div className="rounded-lg bg-rose-50 border border-rose-200 px-3.5 py-2.5 text-sm text-rose-800 mb-3.5">
-          <p className="font-medium mb-0.5">This was sent back</p>
-          <p>{item.returnReason}</p>
-        </div>
-      )}
-
-      {item.status === "AWAITING_APPROVAL" ? (
-        <p className="text-sm text-muted">
-          Submitted — waiting on HR or your supervisor to approve this step. You&apos;ll see the next
-          step here as soon as it&apos;s approved.
-        </p>
-      ) : item.itemType === "CERTIFICATION" ? (
-        <CertificationTestForm itemId={item.id} onSubmitted={onReload} />
-      ) : (
-        <>
-          {item.itemType === "DOCUMENT" && (
-            <div className="mb-3">
-              <button type="button" onClick={viewDocument} className="text-sm text-accent-ink font-medium hover:underline">
-                View {item.documentTitle ?? "document"} →
-              </button>
-              {viewError && <p className="text-xs text-accent mt-1">{viewError}</p>}
-            </div>
-          )}
-
-          <button onClick={onAdvance} disabled={busy} className="btn-primary text-sm px-5 py-2.5">
-            {busy
-              ? "Working…"
-              : item.itemType === "TASK"
-                ? "Mark Complete"
-                : item.itemType === "DOCUMENT"
-                  ? item.status === "RETURNED"
-                    ? "Acknowledge & Resubmit"
-                    : "Acknowledge & Submit"
-                  : item.status === "RETURNED"
-                    ? "Resubmit"
-                    : item.itemType === "MEETING"
-                      ? "Confirm It Happened"
-                      : "Mark as Done"}
-          </button>
-
-          {item.itemType === "DOCUMENT" && (
-            <p className="text-xs text-muted mt-2">
-              Clicking this confirms you&apos;ve read the document — it&apos;s a record for HR, not a
-              legal electronic signature.
-            </p>
-          )}
-          {item.requiresApproval && item.itemType !== "DOCUMENT" && (
-            <p className="text-xs text-muted mt-2">{AFTER_COPY[item.itemType]}</p>
-          )}
-        </>
-      )}
-
-      {error && (
-        <p role="alert" className="text-sm text-accent mt-2">
-          {error}
-        </p>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Certification (Aug 2026 document gap analysis, item 5) — the New Hire Excellence Certification
-// Test itself. Renders in place of the generic advance button for a CERTIFICATION step; the
-// employee fills in all 26 questions and submits once, same "one action" shape as every other
-// step type. See src/lib/certification.ts for scoring; this form never sees an answer key.
-// ---------------------------------------------------------------------------
-
-type DraftAnswer = { answerText: string; selectedKeys: string[] };
-
-function isAnswered(draft: DraftAnswer | undefined): boolean {
-  if (!draft) return false;
-  return draft.answerText.trim().length > 0 || draft.selectedKeys.some((k) => k.trim().length > 0);
-}
-
-function CertificationTestForm({ itemId, onSubmitted }: { itemId: string; onSubmitted: () => void }) {
-  const [questions, setQuestions] = useState<CertificationQuestionDTO[]>([]);
-  const [loadState, setLoadState] = useState<LoadState>("loading");
-  const [drafts, setDrafts] = useState<Record<string, DraftAnswer>>({});
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    let cancelled = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoadState("loading");
-    fetch(`/api/onboarding/items/${itemId}/certification`)
-      .then((res) => (res.ok ? res.json() : Promise.reject()))
-      .then((data) => {
-        if (cancelled) return;
-        setQuestions(data.questions);
-        setLoadState("ready");
-      })
-      .catch(() => {
-        if (!cancelled) setLoadState("error");
-      });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once per step
-  }, [itemId]);
-
-  function draftFor(questionId: string): DraftAnswer {
-    return drafts[questionId] ?? { answerText: "", selectedKeys: [] };
-  }
-
-  function setText(questionId: string, answerText: string) {
-    setDrafts((d) => ({ ...d, [questionId]: { ...draftFor(questionId), answerText } }));
-  }
-
-  function setSingleChoice(questionId: string, key: string) {
-    setDrafts((d) => ({ ...d, [questionId]: { ...draftFor(questionId), selectedKeys: [key] } }));
-  }
-
-  function toggleChoice(questionId: string, key: string) {
-    setDrafts((d) => {
-      const current = draftFor(questionId).selectedKeys;
-      const next = current.includes(key) ? current.filter((k) => k !== key) : [...current, key];
-      return { ...d, [questionId]: { ...draftFor(questionId), selectedKeys: next } };
-    });
-  }
-
-  function setListEntry(questionId: string, index: number, value: string) {
-    setDrafts((d) => {
-      const current = [...draftFor(questionId).selectedKeys];
-      while (current.length <= index) current.push("");
-      current[index] = value;
-      return { ...d, [questionId]: { ...draftFor(questionId), selectedKeys: current } };
-    });
-  }
-
-  const allAnswered = questions.length > 0 && questions.every((q) => isAnswered(drafts[q.id]));
-
-  async function submit() {
-    setSubmitting(true);
-    setError("");
-    try {
-      const answers: CertificationAnswerInput[] = questions.map((q) => {
-        const d = draftFor(q.id);
-        return { questionId: q.id, answerText: d.answerText || undefined, selectedKeys: d.selectedKeys };
-      });
-      const res = await fetch(`/api/onboarding/items/${itemId}/certification/submit`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(data.error ?? "Unable to submit the test.");
-        return;
-      }
-      onSubmitted();
-    } catch {
-      setError("Unable to reach the server. Check your connection and try again.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  if (loadState === "loading") {
-    return <div className="h-24 rounded-xl border border-border bg-background animate-pulse mt-1" />;
-  }
-  if (loadState === "error" || questions.length === 0) {
-    return (
-      <p className="text-sm text-accent mt-1">
-        Unable to load the certification test right now. Please try again or contact HR.
-      </p>
-    );
-  }
-
-  let currentSection = "";
-
-  return (
-    <div className="mt-1 space-y-4">
-      <p className="text-xs text-muted">
-        Answer every question, then submit once at the end — some answers are graded instantly,
-        others are reviewed by HR or your supervisor before this step is approved. 85% or higher
-        is a passing score.
-      </p>
-      {questions.map((q) => {
-        const showSectionHeader = q.section !== currentSection;
-        currentSection = q.section;
-        const draft = draftFor(q.id);
-        return (
-          <div key={q.id}>
-            {showSectionHeader && (
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted mb-2 mt-1">{q.section}</p>
-            )}
-            <div className="rounded-lg border border-border bg-background p-3.5">
-              <p className="text-sm font-medium mb-2.5">
-                {q.number}. {q.prompt}
-              </p>
-
-              {q.type === "MULTIPLE_CHOICE" && q.options && (
-                <div className="space-y-1.5">
-                  {q.options.map((opt) => (
-                    <label key={opt.key} className="flex items-center gap-2 text-sm cursor-pointer">
-                      <input
-                        type="radio"
-                        name={q.id}
-                        checked={draft.selectedKeys[0] === opt.key}
-                        onChange={() => setSingleChoice(q.id, opt.key)}
-                      />
-                      {opt.label}
-                    </label>
-                  ))}
-                </div>
-              )}
-
-              {q.type === "CHECKBOX_ALL" && q.options && (
-                <div className="space-y-1.5">
-                  {q.options.map((opt) => (
-                    <label key={opt.key} className="flex items-center gap-2 text-sm cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={draft.selectedKeys.includes(opt.key)}
-                        onChange={() => toggleChoice(q.id, opt.key)}
-                      />
-                      {opt.label}
-                    </label>
-                  ))}
-                </div>
-              )}
-
-              {q.type === "FILL_IN_BLANK" && (
-                <input
-                  type="text"
-                  value={draft.answerText}
-                  onChange={(e) => setText(q.id, e.target.value)}
-                  placeholder="Your answer…"
-                  className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
-                />
-              )}
-
-              {q.type === "LIST_MATCH" && (
-                <div className="space-y-1.5">
-                  {Array.from({ length: q.requiredMatchCount ?? 2 }).map((_, i) => (
-                    <input
-                      key={i}
-                      type="text"
-                      value={draft.selectedKeys[i] ?? ""}
-                      onChange={(e) => setListEntry(q.id, i, e.target.value)}
-                      placeholder={`${i + 1}.`}
-                      className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
-                    />
-                  ))}
-                </div>
-              )}
-
-              {q.type === "SHORT_ANSWER" && (
-                <textarea
-                  value={draft.answerText}
-                  onChange={(e) => setText(q.id, e.target.value)}
-                  rows={3}
-                  placeholder="Your answer…"
-                  className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
-                />
-              )}
-            </div>
-          </div>
-        );
-      })}
-
-      {error && (
-        <p role="alert" className="text-sm text-accent">
-          {error}
-        </p>
-      )}
-
-      <button onClick={submit} disabled={submitting || !allAnswered} className="btn-primary text-sm px-5 py-2.5">
-        {submitting ? "Submitting…" : "Submit Test"}
-      </button>
-      {!allAnswered && <p className="text-xs text-muted">Answer every question to enable Submit.</p>}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Admin / Supervisor: Manage
-// ---------------------------------------------------------------------------
-
-function AdminOnboardingPanel({ canStart }: { canStart: boolean }) {
-  const [roster, setRoster] = useState<OnboardingAdminSummaryDTO[]>([]);
-  const [loadState, setLoadState] = useState<LoadState>("loading");
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
-  const [startPickerId, setStartPickerId] = useState<string | null>(null);
-  const [templates, setTemplates] = useState<OnboardingTemplateSummaryDTO[]>([]);
-  const [showTemplateManager, setShowTemplateManager] = useState(false);
-  const [showCertManager, setShowCertManager] = useState(false);
-
-  async function loadRoster() {
-    setLoadState("loading");
-    try {
-      const res = await fetch("/api/onboarding/manage");
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      setRoster(data.roster);
-      setLoadState("ready");
-    } catch {
-      setLoadState("error");
-    }
-  }
-
-  async function loadTemplates() {
-    try {
-      const res = await fetch("/api/onboarding/templates");
-      if (!res.ok) return;
-      const data = await res.json();
-      setTemplates(data.templates);
-    } catch {
-      // The template picker just falls back to "Standard starter only" — starting a
-      // checklist at all still works even if this fetch fails.
-    }
-  }
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadRoster();
-    if (canStart) loadTemplates();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
-  }, []);
-
-  return (
-    <div>
-      <p className="text-sm text-muted mb-4">
-        {canStart
-          ? "Start a new hire's checklist, or manage one already in progress — approve or send back a step, and add more as needed."
-          : "Review your direct reports' onboarding — approve or send back a step awaiting your approval."}
-      </p>
-
-      {canStart && (
-        <div className="mb-4 flex flex-wrap gap-2">
-          <button
-            onClick={() => setShowTemplateManager((v) => !v)}
-            className="btn-neutral text-xs px-3 py-1.5"
-          >
-            {showTemplateManager ? "Close Templates" : "Manage Templates"}
-          </button>
-          <button
-            onClick={() => setShowCertManager((v) => !v)}
-            className="btn-neutral text-xs px-3 py-1.5"
-          >
-            {showCertManager ? "Close Certification Test" : "Manage Certification Test"}
-          </button>
-          {showTemplateManager && (
-            <div className="mt-3 w-full">
-              <TemplateManager templates={templates} onChanged={loadTemplates} />
-            </div>
-          )}
-          {showCertManager && (
-            <div className="mt-3 w-full">
-              <CertificationQuestionBankEditor />
-            </div>
-          )}
-        </div>
-      )}
-
-      {loadState === "loading" && (
-        <div className="space-y-2">
-          {[0, 1].map((i) => (
-            <div key={i} className="h-16 rounded-xl border border-border bg-surface animate-pulse" />
-          ))}
-        </div>
-      )}
-
-      {loadState === "error" && (
-        <div className="rounded-xl border border-border bg-surface p-6 text-sm text-accent">
-          Unable to load the team member roster. Please try again.
-        </div>
-      )}
-
-      {loadState === "ready" && roster.length === 0 && (
-        <div className="rounded-xl border border-border bg-surface p-6 text-sm text-muted">
-          {canStart ? "No active team members yet." : "You don't have any direct reports yet."}
-        </div>
-      )}
-
-      {loadState === "ready" && roster.length > 0 && (
-        <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
-          {roster.map((row) => {
-            const started = row.onboardingId !== null;
-            const isSelected = selectedEmployeeId === row.employeeId;
-            const isPickingTemplate = startPickerId === row.employeeId;
-            return (
-              <div key={row.employeeId}>
-                <div className="px-4 py-3.5 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{row.employeeName}</p>
-                    <p className="text-xs text-muted">
-                      {row.jobTitle}
-                      {started ? ` · ${row.completedItems} / ${row.totalItems} complete` : " · Not started"}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <div className="flex flex-col items-end gap-0.5">
-                      <OnboardingStatusPill status={row.status} />
-                      {row.status === "ACTION_NEEDED" && (
-                        <span className="text-[11px] text-muted whitespace-nowrap">
-                          {row.awaitingApprovalCount} step{row.awaitingApprovalCount === 1 ? "" : "s"} awaiting review
-                        </span>
-                      )}
-                    </div>
-                    {started ? (
-                      <button
-                        onClick={() => setSelectedEmployeeId(isSelected ? null : row.employeeId)}
-                        aria-label={`${isSelected ? "Close" : "Manage"} ${row.employeeName}'s checklist`}
-                        className="btn-neutral text-xs px-3 py-1.5"
-                      >
-                        {isSelected ? "Close" : "Manage"}
-                      </button>
-                    ) : canStart ? (
-                      <button
-                        onClick={() => setStartPickerId(isPickingTemplate ? null : row.employeeId)}
-                        aria-label={`Start ${row.employeeName}'s checklist`}
-                        className="btn-primary text-xs px-3 py-1.5"
-                      >
-                        Start Checklist
-                      </button>
-                    ) : (
-                      <span className="text-xs text-muted">Not started</span>
-                    )}
-                  </div>
-                </div>
-                {isPickingTemplate && (
-                  <div className="px-4 pb-4">
-                    <StartChecklistForm
-                      employeeId={row.employeeId}
-                      templates={templates}
-                      onStarted={() => {
-                        setStartPickerId(null);
-                        loadRoster();
-                        setSelectedEmployeeId(row.employeeId);
-                      }}
-                      onCancel={() => setStartPickerId(null)}
-                    />
-                  </div>
-                )}
-                {isSelected && (
-                  <div className="px-4 pb-4 space-y-3">
-                    <EmployeeChecklistDetail employeeId={row.employeeId} canAddItems={canStart} onChanged={loadRoster} />
-                    <ReadinessChecklistPanel employeeId={row.employeeId} />
-                    <CheckpointsPanel employeeId={row.employeeId} />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function StartChecklistForm({
-  employeeId,
-  templates,
-  onStarted,
-  onCancel,
-}: {
-  employeeId: string;
-  templates: OnboardingTemplateSummaryDTO[];
-  onStarted: () => void;
-  onCancel: () => void;
-}) {
-  const [templateId, setTemplateId] = useState("");
-  const [starting, setStarting] = useState(false);
-  const [error, setError] = useState("");
-
-  async function start() {
-    setStarting(true);
-    setError("");
-    try {
-      const res = await fetch(`/api/onboarding/manage/${employeeId}/start`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ templateId: templateId || undefined }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(data.error ?? "Unable to start this checklist.");
-        return;
-      }
-      onStarted();
-    } catch {
-      setError("Unable to reach the server. Check your connection and try again.");
-    } finally {
-      setStarting(false);
-    }
-  }
-
-  return (
-    <div className="rounded-xl border border-border bg-background p-4 flex flex-col sm:flex-row gap-2 sm:items-center">
-      <select
-        value={templateId}
-        onChange={(e) => setTemplateId(e.target.value)}
-        className="flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
-      >
-        <option value="">Standard starter (default 5 tasks)</option>
-        {templates.map((t) => (
-          <option key={t.id} value={t.id}>
-            {t.name} ({t.itemCount} step{t.itemCount === 1 ? "" : "s"})
-          </option>
-        ))}
-      </select>
-      <div className="flex gap-2 shrink-0">
-        <button onClick={start} disabled={starting} className="btn-primary text-xs px-3 py-1.5 whitespace-nowrap">
-          {starting ? "Starting…" : "Start"}
-        </button>
-        <button onClick={onCancel} disabled={starting} className="btn-neutral text-xs px-3 py-1.5">
-          Cancel
-        </button>
-      </div>
-      {error && (
-        <p role="alert" className="text-sm text-accent w-full">
-          {error}
-        </p>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Admin: reusable checklist templates
-// ---------------------------------------------------------------------------
-
-function TemplateManager({
-  templates,
-  onChanged,
-}: {
-  templates: OnboardingTemplateSummaryDTO[];
-  onChanged: () => void;
-}) {
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState("");
-
-  async function createTemplate(e: React.FormEvent) {
-    e.preventDefault();
-    if (!name.trim()) return;
-    setCreating(true);
-    setError("");
-    try {
-      const res = await fetch("/api/onboarding/templates", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, description: description || undefined }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(data.error ?? "Unable to create this template.");
-        return;
-      }
-      setName("");
-      setDescription("");
       onChanged();
-      setExpandedId(data.template.id);
-    } catch {
-      setError("Unable to reach the server. Check your connection and try again.");
     } finally {
-      setCreating(false);
+      setBusyItemId(null);
     }
   }
 
-  async function removeTemplate(templateId: string) {
-    await fetch(`/api/onboarding/templates/${templateId}`, { method: "DELETE" });
-    if (expandedId === templateId) setExpandedId(null);
-    onChanged();
+  if (loadState === "loading") {
+    return <div className="h-24 rounded-xl border border-border bg-background animate-pulse" />;
+  }
+  if (loadState === "error" || !onboarding) {
+    return (
+      <div className="rounded-xl border border-border bg-background p-4 text-sm text-accent">
+        Unable to load this checklist.
+      </div>
+    );
   }
 
   return (
     <div className="rounded-xl border border-border bg-background p-4 space-y-3">
-      <p className="text-xs text-muted">
-        Build a reusable starting checklist once per role, then pick it from the dropdown when
-        starting a new hire&rsquo;s checklist. Editing or deleting a template never changes a checklist
-        someone already started from it.
-      </p>
+      {actionError && (
+        <p role="alert" className="text-sm text-accent">
+          {actionError}
+        </p>
+      )}
 
-      {templates.length > 0 && (
-        <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
-          {templates.map((t) => (
-            <div key={t.id}>
-              <div className="px-3.5 py-2.5 flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium truncate">{t.name}</p>
-                  <p className="text-xs text-muted">
-                    {t.itemCount} step{t.itemCount === 1 ? "" : "s"}
-                    {t.description ? ` · ${t.description}` : ""}
+      <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
+        {onboarding.items.map((item) => {
+          const Icon = TYPE_ICON[item.itemType];
+          const busy = busyItemId === item.id;
+          return (
+            <div key={item.id} className="px-4 py-3">
+              <div className="flex items-center gap-3">
+                <Icon className="h-4 w-4 text-muted shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className={`text-sm ${item.status === "COMPLETED" ? "text-muted line-through" : "text-foreground"}`}>
+                    {item.label}
                   </p>
+                  {item.status === "RETURNED" && item.returnReason && (
+                    <p className="text-xs text-rose-700 mt-0.5">Returned: {item.returnReason}</p>
+                  )}
                 </div>
-                <div className="flex items-center gap-1.5 shrink-0">
+                <StatusBadge item={item} />
+                {!item.locked && item.itemType === "TASK" && (
                   <button
-                    onClick={() => setExpandedId(expandedId === t.id ? null : t.id)}
-                    className="btn-neutral text-xs px-2.5 py-1"
+                    onClick={() => toggleTask(item.id)}
+                    disabled={busy}
+                    className="btn-neutral text-xs px-2.5 py-1 shrink-0"
                   >
-                    {expandedId === t.id ? "Close" : "Edit Steps"}
+                    {item.status === "COMPLETED" ? "Undo" : "Mark Done"}
                   </button>
+                )}
+                {!item.locked && item.status === "AWAITING_APPROVAL" && (
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button onClick={() => approve(item.id)} disabled={busy} className="btn-primary text-xs px-2.5 py-1">
+                      Approve
+                    </button>
+                    <button
+                      onClick={() => setReturningId(returningId === item.id ? null : item.id)}
+                      disabled={busy}
+                      className="btn-neutral text-xs px-2.5 py-1"
+                    >
+                      Return
+                    </button>
+                  </div>
+                )}
+                {item.itemType !== "TASK" && item.status === "COMPLETED" && (
                   <button
-                    onClick={() => removeTemplate(t.id)}
-                    aria-label={`Delete ${t.name} template`}
-                    className="text-muted hover:text-accent p-1"
+                    onClick={() => revert(item.id)}
+                    disabled={busy}
+                    title="Send this step back to not started"
+                    className="btn-neutral text-xs px-2.5 py-1 shrink-0"
                   >
-                    <TrashIcon className="h-4 w-4" />
+                    {busy ? "Working…" : "Revert"}
                   </button>
-                </div>
+                )}
+                {item.itemType === "CERTIFICATION" && item.status !== "NOT_STARTED" && (
+                  <button
+                    onClick={() => setCertOpenItemId(certOpenItemId === item.id ? null : item.id)}
+                    className="btn-neutral text-xs px-2.5 py-1 shrink-0"
+                  >
+                    {certOpenItemId === item.id ? "Close" : "Review Test"}
+                  </button>
+                )}
               </div>
-              {expandedId === t.id && (
-                <div className="px-3.5 pb-3.5">
-                  <TemplateEditor templateId={t.id} />
+              {certOpenItemId === item.id && <CertificationReviewPanel itemId={item.id} onGraded={load} />}
+              {returningId === item.id && (
+                <div className="mt-2.5 flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="text"
+                    value={returnReason}
+                    onChange={(e) => setReturnReason(e.target.value)}
+                    placeholder="Why is this being sent back?"
+                    className="flex-1 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
+                  />
+                  <button
+                    onClick={() => submitReturn(item.id)}
+                    disabled={busy || !returnReason.trim()}
+                    className="btn-neutral text-xs px-3 py-1.5 whitespace-nowrap"
+                  >
+                    Send Back
+                  </button>
                 </div>
               )}
             </div>
-          ))}
-        </div>
-      )}
+          );
+        })}
+      </div>
 
-      <form onSubmit={createTemplate} className="flex flex-col sm:flex-row gap-2 pt-1">
-        <input
-          type="text"
-          required
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="New template name (e.g. Camp Counselor)"
-          className="flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
+      {canAddItems && (
+        <AddItemForm
+          employeeId={employeeId}
+          onboardingId={onboarding.id}
+          onAdded={() => {
+            load();
+            onChanged();
+          }}
         />
-        <input
-          type="text"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Description (optional)"
-          className="flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
-        />
-        <button type="submit" disabled={creating} className="btn-neutral text-sm px-4 py-2 whitespace-nowrap">
-          {creating ? "Creating…" : "New Template"}
-        </button>
-      </form>
-      {error && (
-        <p role="alert" className="text-sm text-accent">
-          {error}
-        </p>
       )}
     </div>
   );
 }
 
-function TemplateEditor({ templateId }: { templateId: string }) {
-  const [template, setTemplate] = useState<OnboardingTemplateDTO | null>(null);
+// Internal admin/supervisor-only readiness tasks (background check, TTC email created,
+// equipment issued, etc.) — a separate, unordered checklist from the employee's own onboarding
+// steps above. Never shown to, or fetchable by, the employee (see prisma/rls.sql). Fetches
+// independently rather than folding into EmployeeChecklistDetail's own state, since these two
+// checklists have nothing to do with each other beyond being managed from the same screen.
+function ReadinessChecklistPanel({ employeeId }: { employeeId: string }) {
+  const [items, setItems] = useState<OnboardingReadinessItemDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [busyItemId, setBusyItemId] = useState<string | null>(null);
 
   async function load() {
     setLoadState("loading");
     try {
-      const res = await fetch(`/api/onboarding/templates/${templateId}`);
+      const res = await fetch(`/api/onboarding/manage/${employeeId}/readiness`);
       if (!res.ok) throw new Error();
       const data = await res.json();
-      setTemplate(data.template);
+      setItems(data.items);
       setLoadState("ready");
     } catch {
       setLoadState("error");
@@ -980,62 +641,236 @@ function TemplateEditor({ templateId }: { templateId: string }) {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-fetch only when the template changes
-  }, [templateId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-fetch only when the selected employee changes
+  }, [employeeId]);
 
-  async function removeItem(itemId: string) {
-    await fetch(`/api/onboarding/templates/${templateId}/items/${itemId}`, { method: "DELETE" });
-    await load();
+  async function toggle(itemId: string) {
+    setBusyItemId(itemId);
+    try {
+      await fetch(`/api/onboarding/readiness/${itemId}/toggle`, { method: "POST" });
+      await load();
+    } finally {
+      setBusyItemId(null);
+    }
   }
 
   if (loadState === "loading") {
-    return <div className="h-20 rounded-lg border border-border bg-surface animate-pulse" />;
+    return <div className="h-16 rounded-xl border border-border bg-background animate-pulse" />;
   }
-  if (loadState === "error" || !template) {
-    return <p className="text-sm text-accent">Unable to load this template&rsquo;s steps.</p>;
+  // Not an error state worth surfacing loudly — most likely this employee's checklist hasn't
+  // been started yet, so there's nothing seeded here (see startOnboarding).
+  if (loadState === "error" || items.length === 0) {
+    return null;
   }
 
   return (
-    <div className="rounded-lg border border-border bg-surface p-3 space-y-2.5">
-      {template.items.length === 0 ? (
-        <p className="text-xs text-muted">No steps yet — add the first one below.</p>
-      ) : (
-        <div className="divide-y divide-border">
-          {template.items.map((item) => {
-            const Icon = TYPE_ICON[item.itemType];
-            return (
-              <div key={item.id} className="flex items-center gap-2.5 py-2">
-                <Icon className="h-4 w-4 text-muted shrink-0" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm truncate">{item.label}</p>
-                  <p className="text-xs text-muted">
-                    {TYPE_LABEL[item.itemType]}
-                    {item.itemType === "DOCUMENT" && item.documentTitle ? ` · ${item.documentTitle}` : ""}
-                    {item.dueOffsetDays != null ? ` · due ${item.dueOffsetDays}d after start` : ""}
-                  </p>
-                </div>
-                <button
-                  onClick={() => removeItem(item.id)}
-                  aria-label={`Remove ${item.label}`}
-                  className="text-muted hover:text-accent p-1 shrink-0"
-                >
-                  <TrashIcon className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-      <TemplateAddItemForm templateId={templateId} onAdded={load} />
+    <div className="rounded-xl border border-border bg-background p-4">
+      <p className="text-xs font-medium text-muted mb-2">Internal Readiness (not visible to team member)</p>
+      <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
+        {items.map((item) => {
+          const busy = busyItemId === item.id;
+          return (
+            <div key={item.id} className="px-4 py-2.5 flex items-center justify-between gap-3">
+              <p className={`text-sm ${item.completed ? "text-muted line-through" : "text-foreground"}`}>
+                {item.label}
+              </p>
+              <button
+                onClick={() => toggle(item.id)}
+                disabled={busy}
+                className="btn-neutral text-xs px-2.5 py-1 shrink-0"
+              >
+                {item.completed ? "Undo" : "Mark Done"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-function TemplateAddItemForm({ templateId, onAdded }: { templateId: string; onAdded: () => void }) {
+function formatCheckpointDueDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+// Lightweight 30/60/90-day follow-ups — a plain due date, a done/not-done status, and freeform
+// notes. Explicitly NOT a performance-review form: no ratings, no scoring, just what CB's
+// document review asked for. Same admin/supervisor-only visibility and independent-fetch
+// pattern as ReadinessChecklistPanel above.
+function CheckpointsPanel({ employeeId }: { employeeId: string }) {
+  const [checkpoints, setCheckpoints] = useState<OnboardingCheckpointDTO[]>([]);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, { notes: string; trainingMilestones: string; developmentGoals: string; followUpNeeded: boolean }>>({});
+
+  async function load() {
+    setLoadState("loading");
+    try {
+      const res = await fetch(`/api/onboarding/manage/${employeeId}/checkpoints`);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setCheckpoints(data.checkpoints);
+      setLoadState("ready");
+    } catch {
+      setLoadState("error");
+    }
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-fetch only when the selected employee changes
+  }, [employeeId]);
+
+  function openDraft(cp: OnboardingCheckpointDTO) {
+    setDrafts((d) => ({
+      ...d,
+      [cp.id]: {
+        notes: cp.notes ?? "",
+        trainingMilestones: cp.trainingMilestones ?? "",
+        developmentGoals: cp.developmentGoals ?? "",
+        followUpNeeded: cp.followUpNeeded,
+      },
+    }));
+    setOpenId(openId === cp.id ? null : cp.id);
+  }
+
+  async function toggleComplete(id: string) {
+    setBusyId(id);
+    try {
+      await fetch(`/api/onboarding/checkpoints/${id}/toggle`, { method: "POST" });
+      await load();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function saveDraft(id: string) {
+    const draft = drafts[id];
+    if (!draft) return;
+    setBusyId(id);
+    try {
+      await fetch(`/api/onboarding/checkpoints/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft),
+      });
+      await load();
+      setOpenId(null);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  if (loadState === "loading") {
+    return <div className="h-16 rounded-xl border border-border bg-background animate-pulse" />;
+  }
+  // Not started yet is the common case (nothing seeded until the main checklist begins) — no
+  // need for a loud error state either way.
+  if (loadState === "error" || checkpoints.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-background p-4">
+      <p className="text-xs font-medium text-muted mb-2">30/60/90-Day Checkpoints (not visible to team member)</p>
+      <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
+        {checkpoints.map((cp) => {
+          const isOpen = openId === cp.id;
+          const busy = busyId === cp.id;
+          const draft = drafts[cp.id];
+          return (
+            <div key={cp.id} className="px-4 py-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <button onClick={() => openDraft(cp)} className="min-w-0 flex-1 text-left">
+                  <p className={`text-sm ${cp.status === "COMPLETED" ? "text-muted line-through" : "text-foreground"}`}>
+                    {cp.milestone}
+                  </p>
+                  <p className="text-xs text-muted">
+                    Due {formatCheckpointDueDate(cp.dueDate)}
+                    {cp.followUpNeeded && cp.status !== "COMPLETED" && (
+                      <span className="text-rose-700"> · Follow-up needed</span>
+                    )}
+                  </p>
+                </button>
+                <button
+                  onClick={() => toggleComplete(cp.id)}
+                  disabled={busy}
+                  className="btn-neutral text-xs px-2.5 py-1 shrink-0"
+                >
+                  {cp.status === "COMPLETED" ? "Reopen" : "Mark Complete"}
+                </button>
+              </div>
+              {isOpen && draft && (
+                <div className="mt-2.5 space-y-2">
+                  <textarea
+                    value={draft.notes}
+                    onChange={(e) => setDrafts((d) => ({ ...d, [cp.id]: { ...draft, notes: e.target.value } }))}
+                    placeholder="Notes"
+                    rows={2}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
+                  />
+                  <textarea
+                    value={draft.trainingMilestones}
+                    onChange={(e) =>
+                      setDrafts((d) => ({ ...d, [cp.id]: { ...draft, trainingMilestones: e.target.value } }))
+                    }
+                    placeholder="Training milestones (if applicable)"
+                    rows={2}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
+                  />
+                  <textarea
+                    value={draft.developmentGoals}
+                    onChange={(e) =>
+                      setDrafts((d) => ({ ...d, [cp.id]: { ...draft, developmentGoals: e.target.value } }))
+                    }
+                    placeholder="Development goals (if applicable)"
+                    rows={2}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
+                  />
+                  <label className="flex items-center gap-2 text-xs text-muted">
+                    <input
+                      type="checkbox"
+                      checked={draft.followUpNeeded}
+                      onChange={(e) =>
+                        setDrafts((d) => ({ ...d, [cp.id]: { ...draft, followUpNeeded: e.target.checked } }))
+                      }
+                    />
+                    Needs follow-up
+                  </label>
+                  <div className="flex justify-end">
+                    <button
+                      onClick={() => saveDraft(cp.id)}
+                      disabled={busy}
+                      className="btn-primary text-xs px-3 py-1.5"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function AddItemForm({
+  employeeId,
+  onboardingId,
+  onAdded,
+}: {
+  employeeId: string;
+  onboardingId: string;
+  onAdded: () => void;
+}) {
   const [label, setLabel] = useState("");
   const [itemType, setItemType] = useState<OnboardingItemType>("TASK");
   const [documentId, setDocumentId] = useState("");
-  const [dueOffsetDays, setDueOffsetDays] = useState("");
+  const [dueDate, setDueDate] = useState("");
   const [documents, setDocuments] = useState<DocumentAdminSummaryDTO[]>([]);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState("");
@@ -1061,14 +896,15 @@ function TemplateAddItemForm({ templateId, onAdded }: { templateId: string; onAd
     setAdding(true);
     setError("");
     try {
-      const res = await fetch(`/api/onboarding/templates/${templateId}/items`, {
+      const res = await fetch(`/api/onboarding/manage/${employeeId}/items`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          onboardingId,
           label,
           itemType,
           documentId: itemType === "DOCUMENT" ? documentId : undefined,
-          dueOffsetDays: dueOffsetDays || undefined,
+          dueDate: dueDate || undefined,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -1079,7 +915,7 @@ function TemplateAddItemForm({ templateId, onAdded }: { templateId: string; onAd
       setLabel("");
       setItemType("TASK");
       setDocumentId("");
-      setDueOffsetDays("");
+      setDueDate("");
       onAdded();
     } catch {
       setError("Unable to reach the server. Check your connection and try again.");
@@ -1089,20 +925,20 @@ function TemplateAddItemForm({ templateId, onAdded }: { templateId: string; onAd
   }
 
   return (
-    <form onSubmit={addItem} className="space-y-2 pt-1 border-t border-border">
-      <div className="flex flex-col sm:flex-row gap-2 pt-2">
+    <form onSubmit={addItem} className="space-y-2 pt-1">
+      <div className="flex flex-col sm:flex-row gap-2">
         <input
           type="text"
           required
           value={label}
           onChange={(e) => setLabel(e.target.value)}
           placeholder="Add a step…"
-          className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
+          className="flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
         />
         <select
           value={itemType}
           onChange={(e) => setItemType(e.target.value as OnboardingItemType)}
-          className="rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
+          className="rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
         >
           <option value="TASK">Task</option>
           <option value="DOCUMENT">Document</option>
@@ -1111,13 +947,10 @@ function TemplateAddItemForm({ templateId, onAdded }: { templateId: string; onAd
           <option value="CERTIFICATION">Certification</option>
         </select>
         <input
-          type="number"
-          min={0}
-          value={dueOffsetDays}
-          onChange={(e) => setDueOffsetDays(e.target.value)}
-          placeholder="Due (days)"
-          title="Due this many days after the checklist starts — leave blank for no deadline"
-          className="w-28 rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
+          type="date"
+          value={dueDate}
+          onChange={(e) => setDueDate(e.target.value)}
+          className="rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
         />
         <button type="submit" disabled={adding} className="btn-neutral text-sm px-4 py-2 whitespace-nowrap">
           {adding ? "Adding…" : "Add Step"}
@@ -1127,7 +960,7 @@ function TemplateAddItemForm({ templateId, onAdded }: { templateId: string; onAd
         <select
           value={documentId}
           onChange={(e) => setDocumentId(e.target.value)}
-          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
+          className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
         >
           <option value="">— Choose a document —</option>
           {documents.map((d) => (
