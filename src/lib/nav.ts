@@ -27,10 +27,12 @@ export const EMPLOYEE_NAV: NavItem[] = [
   { label: "Availability", href: "/availability", icon: CalendarIcon },
   { label: "Documents", href: "/documents", icon: FolderIcon },
   { label: "Onboarding", href: "/onboarding", icon: ChecklistIcon },
-  // CB, Sept 2026: the employee-facing side of the notes/messaging thread — "we would be
-  // able to communicate back and forth" — their own /notes, always reachable, same as
-  // every other personal section here.
-  { label: "Notes", href: "/notes", icon: ChatIcon },
+  // CB, Sept 2026: "instead of notes, I want it to be messages... so its no longer notes its
+  // 'My Messages.'" /messages is the unified inbox — the old general employee/supervisor
+  // thread, per-date/PTO conversations, and real peer-to-peer DMs, all in one place (see
+  // src/app/(portal)/messages/MessagesInboxView.tsx). /notes still exists as a redirect for any
+  // stale link.
+  { label: "My Messages", href: "/messages", icon: ChatIcon },
   { label: "Directory", href: "/directory", icon: UsersIcon },
   { label: "Announcements", href: "/announcements", icon: MegaphoneIcon },
   { label: "My Profile", href: "/profile", icon: UserCircleIcon },
