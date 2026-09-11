@@ -340,6 +340,31 @@ create policy team_note_write on "TeamNote" for all using (
 );
 
 
+-- Same three-way row shape as TeamNote just above — a task's own employee, their supervisor,
+-- or an admin. Row visibility/writability is still just "is this employeeId's row," same as
+-- TeamNote; WHICH of PENDING→COMPLETED→APPROVED a given write is allowed to make is an
+-- app-layer concern (src/lib/date-tasks.ts), not an RLS one — same division of labor as
+-- team_note_write leaving "who actually wrote this note" to the app layer.
+alter table "DateTask" enable row level security;
+alter table "DateTask" force row level security;
+
+drop policy if exists date_task_select on "DateTask";
+create policy date_task_select on "DateTask" for select using (
+  is_admin()
+  or "employeeId" = current_employee_id()
+  or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+);
+
+drop policy if exists date_task_write on "DateTask";
+create policy date_task_write on "DateTask" for all using (
+  "employeeId" = current_employee_id() or is_admin()
+  or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+) with check (
+  "employeeId" = current_employee_id() or is_admin()
+  or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+);
+
+
 alter table "Document" enable row level security;
 alter table "Document" force row level security;
 
