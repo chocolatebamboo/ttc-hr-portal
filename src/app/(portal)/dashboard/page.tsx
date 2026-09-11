@@ -12,32 +12,10 @@ import TimeClockCard from "@/components/TimeClockCard";
 import TimeOffSection from "@/components/TimeOffSection";
 import AvailabilityStatusSection from "@/components/AvailabilityStatusSection";
 import DateTasksSection from "@/components/DateTasksSection";
-import { FolderIcon, ChecklistIcon, MegaphoneIcon, ChartIcon, BellIcon, ChatIcon, type IconProps } from "@/components/icons";
+import QuickActionsCard from "@/components/QuickActionsCard";
+import { MegaphoneIcon, ChartIcon, BellIcon, ChatIcon, type IconProps } from "@/components/icons";
 import { formatHoursCompact } from "@/lib/time";
 import type { AnnouncementDTO, DocumentDTO } from "@/types";
-
-// CB, Sept 2026: "I want you to remove the quick action my time because we already have my
-// time within the mobile view" — My Time is now reachable directly from BottomNav on mobile
-// (and from the sidebar on desktop, same as it always was there too), so it came out of this
-// list entirely rather than just on mobile. Availability came out the same way once the pink
-// dashboard tile and the bottom-nav tab both already got you there — "that availability
-// within the quick actions could go, for right now." Reports has no employee-facing view
-// (see admin/reports/page.tsx's own redirect) so it's appended only for admins — see
-// quickActions below — instead of living in this shared base list everyone gets.
-const QUICK_ACTIONS = [
-  { label: "View Documents", href: "/documents", icon: FolderIcon, tone: "amber" as const },
-  { label: "View Onboarding", href: "/onboarding", icon: ChecklistIcon, tone: "emerald" as const },
-];
-
-const ADMIN_QUICK_ACTION = { label: "Reports", href: "/admin/reports", icon: ChartIcon, tone: "violet" as const };
-
-const CHIP_TONE: Record<string, string> = {
-  blue: "bg-[color-mix(in_srgb,var(--ttc-blue)_12%,white)] text-[var(--ttc-blue-ink)]",
-  pink: "bg-[color-mix(in_srgb,var(--ttc-pink)_12%,white)] text-[var(--ttc-pink-ink)]",
-  amber: "bg-amber-100 text-amber-800",
-  emerald: "bg-emerald-100 text-emerald-800",
-  violet: "bg-violet-100 text-violet-800",
-};
 
 function formatAnnouncementDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -46,8 +24,6 @@ function formatAnnouncementDate(iso: string): string {
 export default async function DashboardPage() {
   const employee = await getCurrentEmployee();
   if (!employee) redirect("/login");
-
-  const quickActions = isAdmin(employee) ? [...QUICK_ACTIONS, ADMIN_QUICK_ACTION] : QUICK_ACTIONS;
 
   // CB, Sept 2026: "on the administrator [side] that is approving, that should be a
   // notification... saying that this person wants to have that time approved. Once that
@@ -188,25 +164,7 @@ export default async function DashboardPage() {
         </div>
 
         <div className="animate-in animate-in-4">
-          <div className="bg-surface border border-border rounded-2xl p-5">
-            <h2 className="text-sm font-medium text-muted mb-3">Quick actions</h2>
-            <div className="grid grid-cols-4 gap-2">
-              {quickActions.map((action) => (
-                <Link
-                  key={action.label}
-                  href={action.href}
-                  className="flex flex-col items-center text-center gap-2 rounded-xl px-1 py-3 text-muted hover:bg-black/[0.03] transition-colors"
-                >
-                  <span
-                    className={`h-10 w-10 rounded-full flex items-center justify-center ${CHIP_TONE[action.tone]}`}
-                  >
-                    <action.icon className="h-5 w-5" />
-                  </span>
-                  <span className="text-[11px] font-medium leading-tight text-foreground">{action.label}</span>
-                </Link>
-              ))}
-            </div>
-          </div>
+          <QuickActionsCard role={employee.role} initialKeys={employee.quickActionKeys} variant="mobile" />
         </div>
 
         <NeedsAttentionSection
@@ -232,21 +190,7 @@ export default async function DashboardPage() {
           </div>
 
           <div className="animate-in animate-in-3">
-            <div className="bg-surface border border-border rounded-2xl p-5">
-              <h2 className="text-sm font-medium text-muted mb-3">Quick actions</h2>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                {quickActions.map((action) => (
-                  <Link
-                    key={action.href + action.label}
-                    href={action.href}
-                    className="flex flex-col items-center text-center gap-2 rounded-xl px-3 py-4 text-muted hover:bg-black/[0.03] hover:text-foreground transition-colors"
-                  >
-                    <action.icon className="h-5 w-5" />
-                    <span className="text-xs font-medium leading-tight text-foreground">{action.label}</span>
-                  </Link>
-                ))}
-              </div>
-            </div>
+            <QuickActionsCard role={employee.role} initialKeys={employee.quickActionKeys} variant="desktop" />
           </div>
 
           <TimeOffSection className="animate-in animate-in-4" recentPto={recentPto} />
