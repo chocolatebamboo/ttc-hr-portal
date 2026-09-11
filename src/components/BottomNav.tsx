@@ -8,10 +8,13 @@ import { HomeIcon, ClockIcon, CalendarIcon, MoreIcon } from "@/components/icons"
 // access... the documents could be in the more section" — Documents drops out of the fixed
 // bar (still reachable one tap away on /more, see that page's own filter) and Availability
 // takes its slot instead.
+//
+// Round four, CB: "I want the availability to go before the my time, to be honest. I think
+// that's gonna be main priority" — Availability moved ahead of My Time in the order below.
 const ITEMS = [
   { label: "Home", href: "/dashboard", Icon: HomeIcon },
-  { label: "My Time", href: "/time", Icon: ClockIcon },
   { label: "Availability", href: "/availability", Icon: CalendarIcon },
+  { label: "My Time", href: "/time", Icon: ClockIcon },
   { label: "More", href: "/more", Icon: MoreIcon },
 ];
 
