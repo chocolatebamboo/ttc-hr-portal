@@ -10,14 +10,24 @@ type LoadState = "loading" | "ready" | "error" | "empty";
 
 /**
  * CB, Sept 2026: My Time should show "a preview of the dates and times... selected in the
- * availability," not "a second calendar" — this page already has its own calendar for actual
- * worked hours (TimesheetCalendar), so a second interactive calendar just for availability read
- * as redundant. This is deliberately a plain read-only list, not a calendar widget: every date
- * you've submitted on the Availability page, with its status, in one scannable place. Editing
- * still only happens on the Availability page itself (linked below) — this is a preview, not a
- * second place to submit or change anything.
+ * availability," not "a second calendar." CB's follow-up (same day): that preview belongs on
+ * the Availability page itself, alongside the calendar you actually submit from, rather than on
+ * My Time — so each page stays about one thing (Availability = when you're free to work; My
+ * Time = hours actually worked). This is deliberately a plain read-only list, not a calendar
+ * widget: every date you've submitted, with its status, in one scannable place next to the
+ * calendar that made it.
+ *
+ * `showLink`/`title` let the one component serve both call sites without reading oddly on
+ * either: on the Availability page itself, a "Submit or edit →" link back to the very page it's
+ * already on would be circular, so AvailabilityView passes showLink={false}.
  */
-export default function MyAvailabilityPreview() {
+export default function MyAvailabilityPreview({
+  title = "Your availability",
+  showLink = true,
+}: {
+  title?: string;
+  showLink?: boolean;
+}) {
   const [submissions, setSubmissions] = useState<AvailabilityDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
 
@@ -40,10 +50,12 @@ export default function MyAvailabilityPreview() {
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <h2 className="text-sm font-medium text-muted">Your availability</h2>
-        <Link href="/availability" className="text-xs font-medium text-accent-ink hover:underline">
-          Submit or edit →
-        </Link>
+        <h2 className="text-sm font-medium text-muted">{title}</h2>
+        {showLink && (
+          <Link href="/availability" className="text-xs font-medium text-accent-ink hover:underline">
+            Submit or edit →
+          </Link>
+        )}
       </div>
 
       {loadState === "loading" && (
@@ -62,10 +74,16 @@ export default function MyAvailabilityPreview() {
 
       {loadState === "empty" && (
         <div className="rounded-xl border border-border bg-surface p-4 text-sm text-muted">
-          You haven&apos;t submitted any availability yet.{" "}
-          <Link href="/availability" className="text-accent-ink font-medium hover:underline">
-            Submit some →
-          </Link>
+          {showLink ? (
+            <>
+              You haven&apos;t submitted any availability yet.{" "}
+              <Link href="/availability" className="text-accent-ink font-medium hover:underline">
+                Submit some →
+              </Link>
+            </>
+          ) : (
+            "You haven't submitted any availability yet — tap dates on the calendar above to get started."
+          )}
         </div>
       )}
 
