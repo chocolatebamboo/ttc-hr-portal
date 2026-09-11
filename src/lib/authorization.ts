@@ -103,3 +103,15 @@ export async function assertCanReviewAvailability(
   if (actor.role !== "SUPERVISOR") throw new ForbiddenError();
   await assertCanAccessEmployeeRecords(actor, targetEmployeeId);
 }
+
+/** Same rule again, for pushing (and later approving) a date task onto a team member — CB,
+ *  Sept 2026: only an admin or that person's supervisor pushes a task, same authority as
+ *  reviewing their availability or PTO, never the employee assigning one to themselves. */
+export async function assertCanAssignTasks(
+  actor: CurrentEmployee,
+  targetEmployeeId: string
+): Promise<void> {
+  if (isAdmin(actor)) return;
+  if (actor.role !== "SUPERVISOR") throw new ForbiddenError();
+  await assertCanAccessEmployeeRecords(actor, targetEmployeeId);
+}
