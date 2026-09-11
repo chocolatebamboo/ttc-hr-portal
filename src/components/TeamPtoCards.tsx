@@ -243,7 +243,14 @@ function Card({
             {initialsOf(r.employeeName)}
           </span>
           <div className="min-w-0 flex-1">
-            <p className="text-base font-semibold text-white truncate">{r.employeeName}</p>
+            <div className="flex items-center gap-1.5">
+              <p className="text-base font-semibold text-white truncate">{r.employeeName}</p>
+              {r.employeeId === viewerId && (
+                <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-white bg-white/25 border border-white/40 rounded-full px-1.5 py-0.5">
+                  You
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-2 mt-0.5">
               {isPending ? (
                 <span className="text-xs font-medium text-white/80">Awaiting your decision</span>
