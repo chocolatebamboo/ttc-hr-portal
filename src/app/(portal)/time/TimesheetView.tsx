@@ -6,7 +6,8 @@ import TimesheetCalendar, { type PtoQuickRequestValues } from "@/components/Time
 import type { CorrectionValues } from "@/components/TimesheetTable";
 import PtoStatusPill from "@/components/PtoStatusPill";
 import TeamNotesThread from "@/components/TeamNotesThread";
-import { ChatIcon } from "@/components/icons";
+import SwipeReveal from "@/components/SwipeReveal";
+import { ChatIcon, TrashIcon } from "@/components/icons";
 import { PTO_TYPE_LABEL, formatDateRange } from "@/lib/time";
 import type { PtoRequestDTO, PtoType, TeamNoteTopicCountDTO, TimeEntryDTO } from "@/types";
 
@@ -41,6 +42,12 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
   const [ptoCancellingId, setPtoCancellingId] = useState<string | null>(null);
   const [ptoError, setPtoError] = useState<string | undefined>();
   const [standaloneFormOpen, setStandaloneFormOpen] = useState(false);
+  // Set while adjusting a denied request — CB, round four: "if they got denied... we should be
+  // able to adjust it... to select a different time or date," same parity Availability already
+  // has via AvailabilityCalendar's startResubmit. Seeds the standalone form with the denied
+  // request's values; submitting always creates a brand-new PENDING request rather than editing
+  // the denied one in place, same "never edit history" shape as Availability's resubmit.
+  const [resubmitFrom, setResubmitFrom] = useState<PtoRequestDTO | null>(null);
   // Which request's conversation (if any) is expanded below the list — CB, Sept 2026: "I don't
   // see where Sean could see those messages," same per-request conversation admin cards
   // already open (TeamPtoCards' topicType="PTO_REQUEST"), now reachable from the employee's
@@ -132,6 +139,7 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
         return;
       }
       setStandaloneFormOpen(false);
+      setResubmitFrom(null);
       await loadPto();
     } catch {
       setPtoError("Unable to reach the server. Check your connection and try again.");
@@ -183,7 +191,10 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-sm font-medium text-muted">Your time-off requests</h2>
           <button
-            onClick={() => setStandaloneFormOpen((o) => !o)}
+            onClick={() => {
+              setResubmitFrom(null);
+              setStandaloneFormOpen((o) => !o);
+            }}
             className={standaloneFormOpen ? "btn-neutral text-xs px-3 py-1.5" : "text-xs text-accent-ink font-medium hover:underline"}
           >
             {standaloneFormOpen ? "Cancel" : "Request for another date"}
@@ -192,9 +203,21 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
 
         {standaloneFormOpen && (
           <StandalonePtoForm
+            key={resubmitFrom?.id ?? "new"}
             onSubmit={submitPtoRequest}
             submitting={ptoSubmitting}
             error={ptoError}
+            initial={
+              resubmitFrom
+                ? {
+                    type: resubmitFrom.type,
+                    startDate: resubmitFrom.startDate,
+                    endDate: resubmitFrom.endDate,
+                    hours: String(resubmitFrom.hours),
+                    reason: resubmitFrom.reason ?? "",
+                  }
+                : undefined
+            }
           />
         )}
 
@@ -223,8 +246,8 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
             {ptoRequests.map((r) => {
               const msgCount = ptoMessageCounts.get(r.id) ?? 0;
               const open = openPtoId === r.id;
-              return (
-                <div key={r.id} className="px-4 py-3.5">
+              const rowContent = (
+                <div className="px-4 py-3.5 bg-surface">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-sm font-medium">
@@ -249,6 +272,17 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
                   </div>
                   {r.status === "DENIED" && r.reviewComment && (
                     <p className="text-xs text-accent mt-1.5">Denied: {r.reviewComment}</p>
+                  )}
+                  {r.status === "DENIED" && (
+                    <button
+                      onClick={() => {
+                        setResubmitFrom(r);
+                        setStandaloneFormOpen(true);
+                      }}
+                      className="mt-1.5 text-xs font-medium text-accent-ink hover:underline"
+                    >
+                      Adjust &amp; resubmit
+                    </button>
                   )}
 
                   {/* CB, Sept 2026: "I send it to Sean, I don't see where Sean could see those
@@ -281,6 +315,26 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
                   )}
                 </div>
               );
+
+              // CB, round four: "I should be able to slide to the left... and delete it" — only
+              // a PENDING request can actually be cancelled (cancelPtoRequest itself enforces
+              // this), so only PENDING rows get the swipe action; the inline "Cancel" text link
+              // above stays too, for anyone on a non-touch device.
+              return r.status === "PENDING" ? (
+                <SwipeReveal
+                  key={r.id}
+                  actionSide="right"
+                  actionLabel="Delete"
+                  actionIcon={<TrashIcon className="h-4 w-4" />}
+                  actionClassName="bg-rose-600 text-white"
+                  busy={ptoCancellingId === r.id}
+                  onAction={() => cancelPtoRequest(r.id)}
+                >
+                  {rowContent}
+                </SwipeReveal>
+              ) : (
+                <div key={r.id}>{rowContent}</div>
+              );
             })}
           </div>
         )}
@@ -293,16 +347,20 @@ function StandalonePtoForm({
   onSubmit,
   submitting,
   error,
+  initial,
 }: {
   onSubmit: (range: { startDate: string; endDate: string }, values: PtoQuickRequestValues) => void;
   submitting: boolean;
   error?: string;
+  /** Pre-fills the form from a denied request being adjusted & resubmitted — omitted for a
+   *  plain "Request for another date." */
+  initial?: { type: PtoType; startDate: string; endDate: string; hours: string; reason: string };
 }) {
-  const [type, setType] = useState<PtoType>("VACATION");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [hours, setHours] = useState("");
-  const [reason, setReason] = useState("");
+  const [type, setType] = useState<PtoType>(initial?.type ?? "VACATION");
+  const [startDate, setStartDate] = useState(initial?.startDate ?? "");
+  const [endDate, setEndDate] = useState(initial?.endDate ?? "");
+  const [hours, setHours] = useState(initial?.hours ?? "");
+  const [reason, setReason] = useState(initial?.reason ?? "");
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -311,6 +369,11 @@ function StandalonePtoForm({
 
   return (
     <form onSubmit={handleSubmit} className="bg-surface border border-border rounded-xl p-5 space-y-4 mb-3">
+      {initial && (
+        <p className="text-xs font-medium text-accent-ink -mb-1">
+          Adjusting your denied request — submitting sends this as a brand-new request.
+        </p>
+      )}
       <div>
         <label className="block text-sm font-medium mb-1.5">Type of leave</label>
         <select
