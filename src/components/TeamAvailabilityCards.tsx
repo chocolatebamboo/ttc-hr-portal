@@ -6,7 +6,7 @@ import TeamNotesThread from "@/components/TeamNotesThread";
 import DateTasksPanel from "@/components/DateTasksPanel";
 import { ChatIcon, ChecklistIcon } from "@/components/icons";
 import { slotChips } from "@/lib/availability-format";
-import { toneForStatus } from "@/lib/status-tone";
+import { toneForStatus, YOU_TONE } from "@/lib/status-tone";
 import type { AdminAvailabilityDTO, TeamNoteTopicCountDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
@@ -239,7 +239,10 @@ function Card({
   // background" (Approved) / "I think the pending color should be that yellow as well" —
   // confirmed this replaces the old per-employee tone entirely: color now signals the
   // decision itself (Pending/Approved/Denied), same everywhere, not who or what it's about.
-  const tone = toneForStatus(r.status);
+  // CB, round five: the viewer's own card always reads in brand blue, regardless of status —
+  // see YOU_TONE's doc comment in src/lib/status-tone.ts.
+  const isSelf = r.employeeId === viewerId;
+  const tone = isSelf ? YOU_TONE : toneForStatus(r.status);
   const isPending = r.status === "PENDING";
   const openChip = chips.find((c) => c.date === openDate);
 
@@ -256,7 +259,7 @@ function Card({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
               <p className="text-base font-semibold text-white truncate">{r.employeeName}</p>
-              {r.employeeId === viewerId && (
+              {isSelf && (
                 <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-white bg-white/25 border border-white/40 rounded-full px-1.5 py-0.5">
                   You
                 </span>
