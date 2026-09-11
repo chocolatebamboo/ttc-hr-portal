@@ -228,6 +228,28 @@ export default function TimesheetCalendar({
   // so its cleanup can cancel a not-yet-fired frame on unmount rather than leaking one.
   const rafRef = useRef<number | null>(null);
 
+  // CB, round five (pointing at an Airbnb-style host calendar reference video): "it auto
+  // updates with the... respective date or month at the top" while scrolling — see
+  // AvailabilityCalendar's identical sticky-header setup for the full reasoning; this is the
+  // same pattern applied here so My Time's own calendar matches that same reference.
+  const monthRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const [currentLabel, setCurrentLabel] = useState(() => getMonth(0).label);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.filter((e) => e.isIntersecting);
+        if (visible.length === 0) return;
+        const topMost = visible.reduce((best, e) => (e.boundingClientRect.top < best.boundingClientRect.top ? e : best));
+        const label = topMost.target.getAttribute("data-month-label");
+        if (label) setCurrentLabel(label);
+      },
+      { rootMargin: "-8px 0px -82% 0px", threshold: 0 }
+    );
+    monthRefs.current.forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, [months]);
+
   async function loadMonth(offset: number) {
     const month = getMonth(offset);
     try {
@@ -401,6 +423,16 @@ export default function TimesheetCalendar({
     // narrow card with empty page beside it.
     <div className="flex flex-col sm:flex-row sm:items-start gap-4">
       <div className="flex-1 min-w-0 space-y-6">
+        {/* CB, round five: the auto-updating month header from her Airbnb-calendar reference
+            video — tapping it, like that reference's own chevron, jumps straight back to today. */}
+        <button
+          type="button"
+          onClick={scrollToCurrentMonth}
+          className="sticky top-0 z-10 -mx-1 mb-1 flex items-center gap-1 bg-background/95 backdrop-blur px-1 py-2 text-left"
+        >
+          <span className="font-serif font-bold text-xl">{currentLabel}</span>
+          <ChevronDownIcon className="h-4 w-4 text-muted" />
+        </button>
         {/* Always the topmost thing rendered — months[0] is always the MAX_FUTURE_OFFSET slot,
             since nothing ever loads or prepends anything ahead of it. */}
         <p className="text-center text-xs text-muted/60 py-2">
@@ -409,8 +441,17 @@ export default function TimesheetCalendar({
         {months.map((slot) => (
           // The current month gets a ref so the mount effect above can scroll straight to it —
           // otherwise the page would land on the future months now sitting above it instead of
-          // today's.
-          <div key={slot.offset} ref={slot.offset === 0 ? currentMonthRef : undefined}>
+          // today's. Also registers into monthRefs (keyed by month.start) for the sticky-header
+          // IntersectionObserver above, same as AvailabilityCalendar's month wrappers.
+          <div
+            key={slot.offset}
+            ref={(el) => {
+              if (slot.offset === 0) currentMonthRef.current = el;
+              if (el) monthRefs.current.set(slot.month.start, el);
+              else monthRefs.current.delete(slot.month.start);
+            }}
+            data-month-label={slot.month.label}
+          >
             <MonthSection slot={slot} selection={selection} ptoMap={ptoMap} onDayClick={handleDayClick} />
           </div>
         ))}
