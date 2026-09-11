@@ -168,7 +168,7 @@ export default function ReportsView() {
           {loadState === "loading" ? "Generating…" : "Generate"}
         </button>
         {report && loadState !== "error" && (
-          <a
+          
             href={`/api/payroll/hours/csv${csvQuery}`}
             className="btn-neutral text-sm px-5 py-2"
           >
@@ -207,7 +207,53 @@ export default function ReportsView() {
             </div>
           )}
 
-          <div className="bg-surface border border-border rounded-xl overflow-hidden overflow-x-auto">
+          {/* CB, round four: "that bottom half where you see the different team members...
+              needs to read a little bit more cleanly in a widget format... I shouldn't have to
+              slide to the left or right." Below md, this card list replaces the table entirely
+              (no horizontal scroll); at md and up the original table takes over. */}
+          <div className="md:hidden space-y-2.5">
+            {report.rows.map((row) => (
+              <div key={row.employeeId} className="bg-surface border border-border rounded-xl p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-medium truncate">{row.name}</p>
+                    <p className="text-xs text-muted mt-0.5">
+                      {row.employeeCode}
+                      {row.department ? ` · ${row.department}` : ""}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-xs text-muted">Total</p>
+                    <p className="text-base font-semibold tabular-nums">{row.totalHours.toFixed(2)}</p>
+                  </div>
+                </div>
+                <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm border-t border-border pt-3">
+                  <div className="flex items-center justify-between">
+                    <dt className="text-xs text-muted">Regular</dt>
+                    <dd className="tabular-nums">{row.regularHours.toFixed(2)}</dd>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <dt className="text-xs text-muted">Vacation</dt>
+                    <dd className="tabular-nums">{row.vacationHours.toFixed(2)}</dd>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <dt className="text-xs text-muted">Sick</dt>
+                    <dd className="tabular-nums">{row.sickHours.toFixed(2)}</dd>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <dt className="text-xs text-muted">Personal</dt>
+                    <dd className="tabular-nums">{row.personalHours.toFixed(2)}</dd>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <dt className="text-xs text-muted">Other Leave</dt>
+                    <dd className="tabular-nums">{row.otherLeaveHours.toFixed(2)}</dd>
+                  </div>
+                </dl>
+              </div>
+            ))}
+          </div>
+
+          <div className="hidden md:block bg-surface border border-border rounded-xl overflow-hidden overflow-x-auto">
             <table className="w-full text-sm min-w-[720px]">
               <thead>
                 <tr className="border-b border-border text-left text-xs text-muted uppercase tracking-wide">
