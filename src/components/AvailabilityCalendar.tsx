@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AvailabilityStatusPill from "@/components/AvailabilityStatusPill";
 import JumpToTodayButton from "@/components/JumpToTodayButton";
 import TeamNotesThread from "@/components/TeamNotesThread";
-import { ChatIcon } from "@/components/icons";
+import { ChatIcon, ChevronDownIcon } from "@/components/icons";
 import { formatSlotDate, formatTime12h } from "@/lib/availability-format";
 import { todayDateKey } from "@/lib/time";
 import { getMonth, type Month } from "@/lib/month";
@@ -184,6 +184,37 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
   // cleanup can cancel a not-yet-fired one on unmount instead of leaking it.
   const rafRef = useRef<number | null>(null);
 
+  // CB, round five (pointing at an Airbnb-style host calendar reference video): "it auto
+  // updates with the... respective date or month at the top" while scrolling — a sticky header
+  // (rendered below, just above the month list) that always names whichever month is currently
+  // scrolled to the top of view, the same way that reference calendar's own header behaves.
+  // Every month wrapper below registers itself here by its own `month.start` key so the
+  // IntersectionObserver effect can watch all of them at once, not just the current one.
+  const monthRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const [currentLabel, setCurrentLabel] = useState(() => getMonth(0).label);
+
+  useEffect(() => {
+    // A thin horizontal band near the very top of the viewport — rootMargin's negative top
+    // pushes it down past the sticky header's own height, and the large negative bottom keeps
+    // it thin, so "which month is intersecting this band" reads as "which month is scrolled to
+    // the top" rather than "which month is merely anywhere on screen." root: null (the
+    // viewport) works correctly here even for the desktop layout's own internally-scrolling
+    // column — a target's bounding rect already reflects any scrollable ancestor's scroll
+    // offset, so intersection with the viewport still tracks scroll position inside that column.
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.filter((e) => e.isIntersecting);
+        if (visible.length === 0) return;
+        const topMost = visible.reduce((best, e) => (e.boundingClientRect.top < best.boundingClientRect.top ? e : best));
+        const label = topMost.target.getAttribute("data-month-label");
+        if (label) setCurrentLabel(label);
+      },
+      { rootMargin: "-8px 0px -82% 0px", threshold: 0 }
+    );
+    monthRefs.current.forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, [months]);
+
   // Same "land on today" behavior as TimesheetCalendar, including the same fix for the same
   // real bug: Next.js's own App Router scroll-restoration runs its scroll-to-top AFTER this
   // component's own mount effect (a parent's plain useEffect can still undo a child's
@@ -296,13 +327,31 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
           actually engage instead of this column just growing to fit all ~10 months of content
           and pushing the row (and the panel beside it) taller than the viewport. */}
       <div className="flex-1 min-w-0 space-y-6 md:min-h-0 md:overflow-y-auto md:pr-1">
+        {/* CB, round five: the auto-updating month header from her Airbnb-calendar reference
+            video — tapping it, like that reference's own chevron, jumps straight back to today. */}
+        <button
+          type="button"
+          onClick={scrollToCurrentMonth}
+          className="sticky top-0 z-10 -mx-1 mb-1 flex items-center gap-1 bg-background/95 backdrop-blur px-1 py-2 text-left"
+        >
+          <span className="font-serif font-bold text-xl">{currentLabel}</span>
+          <ChevronDownIcon className="h-4 w-4 text-muted" />
+        </button>
         <p className="text-center text-xs text-muted/60 py-2">
           Tap the dates you&apos;re available — you can plan up to {MAX_FUTURE_OFFSET} months ahead.
         </p>
         {months.map((month, i) => {
           const offset = PAST_OFFSET + i;
           return (
-            <div key={month.start} ref={offset === 0 ? currentMonthRef : undefined}>
+            <div
+              key={month.start}
+              ref={(el) => {
+                if (offset === 0) currentMonthRef.current = el;
+                if (el) monthRefs.current.set(month.start, el);
+                else monthRefs.current.delete(month.start);
+              }}
+              data-month-label={month.label}
+            >
               <MonthSection month={month} byDate={byDate} draft={draft} today={today} onDayClick={handleDayClick} />
             </div>
           );
