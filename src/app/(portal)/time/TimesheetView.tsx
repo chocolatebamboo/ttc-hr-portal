@@ -183,29 +183,32 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
         <h1 className="page-title text-2xl">My Time</h1>
       </div>
 
-      {/* Month navigation is scroll, not click — see TimesheetCalendar's own doc comment.
-          Loading/error states are per-month now (each month section shows its own), so there's
-          no page-level loading/error block here anymore. */}
-      <TimesheetCalendar
-        loadEntries={loadEntriesForMonth}
-        refreshKey={refreshKey}
-        correction={{ onSubmit: submitCorrection, busyEntryId, error: correctionError }}
-        ptoRequests={ptoRequests}
-        pto={{
-          onSubmit: submitPtoRequest,
-          onCancel: cancelPtoRequest,
-          submitting: ptoSubmitting,
-          cancellingId: ptoCancellingId,
-          error: ptoError,
-        }}
-      />
+      {/* CB, Sept 2026: "a preview of the dates and times... selected in the availability," not
+          a second calendar — and CB again, round two of this same request: this summary leads
+          the page now, with the logged-hours calendar below it rather than above. Editing still
+          only happens on the Availability page itself (linked from here) — this is a preview. */}
+      <MyAvailabilityPreview />
 
-      {/* CB, Sept 2026: "a preview of the dates and times... selected in the availability" —
-          a plain read-only list of your own Availability submissions, not a second calendar.
-          Sits between the time-tracking calendar above and the time-off list below, since it's
-          neither of those things but belongs on the same "everything about my time" page. */}
+      {/* Logged hours, corrections, and day-click PTO requests — kept on this page (CB: "keep
+          the calendar functions on My Time"), just demoted below the summary above instead of
+          being the first thing on the page. Month navigation is scroll, not click — see
+          TimesheetCalendar's own doc comment. Loading/error states are per-month now (each month
+          section shows its own), so there's no page-level loading/error block here anymore. */}
       <div className="mt-8">
-        <MyAvailabilityPreview />
+        <h2 className="text-sm font-medium text-muted mb-2">Logged hours</h2>
+        <TimesheetCalendar
+          loadEntries={loadEntriesForMonth}
+          refreshKey={refreshKey}
+          correction={{ onSubmit: submitCorrection, busyEntryId, error: correctionError }}
+          ptoRequests={ptoRequests}
+          pto={{
+            onSubmit: submitPtoRequest,
+            onCancel: cancelPtoRequest,
+            submitting: ptoSubmitting,
+            cancellingId: ptoCancellingId,
+            error: ptoError,
+          }}
+        />
       </div>
 
       {/* Time Off, folded in here rather than living on its own page — clicking a day above
