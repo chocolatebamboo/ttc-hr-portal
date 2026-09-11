@@ -109,6 +109,8 @@ model Employee {
   availabilityReviewed    AvailabilitySubmission[] @relation("AvailabilityReviewer")
   teamNotesAsSubject      TeamNote[]                @relation("TeamNoteSubject")
   teamNotesWritten        TeamNote[]                @relation("TeamNoteAuthor")
+  directMessagesSent      DirectMessage[]           @relation("DirectMessageSender")
+  directMessagesReceived  DirectMessage[]           @relation("DirectMessageRecipient")
   dateTasksAsSubject      DateTask[]                @relation("DateTaskSubject")
   dateTasksCreated        DateTask[]                @relation("DateTaskCreatedBy")
   dateTasksApproved       DateTask[]                @relation("DateTaskApprovedBy")
@@ -388,6 +390,47 @@ model TeamNote {
 
   @@index([employeeId, createdAt])
   @@index([employeeId, topicType, topicId, topicDate, createdAt])
+}
+
+// CB, Sept 2026: "instead of notes, I want it to be messages... I should be able to look up
+// members and send them individual messages... have an internal conversation there" — a real
+// peer-to-peer DM between any two employees, unlike TeamNote above (which is always about one
+// employee's own HR-facing thread with their supervisor chain, never a conversation between two
+// arbitrary teammates). Deliberately no separate "Conversation" table: a conversation's identity
+// is just the unordered {senderId, recipientId} pair, folded down from the message rows
+// themselves — the same "derive it, don't store it" shape aggregateTopicCounts already uses for
+// TeamNote's topic conversations (src/lib/team-notes.ts). Kept as its own table rather than a
+// wider TeamNote (a fourth topicType) because access is fundamentally different: a TeamNote
+// row's visibility is about whose EMPLOYEE RECORD it is (self/supervisor/admin), a DirectMessage
+// row's visibility is about who actually sent or received IT (see prisma/rls.sql's
+// direct_message_select) — two different rules that don't belong in one policy.
+model DirectMessage {
+  id          String   @id @default(uuid())
+  senderId    String
+  sender      Employee @relation("DirectMessageSender", fields: [senderId], references: [id])
+  recipientId String
+  recipient   Employee @relation("DirectMessageRecipient", fields: [recipientId], references: [id])
+
+  body           String
+  attachmentKey  String?
+  attachmentName String?
+
+  // "Reference the different tasks or messages from the different dates... within the chat as
+  // well" — an optional attached reference card pointing at one AvailabilitySubmission date, a
+  // PtoRequest, or a DateTask. Same plain-columns shape as TeamNote.topicType/topicId/topicDate
+  // just above (no formal @relation — all three are optional and only ever set together by
+  // src/lib/direct-messages.ts), and same reasoning: keeps this table off those other tables'
+  // own RLS policies, since a DM's visibility never depends on what it references. Columns exist
+  // from the start so this doesn't need a second migration later; the UI to actually attach one
+  // is a follow-up on top of this round's working conversations.
+  refType String?
+  refId   String?
+  refDate String?
+
+  createdAt DateTime @default(now())
+
+  @@index([senderId, recipientId, createdAt])
+  @@index([recipientId, senderId, createdAt])
 }
 
 enum DateTaskStatus {
