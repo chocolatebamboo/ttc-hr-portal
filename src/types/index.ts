@@ -297,6 +297,8 @@ export interface DateTaskDTO {
   createdByName: string;
   taskDate: string; // "YYYY-MM-DD"
   description: string;
+  hasAttachment: boolean;
+  attachmentName: string | null;
   status: DateTaskStatus;
   completedAt: string | null; // ISO
   approvedById: string | null;
