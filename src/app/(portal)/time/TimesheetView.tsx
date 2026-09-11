@@ -2,12 +2,20 @@
 
 import { useEffect, useState } from "react";
 import { getWeek, formatWeekRange } from "@/lib/week";
-import TimesheetTable, { type CorrectionValues } from "@/components/TimesheetTable";
+import type { CorrectionValues } from "@/components/TimesheetTable";
+import StatusPill from "@/components/StatusPill";
 import PtoStatusPill from "@/components/PtoStatusPill";
 import TeamNotesThread from "@/components/TeamNotesThread";
 import SwipeReveal from "@/components/SwipeReveal";
 import { ChatIcon, TrashIcon } from "@/components/icons";
-import { PTO_TYPE_LABEL, formatDateRange } from "@/lib/time";
+import {
+  PTO_TYPE_LABEL,
+  combineDateAndTime,
+  formatClockTime,
+  formatDateRange,
+  formatMinutes,
+  toTimeInputValue,
+} from "@/lib/time";
 import type { PtoRequestDTO, PtoType, TeamNoteTopicCountDTO, TimeEntryDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error" | "empty";
@@ -245,12 +253,28 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
         </div>
       )}
 
+      {/* CB, Sept 2026: "this needs to be like the widget aesthetic" — same clean card/list
+          look as the time-off list right below (and MyAvailabilityPreview on the Availability
+          page): a rounded card, divide-y rows, a status pill on the right — not a bordered
+          spreadsheet-style table. TimesheetTable (the plain table) stays as-is for the
+          supervisor's own review view; this is its own rendering so that page is unaffected. */}
       {(loadState === "ready" || loadState === "empty") && (
-        <TimesheetTable
-          days={week.days}
-          entries={entries}
-          correction={{ onSubmit: submitCorrection, busyEntryId, error: correctionError }}
-        />
+        <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
+          {week.days.map((day) => (
+            <TimesheetDayRow
+              key={day}
+              day={day}
+              entry={entries.find((e) => e.workDate.slice(0, 10) === day)}
+              correction={{ onSubmit: submitCorrection, busyEntryId, error: correctionError }}
+            />
+          ))}
+          <div className="px-4 py-3 flex items-center justify-between bg-black/[0.02] text-sm font-medium">
+            <span>Weekly total</span>
+            <span className="tabular-nums">
+              {formatMinutes(entries.reduce((sum, e) => sum + (e.totalMinutes ?? 0), 0))}
+            </span>
+          </div>
+        </div>
       )}
 
       {/* Time Off, folded in here rather than living on its own page. PTO is now requested only
@@ -397,6 +421,13 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
                 </div>
               );
 
+              // CB, round four: "I should be able to slide to the left... and delete it" — a
+              // PENDING request swipes to Cancel (cancelPtoRequest itself enforces that only
+              // PENDING can be cancelled). CB, round five, the same swipe now also covers
+              // Cancelled rows — "I should be able to delete these as well" — swiping there
+              // calls the real DELETE (deletePtoRequestRow) instead, since a Cancelled request
+              // has nothing left to "cancel" into. The inline text link above (Cancel/Delete)
+              // stays either way, for anyone on a non-touch device.
               if (r.status === "PENDING") {
                 return (
                   <SwipeReveal
@@ -433,6 +464,150 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
         )}
       </div>
     </div>
+  );
+}
+
+/** One row of the session-editing form — kept as HH:MM strings from the <input type="time">
+ *  elements until submit, same shape TimesheetTable's own row editor uses. */
+interface SessionRow {
+  clockIn: string;
+  clockOut: string;
+}
+
+/** One day, styled to match the widget/card list look used elsewhere on this page (and on
+ *  Availability's own submissions preview) rather than a bordered table row. Only a Returned
+ *  day gets an "Edit & resubmit" control — same rule TimesheetTable enforces. */
+function TimesheetDayRow({
+  day,
+  entry,
+  correction,
+}: {
+  day: string;
+  entry: TimeEntryDTO | undefined;
+  correction: { onSubmit: (entryId: string, sessions: CorrectionValues) => void; busyEntryId: string | null; error?: string };
+}) {
+  const [editing, setEditing] = useState(false);
+  const [rows, setRows] = useState<SessionRow[]>([]);
+
+  const label = new Date(`${day}T00:00:00`).toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+  const isCorrectionBusy = correction.busyEntryId === entry?.id;
+  const isCorrectable = entry?.status === "RETURNED";
+
+  function startEditing() {
+    setRows(
+      entry && entry.sessions.length > 0
+        ? entry.sessions.map((s) => ({ clockIn: toTimeInputValue(s.clockIn), clockOut: toTimeInputValue(s.clockOut) }))
+        : [{ clockIn: "", clockOut: "" }]
+    );
+    setEditing(true);
+  }
+
+  function updateRow(index: number, field: keyof SessionRow, value: string) {
+    setRows((r) => r.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
+  }
+
+  function submitCorrection() {
+    if (!entry) return;
+    const sessions = rows
+      .map((r) => ({ clockIn: combineDateAndTime(day, r.clockIn), clockOut: combineDateAndTime(day, r.clockOut) }))
+      .filter((s): s is { clockIn: Date; clockOut: Date } => s.clockIn !== null && s.clockOut !== null);
+    correction.onSubmit(entry.id, sessions);
+  }
+
+  return (
+    <div className="px-4 py-3.5">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium">{label}</p>
+          {entry && entry.sessions.length > 0 ? (
+            <div className="mt-0.5 space-y-0.5">
+              {entry.sessions.map((s) => (
+                <p key={s.id} className="text-xs text-muted tabular-nums">
+                  {formatClockTime(s.clockIn)} – {s.clockOut ? formatClockTime(s.clockOut) : "in progress"}
+                </p>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted mt-0.5">No hours logged</p>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-sm font-medium tabular-nums">{formatMinutes(entry?.totalMinutes ?? null)}</span>
+          <StatusPill status={entry?.status ?? "MISSING_ENTRY"} />
+        </div>
+      </div>
+
+      {entry?.status === "RETURNED" && entry.reviewComment && (
+        <p className="text-xs text-accent mt-1.5">Returned: {entry.reviewComment}</p>
+      )}
+
+      {isCorrectable && (
+        <button
+          onClick={() => (editing ? setEditing(false) : startEditing())}
+          disabled={isCorrectionBusy}
+          className="mt-1.5 text-xs font-medium text-accent-ink hover:underline"
+        >
+          {editing ? "Cancel" : "Edit & resubmit"}
+        </button>
+      )}
+
+      {editing && entry && (
+        <div className="mt-2 bg-black/[0.03] rounded-lg p-3 space-y-3">
+          <div className="space-y-2">
+            {rows.map((row, i) => (
+              <div key={i} className="flex items-end gap-2">
+                <TimeField label="Clock in" value={row.clockIn} onChange={(v) => updateRow(i, "clockIn", v)} />
+                <TimeField label="Clock out" value={row.clockOut} onChange={(v) => updateRow(i, "clockOut", v)} />
+                {rows.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setRows((r) => r.filter((_, j) => j !== i))}
+                    aria-label="Remove this session"
+                    className="h-8 w-8 shrink-0 rounded-full border border-border bg-surface hover:bg-black/[0.03] text-sm leading-none"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => setRows((r) => [...r, { clockIn: "", clockOut: "" }])}
+              className="text-xs text-accent-ink font-medium hover:underline"
+            >
+              + Add another session
+            </button>
+          </div>
+          {correction.error && <p className="text-xs text-accent">{correction.error}</p>}
+          <div className="flex gap-2">
+            <button onClick={submitCorrection} disabled={isCorrectionBusy} className="btn-primary text-xs px-3 py-1.5">
+              {isCorrectionBusy ? "Submitting…" : "Resubmit for approval"}
+            </button>
+            <button onClick={() => setEditing(false)} className="btn-neutral text-xs px-3 py-1.5">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TimeField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="text-xs text-muted">{label}</span>
+      <input
+        type="time"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="rounded-md border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
+      />
+    </label>
   );
 }
 
