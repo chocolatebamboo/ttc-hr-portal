@@ -169,7 +169,8 @@ export default function ReportsView() {
         </button>
         {report && loadState !== "error" && (
           
-            href={`/api/payroll/hours/csv${csvQuery}`}
+            <a
+              href={`/api/payroll/hours/csv${csvQuery}`}
             className="btn-neutral text-sm px-5 py-2"
           >
             Download CSV
