@@ -23,3 +23,14 @@ export const STATUS_TONE: Record<"PENDING" | "APPROVED" | "DENIED" | "CANCELLED"
 export function toneForStatus(status: string): { from: string; to: string } {
   return STATUS_TONE[status as keyof typeof STATUS_TONE] ?? STATUS_TONE.PENDING;
 }
+
+/**
+ * CB, round five, pointing at her own card on TeamAvailabilityCards' Decided list: "where it
+ * says Chocolate Bamboo, you should always be blue... just so it could read nicely." The
+ * viewer's own card on a shared team list (TeamAvailabilityCards, TeamPtoCards) reads in brand
+ * blue regardless of its actual decision status, so spotting "that's me" is a glance instead of
+ * a name-search — deliberately overrides toneForStatus rather than composing with it. Shares
+ * CANCELLED's exact blue rather than inventing a second one; this app already treats blue as
+ * simply "the other brand color," not tied to one specific status.
+ */
+export const YOU_TONE = { from: "var(--ttc-blue)", to: "var(--ttc-blue-ink)" };
