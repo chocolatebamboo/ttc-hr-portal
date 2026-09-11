@@ -265,3 +265,34 @@ export function ChatIcon({ className = base }: IconProps) {
     </svg>
   );
 }
+
+// CB, Sept 2026: swapped in for the Quick Actions "customize" button — she flagged the old
+// GearIcon there as reading too close to another platform's own settings icon. Three
+// adjustment-slider tracks, each with its handle at a different position, is a standard
+// "customize/adjust" glyph that doesn't read as a generic settings gear.
+export function SlidersIcon({ className = base }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
+      <path d="M4 6h6M14 6h6M4 12h10M18 12h2M4 18h2M10 18h10" strokeLinecap="round" />
+      <circle cx="10" cy="6" r="2" fill="currentColor" stroke="none" />
+      <circle cx="16" cy="12" r="2" fill="currentColor" stroke="none" />
+      <circle cx="6" cy="18" r="2" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+// A plain six-dot drag handle — the grip affordance for DragReorderList
+// (src/components/DragReorderList.tsx), same hand-authored style as every other icon here
+// (filled dots, since a grip handle reads clearer solid than outlined at this size).
+export function GripIcon({ className = base }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" className={className}>
+      <circle cx="9" cy="6" r="1.4" />
+      <circle cx="9" cy="12" r="1.4" />
+      <circle cx="9" cy="18" r="1.4" />
+      <circle cx="15" cy="6" r="1.4" />
+      <circle cx="15" cy="12" r="1.4" />
+      <circle cx="15" cy="18" r="1.4" />
+    </svg>
+  );
+}
