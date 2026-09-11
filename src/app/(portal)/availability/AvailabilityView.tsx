@@ -26,6 +26,12 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
   // Which submission (if any) a clear/cancel request is currently in flight for — lets that
   // one submission's button show a busy state without a whole separate loading screen.
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  // CB, Sept 2026: "if I click on one of the dates and I say clear... it deletes all of them
+  // that I selected" — a single-date removal within a multi-date submission, tracked separately
+  // from cancellingId (which is submission-wide) so just the one date's own button goes busy.
+  // Keyed "submissionId:date" since a submission alone doesn't uniquely identify which of its
+  // dates is being removed.
+  const [removingDateKey, setRemovingDateKey] = useState<string | null>(null);
 
   async function load() {
     setLoadState("loading");
@@ -82,6 +88,21 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
     }
   }
 
+  // Removes just one date from a Pending/Denied submission — the rest of that submission's
+  // dates stay exactly as they were (see removeAvailabilityDate's doc comment).
+  async function handleRemoveDate(submissionId: string, date: string) {
+    const key = `${submissionId}:${date}`;
+    setRemovingDateKey(key);
+    try {
+      const res = await fetch(`/api/availability/${submissionId}/dates/${date}`, { method: "DELETE" });
+      if (!res.ok) return;
+      const updated: AvailabilityDTO = await res.json();
+      setSubmissions((prev) => prev.map((s) => (s.id === submissionId ? updated : s)));
+    } finally {
+      setRemovingDateKey(null);
+    }
+  }
+
   return (
     // md:h-full md:flex md:flex-col md:min-h-0 (CB, Sept 2026, restructuring this page's
     // layout): gives AvailabilityCalendar's own row a real, bounded height to stretch into —
@@ -107,7 +128,17 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
 
       {loadState === "ready" && (
         <AvailabilityCalendar
-          controls={{ employeeId, submissions, onSubmit: handleSubmit, submitting, error, onCancel: handleCancel, cancellingId }}
+          controls={{
+            employeeId,
+            submissions,
+            onSubmit: handleSubmit,
+            submitting,
+            error,
+            onCancel: handleCancel,
+            cancellingId,
+            onRemoveDate: handleRemoveDate,
+            removingDateKey,
+          }}
         />
       )}
     </div>
