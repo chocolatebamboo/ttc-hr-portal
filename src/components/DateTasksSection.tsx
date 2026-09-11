@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { DateTaskDTO } from "@/types";
+import { DownloadIcon } from "@/components/icons";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -27,6 +28,7 @@ export default function DateTasksSection({ className, employeeId }: { className?
   const [tasks, setTasks] = useState<DateTaskDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   async function load() {
     setLoadState("loading");
@@ -57,6 +59,19 @@ export default function DateTasksSection({ className, employeeId }: { className?
     }
   }
 
+  async function handleDownload(taskId: string) {
+    setDownloadingId(taskId);
+    try {
+      const res = await fetch(`/api/date-tasks/${taskId}/download`);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.url) {
+        window.open(data.url, "_blank", "noopener,noreferrer");
+      }
+    } finally {
+      setDownloadingId(null);
+    }
+  }
+
   // Best-effort, optional section — an error here or a genuinely empty list just means nothing
   // to show, not a broken dashboard.
   if (loadState === "error" || (loadState === "ready" && tasks.length === 0)) return null;
@@ -79,6 +94,16 @@ export default function DateTasksSection({ className, employeeId }: { className?
                   {formatTaskDate(t.taskDate)}
                   {t.status === "COMPLETED" ? " · Waiting for confirmation" : ` · From ${t.createdByName}`}
                 </p>
+                {t.hasAttachment && (
+                  <button
+                    onClick={() => handleDownload(t.id)}
+                    disabled={downloadingId === t.id}
+                    className="mt-1 flex items-center gap-1.5 text-xs font-medium text-accent-ink underline"
+                  >
+                    <DownloadIcon className="h-3.5 w-3.5" />
+                    {t.attachmentName ?? "Attachment"}
+                  </button>
+                )}
               </div>
               {t.status === "PENDING" ? (
                 <button
