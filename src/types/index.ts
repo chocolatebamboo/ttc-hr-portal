@@ -266,11 +266,43 @@ export interface TeamNoteDTO {
  */
 export interface TeamNoteTopicCountDTO {
   employeeId: string;
+  // Added for the Messages inbox (src/app/(portal)/messages) — CB, Sept 2026: "an icon on
+  // the home dashboard... a messages portal similar to where we could see all the different
+  // messages for its respective day." Existing chip-badge callers (TeamAvailabilityCards,
+  // TeamPtoCards, AvailabilityCalendar, TimesheetView) already know whose row they're
+  // rendering and simply ignore this field.
+  employeeName: string;
   topicType: TeamNoteTopicType;
   topicId: string;
   topicDate: string | null;
   total: number;
   fromOthers: number;
+}
+
+/**
+ * A task an admin/supervisor pushes for one specific calendar date — CB, Sept 2026: "I like
+ * how we have a texting feature but I feel like we should be also able to push different
+ * tasks within that specific day... on the receiving end, they would see it on their main
+ * dashboard." Two-way, not a plain checklist: PENDING (assigned) → COMPLETED (the employee
+ * marked their part done) → APPROVED (an admin/supervisor confirmed it) — same submit/review
+ * shape availability and PTO already use.
+ */
+export type DateTaskStatus = "PENDING" | "COMPLETED" | "APPROVED";
+
+export interface DateTaskDTO {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  createdById: string;
+  createdByName: string;
+  taskDate: string; // "YYYY-MM-DD"
+  description: string;
+  status: DateTaskStatus;
+  completedAt: string | null; // ISO
+  approvedById: string | null;
+  approvedByName: string | null;
+  approvedAt: string | null; // ISO
+  createdAt: string; // ISO
 }
 
 export type DocumentCategory =
