@@ -87,6 +87,14 @@ model Employee {
 
   deactivatedAt DateTime? // set the instant HR ends access; checked on every request
 
+  // Which Quick Actions tiles this person has chosen to keep on their own dashboard — CB,
+  // round five: "I should be able to customize what quick actions is there... based off of
+  // what's available in the more tab." Stable keys (see src/lib/quick-actions.ts), not
+  // hrefs/labels, so a route rename doesn't silently drop someone's saved picks. Empty means
+  // "never customized" — the dashboard falls back to the plain defaults (defaultQuickActionKeys)
+  // rather than showing nothing.
+  quickActionKeys String[] @default([])
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
