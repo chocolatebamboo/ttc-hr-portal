@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AvailabilityStatusPill from "@/components/AvailabilityStatusPill";
 import JumpToTodayButton from "@/components/JumpToTodayButton";
 import TeamNotesThread from "@/components/TeamNotesThread";
-import { ChatIcon, ChevronDownIcon } from "@/components/icons";
+import { ChatIcon, ChevronDownIcon, TrashIcon } from "@/components/icons";
 import { formatSlotDate, formatTime12h } from "@/lib/availability-format";
 import { todayDateKey } from "@/lib/time";
 import { getMonth, type Month } from "@/lib/month";
@@ -81,6 +81,16 @@ export interface AvailabilityCalendarControls {
   /** Which submission (if any) a clear request is currently in flight for, so its button can
    *  show a busy state without a whole separate loading flag. */
   cancellingId: string | null;
+  /** Removing ONE date out of a multi-date submission, leaving the rest of it untouched — CB,
+   *  Sept 2026: "if I click on one of the dates and I say clear... it deletes all of them that
+   *  I selected. It should only be one at a time." Same Pending/Denied-only eligibility as
+   *  onCancel (see removeAvailabilityDate's doc comment in src/lib/availability.ts);
+   *  onCancel/"Clear this submission" is still there for when clearing the whole batch at once
+   *  really is what's wanted. */
+  onRemoveDate: (submissionId: string, date: string) => void;
+  /** "submissionId:date" of whichever single-date removal is currently in flight, so only that
+   *  one row's own button shows a busy state. */
+  removingDateKey: string | null;
 }
 
 /**
@@ -388,6 +398,8 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
           onResubmit={viewingSubmission ? () => startResubmit(viewingSubmission) : undefined}
           onCancel={viewingSubmission ? () => handleCancel(viewingSubmission.id) : undefined}
           cancelling={!!viewingSubmission && controls.cancellingId === viewingSubmission.id}
+          onRemoveSubmissionDate={viewingSubmission ? (date) => controls.onRemoveDate(viewingSubmission.id, date) : undefined}
+          removingDateKey={controls.removingDateKey}
         />
       )}
     </div>
@@ -516,6 +528,8 @@ function Panel({
   onResubmit,
   onCancel,
   cancelling,
+  onRemoveSubmissionDate,
+  removingDateKey,
 }: {
   viewingSubmission: AvailabilityDTO | undefined;
   employeeId: string;
@@ -524,6 +538,8 @@ function Panel({
   draftDates: string[];
   draft: Record<string, { startTime: string; endTime: string }>;
   onUpdateTime: (dateKey: string, field: "startTime" | "endTime", value: string) => void;
+  /** Drops an undrafted date from the draft form before submit — nothing to do with the
+   *  already-submitted case below. */
   onRemoveDate: (dateKey: string) => void;
   onClearDraft: () => void;
   onSubmit: (note?: string) => void;
@@ -533,6 +549,12 @@ function Panel({
   onResubmit?: () => void;
   onCancel?: () => void;
   cancelling?: boolean;
+  /** Removes ONE date out of an already-submitted, still-Pending/Denied submission via the real
+   *  DELETE route — see AvailabilityCalendarControls.onRemoveDate's doc comment above. Distinct
+   *  name from the draft form's own onRemoveDate (different job entirely) to avoid a collision
+   *  in this one destructure. */
+  onRemoveSubmissionDate?: (date: string) => void;
+  removingDateKey: string | null;
 }) {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -589,6 +611,8 @@ function Panel({
           onResubmit={onResubmit}
           onCancel={onCancel}
           cancelling={cancelling}
+          onRemoveDate={onRemoveSubmissionDate}
+          removingDateKey={removingDateKey}
         />
       ) : (
         <DraftForm
@@ -613,6 +637,8 @@ function SubmissionDetail({
   onResubmit,
   onCancel,
   cancelling,
+  onRemoveDate,
+  removingDateKey,
 }: {
   submission: AvailabilityDTO;
   employeeId: string;
@@ -621,6 +647,12 @@ function SubmissionDetail({
   onResubmit?: () => void;
   onCancel?: () => void;
   cancelling?: boolean;
+  /** CB, Sept 2026: "if I click on one of the dates and I say clear... it deletes all of them
+   *  that I selected. It should only be one at a time" — removes just the one date this row is
+   *  for, via DELETE /api/availability/[id]/dates/[date] (removeAvailabilityDate). "Clear this
+   *  submission" below stays as the deliberate clear-everything-at-once action. */
+  onRemoveDate?: (date: string) => void;
+  removingDateKey: string | null;
 }) {
   const lines = [...submission.slots].sort((a, b) => a.date.localeCompare(b.date));
   const canClear = submission.status === "PENDING" || submission.status === "DENIED";
@@ -647,23 +679,39 @@ function SubmissionDetail({
           {lines.map((s) => {
             const msgCount = messageCounts.get(`${submission.id}:${s.date}`) ?? 0;
             const active = openDate === s.date;
+            const removingThisDate = removingDateKey === `${submission.id}:${s.date}`;
             return (
-              <li key={s.date}>
-                <button
-                  type="button"
-                  onClick={() => setOpenDate(active ? null : s.date)}
-                  className={`w-full flex items-center justify-between gap-2 rounded-lg -mx-2 px-2 py-1.5 text-left transition-colors ${
-                    active ? "bg-white/15" : "hover:bg-white/10"
-                  }`}
+              <li key={s.date} className="-mx-2 px-2 rounded-lg">
+                <div
+                  className={`flex items-center gap-1 rounded-lg transition-colors ${active ? "bg-white/15" : "hover:bg-white/10"}`}
                 >
-                  <span>
-                    {formatSlotDate(s.date)}: {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
-                  </span>
-                  <span className="flex items-center gap-1 shrink-0 text-xs text-white/60">
-                    <ChatIcon className="h-3 w-3" />
-                    {msgCount > 0 ? msgCount : "Message"}
-                  </span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => setOpenDate(active ? null : s.date)}
+                    className="flex-1 min-w-0 flex items-center justify-between gap-2 px-2 py-1.5 text-left"
+                  >
+                    <span>
+                      {formatSlotDate(s.date)}: {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
+                    </span>
+                    <span className="flex items-center gap-1 shrink-0 text-xs text-white/60">
+                      <ChatIcon className="h-3 w-3" />
+                      {msgCount > 0 ? msgCount : "Message"}
+                    </span>
+                  </button>
+                  {/* One date at a time, distinct from "Clear this submission" below (CB, Sept
+                      2026 — see this component's doc comment above). */}
+                  {canClear && onRemoveDate && (
+                    <button
+                      type="button"
+                      onClick={() => onRemoveDate(s.date)}
+                      disabled={removingThisDate}
+                      aria-label={`Remove ${formatSlotDate(s.date)}`}
+                      className="h-7 w-7 mr-1 shrink-0 flex items-center justify-center rounded-full text-white/50 hover:text-white hover:bg-white/10 disabled:opacity-50"
+                    >
+                      <TrashIcon className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
                 {active && (
                   <div className="mt-1.5 mb-2">
                     <TeamNotesThread
@@ -702,8 +750,10 @@ function SubmissionDetail({
       )}
 
       {/* Withdraws a Pending submission, or clears a Denied one out for good instead of
-          resubmitting it — either way the date goes right back to being selectable (see this
-          component's doc comment above). Not offered once Approved. */}
+          resubmitting it — either way the dates go right back to being selectable (see this
+          component's doc comment above). Not offered once Approved. Label spells out "all N
+          dates" when there's more than one, so it reads as the deliberate bulk action it is,
+          distinct from the per-date trash icon above each line. */}
       {canClear && onCancel && (
         <button
           type="button"
@@ -711,7 +761,7 @@ function SubmissionDetail({
           disabled={cancelling}
           className="w-full rounded-2xl bg-white/10 hover:bg-white/20 disabled:opacity-50 py-3 text-sm font-medium"
         >
-          {cancelling ? "Clearing…" : "Clear this submission"}
+          {cancelling ? "Clearing…" : lines.length > 1 ? `Clear all ${lines.length} dates` : "Clear this submission"}
         </button>
       )}
     </div>
