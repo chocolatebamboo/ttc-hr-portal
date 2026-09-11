@@ -67,6 +67,32 @@ export async function uploadTeamNoteFile(file: File, employeeId: string): Promis
 }
 
 /**
+ * Uploads a file attached to a pushed date task (src/lib/date-tasks.ts) and returns the storage
+ * key to save on the DateTask row. Same private "documents" bucket and same reasoning as
+ * uploadTeamNoteFile just above — this isn't part of the formal Documents library either, just
+ * whatever an admin/supervisor attached to one task, under its own "date-tasks/" key prefix so
+ * it never collides with a team-notes upload for the same employee. Callers must already have
+ * confirmed (via assertCanAssignTasks) that the caller may push a task to this employee at all —
+ * this function performs no authorization of its own, same convention as the other uploaders.
+ */
+export async function uploadDateTaskFile(file: File, employeeId: string): Promise<string> {
+  const admin = createSupabaseAdminClient();
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_") || "file";
+  const storageKey = `date-tasks/${employeeId}/${Date.now()}-${safeName}`;
+
+  const bytes = await file.arrayBuffer();
+  const { error } = await admin.storage.from(BUCKET).upload(storageKey, bytes, {
+    contentType: file.type || "application/octet-stream",
+    upsert: false,
+  });
+
+  if (error) {
+    throw new DocumentUploadError(`Couldn't upload the file: ${error.message}`);
+  }
+  return storageKey;
+}
+
+/**
  * Mints a short-lived signed URL for a document's file. Callers MUST resolve the Document
  * row through withRlsContext (src/lib/documents.ts) first and confirm it's visible to the
  * caller — that read is the actual authorization check; this function trusts its input
