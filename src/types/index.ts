@@ -29,6 +29,9 @@ export interface CurrentEmployee {
   departmentId: string | null;
   supervisorId: string | null;
   avatarUrl: string | null;
+  /** Which Quick Actions tiles this person has chosen for their own dashboard — see
+   *  src/lib/quick-actions.ts. Empty means "never customized," not "chose none." */
+  quickActionKeys: string[];
 }
 
 /** One clock-in/clock-out pair. clockOut is null exactly while this is the day's currently
