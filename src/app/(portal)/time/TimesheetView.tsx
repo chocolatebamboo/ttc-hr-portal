@@ -7,6 +7,7 @@ import type { CorrectionValues } from "@/components/TimesheetTable";
 import PtoStatusPill from "@/components/PtoStatusPill";
 import TeamNotesThread from "@/components/TeamNotesThread";
 import SwipeReveal from "@/components/SwipeReveal";
+import MyAvailabilityPreview from "@/components/MyAvailabilityPreview";
 import { ChatIcon, TrashIcon } from "@/components/icons";
 import { PTO_TYPE_LABEL, formatDateRange } from "@/lib/time";
 import type { PtoRequestDTO, PtoType, TeamNoteTopicCountDTO, TimeEntryDTO } from "@/types";
@@ -198,6 +199,14 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
           error: ptoError,
         }}
       />
+
+      {/* CB, Sept 2026: "a preview of the dates and times... selected in the availability" —
+          a plain read-only list of your own Availability submissions, not a second calendar.
+          Sits between the time-tracking calendar above and the time-off list below, since it's
+          neither of those things but belongs on the same "everything about my time" page. */}
+      <div className="mt-8">
+        <MyAvailabilityPreview />
+      </div>
 
       {/* Time Off, folded in here rather than living on its own page — clicking a day above
           covers most requests, but a date outside the month currently showing (or scrolled
