@@ -53,6 +53,27 @@ export async function cancelPtoRequest(actor: CurrentEmployee, requestId: string
   });
 }
 
+/**
+ * Permanently removes one of the signed-in employee's own already-closed-out PTO requests —
+ * CB, round five, circling old "Cancelled" entries on the dashboard's Time off list: "I should
+ * be able to delete certain things." Distinct from cancelPtoRequest just above (which sets a
+ * still-Pending request to Cancelled and keeps the row around) — this is a real delete, and
+ * only once a request is already Cancelled, since that's the one status with nothing left for
+ * anyone — the employee, a supervisor, HR — to still act on or refer back to.
+ */
+export async function deletePtoRequest(actor: CurrentEmployee, requestId: string): Promise<void> {
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const existing = await tx.ptoRequest.findUnique({ where: { id: requestId } });
+    if (!existing || existing.employeeId !== actor.id) {
+      throw new InvalidPtoRequestError("Request not found.");
+    }
+    if (existing.status !== "CANCELLED") {
+      throw new InvalidPtoRequestError('Only a "Cancelled" request can be deleted.');
+    }
+    await tx.ptoRequest.delete({ where: { id: requestId } });
+  });
+}
+
 type Decision = "APPROVED" | "DENIED";
 
 export async function decidePtoRequest(
