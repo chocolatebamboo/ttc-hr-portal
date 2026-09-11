@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DateTaskDTO } from "@/types";
+import { DownloadIcon } from "@/components/icons";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -23,8 +24,11 @@ export default function DateTasksPanel({ employeeId, taskDate }: { employeeId: s
   const [tasks, setTasks] = useState<DateTaskDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [description, setDescription] = useState("");
+  const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function load() {
     setLoadState("loading");
@@ -50,13 +54,15 @@ export default function DateTasksPanel({ employeeId, taskDate }: { employeeId: s
     if (!description.trim()) return;
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/date-tasks/${employeeId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ taskDate, description }),
-      });
+      const form = new FormData();
+      form.set("taskDate", taskDate);
+      form.set("description", description);
+      if (file) form.set("file", file);
+      const res = await fetch(`/api/date-tasks/${employeeId}`, { method: "POST", body: form });
       if (res.ok) {
         setDescription("");
+        setFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = "";
         await load();
       }
     } finally {
@@ -71,6 +77,19 @@ export default function DateTasksPanel({ employeeId, taskDate }: { employeeId: s
       await load();
     } finally {
       setBusyId(null);
+    }
+  }
+
+  async function handleDownload(taskId: string) {
+    setDownloadingId(taskId);
+    try {
+      const res = await fetch(`/api/date-tasks/${taskId}/download`);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.url) {
+        window.open(data.url, "_blank", "noopener,noreferrer");
+      }
+    } finally {
+      setDownloadingId(null);
     }
   }
 
@@ -92,6 +111,16 @@ export default function DateTasksPanel({ employeeId, taskDate }: { employeeId: s
                   {t.status === "COMPLETED" && `Marked done — awaiting your confirmation`}
                   {t.status === "APPROVED" && `Confirmed`}
                 </p>
+                {t.hasAttachment && (
+                  <button
+                    onClick={() => handleDownload(t.id)}
+                    disabled={downloadingId === t.id}
+                    className="mt-1 flex items-center gap-1.5 text-xs font-medium text-accent-ink underline"
+                  >
+                    <DownloadIcon className="h-3.5 w-3.5" />
+                    {t.attachmentName ?? "Attachment"}
+                  </button>
+                )}
               </div>
               {t.status === "COMPLETED" && (
                 <div className="flex items-center gap-2.5 shrink-0 pt-0.5">
@@ -115,20 +144,42 @@ export default function DateTasksPanel({ employeeId, taskDate }: { employeeId: s
           ))}
       </div>
 
-      <form onSubmit={addTask} className="border-t border-border p-3 flex items-center gap-2">
-        <input
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Push a task for this date…"
-          className="flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
-        />
-        <button
-          type="submit"
-          disabled={submitting || !description.trim()}
-          className="btn-primary text-sm px-3.5 py-2 shrink-0 disabled:opacity-60"
-        >
-          {submitting ? "Adding…" : "Add"}
-        </button>
+      <form onSubmit={addTask} className="border-t border-border p-3 space-y-2">
+        <div className="flex items-center gap-2">
+          <input
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Push a task for this date…"
+            className="flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
+          />
+          <button
+            type="submit"
+            disabled={submitting || !description.trim()}
+            className="btn-primary text-sm px-3.5 py-2 shrink-0 disabled:opacity-60"
+          >
+            {submitting ? "Adding…" : "Add"}
+          </button>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            className="flex-1 text-xs text-muted file:mr-2 file:rounded-md file:border-0 file:bg-black/[0.05] file:px-2.5 file:py-1.5 file:text-xs file:font-medium"
+          />
+          {file && (
+            <button
+              type="button"
+              onClick={() => {
+                setFile(null);
+                if (fileInputRef.current) fileInputRef.current.value = "";
+              }}
+              className="text-xs text-muted hover:text-accent-ink shrink-0"
+            >
+              Remove
+            </button>
+          )}
+        </div>
       </form>
     </div>
   );
