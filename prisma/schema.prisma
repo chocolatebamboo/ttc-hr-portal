@@ -410,6 +410,14 @@ model DateTask {
   taskDate    String // "YYYY-MM-DD" — same format TeamNote.topicDate already uses
   description String
 
+  // Same "bare key, not a URL" shape as TeamNote.attachmentKey/attachmentName — CB, Sept 2026:
+  // "I should be able to choose file or add files into that as well," on the task feature
+  // specifically, matching what a message can already carry. Resolved to a short-lived signed
+  // URL server-side (src/lib/date-tasks.ts's getDateTaskAttachmentUrl), never stored or returned
+  // as a public link.
+  attachmentKey  String?
+  attachmentName String?
+
   status DateTaskStatus @default(PENDING)
 
   completedAt DateTime? // set when the employee marks it done
