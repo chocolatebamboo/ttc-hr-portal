@@ -20,6 +20,7 @@ import { CertificationNotFoundError, InvalidCertificationError } from "@/lib/cer
 import { InvalidProfileError } from "@/lib/profile";
 import { InvalidTeamNoteError, TeamNoteNotFoundError } from "@/lib/team-notes";
 import { InvalidDateTaskError, DateTaskNotFoundError } from "@/lib/date-tasks";
+import { InvalidDirectMessageError, DirectMessageNotFoundError } from "@/lib/direct-messages";
 
 /** Maps our typed domain errors to the right HTTP status instead of leaking a 500 + stack. */
 export function toErrorResponse(err: unknown) {
@@ -38,7 +39,8 @@ export function toErrorResponse(err: unknown) {
     err instanceof AnnouncementNotFoundError ||
     err instanceof CertificationNotFoundError ||
     err instanceof TeamNoteNotFoundError ||
-    err instanceof DateTaskNotFoundError
+    err instanceof DateTaskNotFoundError ||
+    err instanceof DirectMessageNotFoundError
   ) {
     return NextResponse.json({ error: err.message }, { status: 404 });
   }
@@ -59,7 +61,8 @@ export function toErrorResponse(err: unknown) {
     err instanceof InvalidCertificationError ||
     err instanceof InvalidProfileError ||
     err instanceof InvalidTeamNoteError ||
-    err instanceof InvalidDateTaskError
+    err instanceof InvalidDateTaskError ||
+    err instanceof InvalidDirectMessageError
   ) {
     return NextResponse.json({ error: err.message }, { status: 400 });
   }
