@@ -14,7 +14,8 @@ import TimeOffSection from "@/components/TimeOffSection";
 import AvailabilityStatusSection from "@/components/AvailabilityStatusSection";
 import DateTasksSection from "@/components/DateTasksSection";
 import QuickActionsCard from "@/components/QuickActionsCard";
-import { MegaphoneIcon, ChartIcon, BellIcon, ChatIcon, type IconProps } from "@/components/icons";
+import DashboardNotifications from "@/components/DashboardNotifications";
+import { MegaphoneIcon, ChartIcon, ChatIcon, type IconProps } from "@/components/icons";
 import { formatHoursCompact } from "@/lib/time";
 import type { AnnouncementDTO, DocumentDTO } from "@/types";
 
@@ -122,25 +123,19 @@ export default async function DashboardPage() {
         </Link>
       </div>
 
-      {/* Admin-only "notification" that a team member is waiting on a decision — same one
-          banner on both mobile and desktop (no md:hidden split like the sections below), right
-          under the header so it's the first thing an admin sees on their home page, per CB's
-          "on the administrator that is approving, that should be a notification... on their
-          home page." */}
-      {isAdmin(employee) && pendingAvailabilityCount > 0 && (
-        <PendingApprovalsBanner className="animate-in animate-in-2 mt-4" count={pendingAvailabilityCount} />
-      )}
-
-      {/* Same "shows while true" shape as the approvals banner above — the admin side links
-          into the card list where every conversation lives; the employee side links into their
-          own Availability summary, which is where both the Availability and Time Off sections
-          (and, from there, the actual per-date/per-request threads) live. */}
-      {messagesFromOthers > 0 && (
-        <MessagesBanner
-          className={`animate-in mt-3 ${isAdmin(employee) ? "animate-in-3" : "animate-in-2"}`}
-          count={messagesFromOthers}
-        />
-      )}
+      {/* Admin-only pending-approvals banner + everyone's messages banner — same one spot on
+          both mobile and desktop (no md:hidden split like the sections below), right under the
+          header so they're the first thing anyone sees on their home page, per CB's "on the
+          administrator that is approving, that should be a notification... on their home page."
+          Swipeable/dismissible (CB, Sept 2026: "the ability to exit... notifications") — see
+          DashboardNotifications' own doc comment for how clearing and recovering works. */}
+      <DashboardNotifications
+        className="animate-in animate-in-2 mt-4"
+        employeeId={employee.id}
+        showApprovals={isAdmin(employee)}
+        pendingApprovalsCount={pendingAvailabilityCount}
+        messagesCount={messagesFromOthers}
+      />
 
       {/* Mobile: bold color-block layout (CB's Sept 2026 aesthetic ask, reference screenshots
           in chat). Desktop keeps the original layout below, completely untouched — this pass
@@ -362,54 +357,5 @@ function AnnouncementsSection({
   );
 }
 
-// CB, Sept 2026: the admin-facing half — "on the administrator that is approving, that should
-// be a notification... on their home page saying that this person wants to have that time
-// approved." Only rendered when there's actually something pending (see the isAdmin +
-// pendingAvailabilityCount > 0 guard in DashboardPage above), so it disappears on its own the
-// moment the queue is empty rather than needing to be dismissed — same "shows while true"
-// shape NeedsAttentionSection already uses for onboarding/document items.
-function PendingApprovalsBanner({ className, count }: { className?: string; count: number }) {
-  return (
-    <Link
-      href="/admin/availability"
-      className={`flex items-center gap-3 rounded-2xl px-4 py-3.5 text-white transition-transform hover:-translate-y-0.5 ${className ?? ""}`}
-      style={{ background: "linear-gradient(135deg, var(--ttc-blue-ink), var(--ttc-blue))" }}
-    >
-      <span className="h-9 w-9 shrink-0 rounded-full bg-white/15 flex items-center justify-center">
-        <BellIcon className="h-4.5 w-4.5" />
-      </span>
-      <p className="text-sm font-medium">
-        {count} availability {count === 1 ? "request" : "requests"} waiting for your review
-      </p>
-      <span className="ml-auto text-xs font-medium whitespace-nowrap shrink-0 opacity-90">Review →</span>
-    </Link>
-  );
-}
-
-// CB, Sept 2026: the other half of the messaging feature — "I send it to Sean, I don't see
-// where Sean could see those messages... it needs to kinda read cleanly," extended this round
-// to "instead of notes, I want it to be messages... have an internal conversation." Links
-// straight into the unified My Messages inbox (not just the availability page) since a waiting
-// message can now be a topic thread OR a real peer-to-peer DM. Deliberately a distinct violet
-// (not blue, which PendingApprovalsBanner already owns, and not pink, which Announcements owns
-// below) so the two home-page banners never read as the same kind of thing at a glance — this
-// one is "someone said something," not "something needs a decision." Shown to admins and
-// employees alike (unlike the approvals banner, which is admin-only) since a message can come
-// from either side.
-function MessagesBanner({ className, count }: { className?: string; count: number }) {
-  return (
-    <Link
-      href="/messages"
-      className={`flex items-center gap-3 rounded-2xl px-4 py-3.5 text-white transition-transform hover:-translate-y-0.5 ${className ?? ""}`}
-      style={{ background: "linear-gradient(135deg, #6d28d9, #8b5cf6)" }}
-    >
-      <span className="h-9 w-9 shrink-0 rounded-full bg-white/15 flex items-center justify-center">
-        <ChatIcon className="h-4.5 w-4.5" />
-      </span>
-      <p className="text-sm font-medium">
-        {count} new {count === 1 ? "message" : "messages"} waiting for you
-      </p>
-      <span className="ml-auto text-xs font-medium whitespace-nowrap shrink-0 opacity-90">View →</span>
-    </Link>
-  );
-}
+// PendingApprovalsBanner and MessagesBanner now live in src/components/DashboardNotifications.tsx
+// (Sept 2026) so they can be wrapped in swipe-to-clear — see that file's own doc comment.
