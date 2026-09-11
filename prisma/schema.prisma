@@ -101,6 +101,9 @@ model Employee {
   availabilityReviewed    AvailabilitySubmission[] @relation("AvailabilityReviewer")
   teamNotesAsSubject      TeamNote[]                @relation("TeamNoteSubject")
   teamNotesWritten        TeamNote[]                @relation("TeamNoteAuthor")
+  dateTasksAsSubject      DateTask[]                @relation("DateTaskSubject")
+  dateTasksCreated        DateTask[]                @relation("DateTaskCreatedBy")
+  dateTasksApproved       DateTask[]                @relation("DateTaskApprovedBy")
   onboardingReadinessItems OnboardingReadinessItem[]
   onboardingCheckpoints    OnboardingCheckpoint[]
   certificationAttempts    CertificationAttempt[]
@@ -377,6 +380,49 @@ model TeamNote {
 
   @@index([employeeId, createdAt])
   @@index([employeeId, topicType, topicId, topicDate, createdAt])
+}
+
+enum DateTaskStatus {
+  PENDING
+  // Employee has marked their part done; not final until an admin/supervisor confirms it —
+  // CB, Sept 2026: "I like how we have a texting feature but I feel like we should be also
+  // able to push different tasks within that specific day," and wanted it to work as a
+  // two-way approval rather than a plain self-reported checklist, same shape as availability
+  // and PTO already use (submit → review → decide).
+  COMPLETED
+  APPROVED
+}
+
+// A task an admin/supervisor pushes to a team member for one specific calendar date — sits
+// alongside TeamNote's per-date conversation (same "Fri, Oct 9" scope, same card) but is a
+// discrete, checkable item rather than free-form chat. Deliberately its own table rather than
+// piggybacking on TeamNote's topic columns: a task has real status/workflow (PENDING →
+// COMPLETED → APPROVED) a message never needs, and mixing the two would make both harder to
+// query and render correctly.
+model DateTask {
+  id         String   @id @default(uuid())
+  employeeId String // whose day this task is on
+  employee   Employee @relation("DateTaskSubject", fields: [employeeId], references: [id])
+
+  createdById String // the admin/supervisor who pushed this task
+  createdBy   Employee @relation("DateTaskCreatedBy", fields: [createdById], references: [id])
+
+  taskDate    String // "YYYY-MM-DD" — same format TeamNote.topicDate already uses
+  description String
+
+  status DateTaskStatus @default(PENDING)
+
+  completedAt DateTime? // set when the employee marks it done
+
+  approvedById String?
+  approvedBy   Employee? @relation("DateTaskApprovedBy", fields: [approvedById], references: [id])
+  approvedAt   DateTime? // set when an admin/supervisor confirms it
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId, taskDate])
+  @@index([employeeId, status])
 }
 
 // ---------------------------------------------------------------------------
