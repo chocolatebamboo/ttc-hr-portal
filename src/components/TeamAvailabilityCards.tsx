@@ -4,7 +4,8 @@ import { useState, useEffect } from "react";
 import AvailabilityStatusPill from "@/components/AvailabilityStatusPill";
 import TeamNotesThread from "@/components/TeamNotesThread";
 import DateTasksPanel from "@/components/DateTasksPanel";
-import { ChatIcon, ChecklistIcon } from "@/components/icons";
+import SwipeReveal from "@/components/SwipeReveal";
+import { ChatIcon, ChecklistIcon, CheckCircleIcon } from "@/components/icons";
 import { slotChips } from "@/lib/availability-format";
 import { toneForStatus, YOU_TONE } from "@/lib/status-tone";
 import type { AdminAvailabilityDTO, TeamNoteTopicCountDTO } from "@/types";
@@ -54,6 +55,13 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
   const [denyComment, setDenyComment] = useState("");
   const [openDate, setOpenDate] = useState<{ submissionId: string; date: string } | null>(null);
   const [messageCounts, setMessageCounts] = useState<Map<string, number>>(new Map());
+  // CB, Sept 2026: "[approve/deny] with no way to close out afterward" — once a card has been
+  // decided, swiping it away clears it from view, same SwipeReveal "Clear" pattern Messages
+  // already uses (actionSide="left", CheckCircleIcon). Client-side only, same as Messages' own
+  // dismiss — reloading (or a fresh decision changing this submission's id) brings it back, it
+  // isn't a persisted "read" flag. Only ever applies to Decided cards: a Pending one still needs
+  // an actual Approve/Deny, not a way to make it disappear unactioned.
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
 
   async function load() {
     setLoadState("loading");
@@ -132,6 +140,8 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
     );
   }
 
+  const visibleDecided = decided.filter((r) => !dismissed.has(r.id));
+
   return (
     <>
       <section className="mb-8">
@@ -170,33 +180,45 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
 
       <section>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted mb-2.5">
-          Decided ({decided.length})
+          Decided ({visibleDecided.length})
         </h2>
         {decided.length === 0 ? (
           <div className="rounded-2xl border border-border bg-surface p-4 text-sm text-muted">
             Nothing decided yet.
           </div>
+        ) : visibleDecided.length === 0 ? (
+          <div className="rounded-2xl border border-border bg-surface p-4 text-sm text-muted">
+            All cleared — nothing left to review here.
+          </div>
         ) : (
           <div className="space-y-3">
-            {decided.map((r) => (
-              <Card
+            {visibleDecided.map((r) => (
+              <SwipeReveal
                 key={r.id}
-                row={r}
-                viewerId={viewerId}
-                busy={busyId === r.id}
-                denying={false}
-                denyComment=""
-                openDate={openDate?.submissionId === r.id ? openDate.date : null}
-                messageCounts={messageCounts}
-                onToggleDate={(date) =>
-                  setOpenDate(openDate?.submissionId === r.id && openDate.date === date ? null : { submissionId: r.id, date })
-                }
-                onDenyToggle={() => {}}
-                onDenyCommentChange={() => {}}
-                onDecide={() => {}}
-                onUndo={undo}
-                onMessagePosted={loadCounts}
-              />
+                actionSide="left"
+                actionLabel="Clear"
+                actionIcon={<CheckCircleIcon className="h-4 w-4" />}
+                actionClassName="bg-black/[0.06] text-accent-ink rounded-3xl"
+                onAction={() => setDismissed((prev) => new Set(prev).add(r.id))}
+              >
+                <Card
+                  row={r}
+                  viewerId={viewerId}
+                  busy={busyId === r.id}
+                  denying={false}
+                  denyComment=""
+                  openDate={openDate?.submissionId === r.id ? openDate.date : null}
+                  messageCounts={messageCounts}
+                  onToggleDate={(date) =>
+                    setOpenDate(openDate?.submissionId === r.id && openDate.date === date ? null : { submissionId: r.id, date })
+                  }
+                  onDenyToggle={() => {}}
+                  onDenyCommentChange={() => {}}
+                  onDecide={() => {}}
+                  onUndo={undo}
+                  onMessagePosted={loadCounts}
+                />
+              </SwipeReveal>
             ))}
           </div>
         )}
