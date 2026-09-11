@@ -93,6 +93,32 @@ export async function uploadDateTaskFile(file: File, employeeId: string): Promis
 }
 
 /**
+ * Uploads a file attached to a direct message (src/lib/direct-messages.ts) and returns the
+ * storage key to save on the DirectMessage row. Same private "documents" bucket, same reasoning
+ * as uploadTeamNoteFile above. Keyed by the conversation's two participants sorted into a fixed
+ * order (not senderId/recipientId as given) so both directions of the same DM land under one
+ * prefix regardless of who's sending — same idea as "derive the conversation, don't store it"
+ * from DirectMessage's own doc comment, just applied to the storage path.
+ */
+export async function uploadDirectMessageFile(file: File, participantA: string, participantB: string): Promise<string> {
+  const admin = createSupabaseAdminClient();
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_") || "file";
+  const pair = [participantA, participantB].sort().join("_");
+  const storageKey = `direct-messages/${pair}/${Date.now()}-${safeName}`;
+
+  const bytes = await file.arrayBuffer();
+  const { error } = await admin.storage.from(BUCKET).upload(storageKey, bytes, {
+    contentType: file.type || "application/octet-stream",
+    upsert: false,
+  });
+
+  if (error) {
+    throw new DocumentUploadError(`Couldn't upload the file: ${error.message}`);
+  }
+  return storageKey;
+}
+
+/**
  * Mints a short-lived signed URL for a document's file. Callers MUST resolve the Document
  * row through withRlsContext (src/lib/documents.ts) first and confirm it's visible to the
  * caller — that read is the actual authorization check; this function trusts its input
