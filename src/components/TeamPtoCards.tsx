@@ -5,7 +5,8 @@ import PtoStatusPill from "@/components/PtoStatusPill";
 import TeamNotesThread from "@/components/TeamNotesThread";
 import { ChatIcon } from "@/components/icons";
 import { PTO_TYPE_LABEL, formatDateRange } from "@/lib/time";
-import type { AdminPtoRequestDTO, AdminPtoSummaryDTO, PtoType, TeamNoteTopicCountDTO } from "@/types";
+import { toneForStatus } from "@/lib/status-tone";
+import type { AdminPtoRequestDTO, AdminPtoSummaryDTO, TeamNoteTopicCountDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -25,19 +26,6 @@ function countsByRequest(counts: TeamNoteTopicCountDTO[]): Map<string, number> {
   }
   return map;
 }
-
-/** Same bold-gradient treatment as TeamAvailabilityCards' CARD_TONES, but keyed by PTO type
- *  rather than by person — CB (Sept 2026, round two): "PTO cards get one tone per leave type
- *  instead of per person, same as today," so "Sick" reads the same shade everywhere on this
- *  page rather than shifting with whichever employee happens to have it, same reasoning the
- *  original per-type chip coloring used. Same hue family as the old TYPE_TONE (blue/rose/
- *  violet/amber), just as a full-card gradient now. */
-const TYPE_TONE: Record<PtoType, { from: string; to: string }> = {
-  VACATION: { from: "var(--ttc-blue)", to: "var(--ttc-blue-ink)" },
-  SICK: { from: "#f43f5e", to: "#be123c" }, // rose-500 → rose-700
-  PERSONAL: { from: "#8b5cf6", to: "#6d28d9" }, // violet-500 → violet-700
-  OTHER_APPROVED_LEAVE: { from: "#f59e0b", to: "#b45309" }, // amber-500 → amber-700
-};
 
 /**
  * The HR-wide PTO dashboard's actual card list — fetch, Approve/Deny/Undo, Pending/Decided
@@ -238,7 +226,9 @@ function Card({
   onUndo: (id: string) => void;
   onMessagePosted: () => void;
 }) {
-  const tone = TYPE_TONE[r.type];
+  // CB, Sept 2026, round three: same status-driven tone as TeamAvailabilityCards now uses —
+  // Approved is pink, Pending is amber/yellow — replacing the old per-leave-type coloring.
+  const tone = toneForStatus(r.status);
   const isPending = r.status === "PENDING";
   const msgCount = messageCounts.get(`${r.employeeId}:${r.id}`) ?? 0;
 
