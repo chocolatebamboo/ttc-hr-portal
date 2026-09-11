@@ -3,35 +3,13 @@
 import { useState, useEffect } from "react";
 import AvailabilityStatusPill from "@/components/AvailabilityStatusPill";
 import TeamNotesThread from "@/components/TeamNotesThread";
-import { ChatIcon } from "@/components/icons";
+import DateTasksPanel from "@/components/DateTasksPanel";
+import { ChatIcon, ChecklistIcon } from "@/components/icons";
 import { slotChips } from "@/lib/availability-format";
+import { toneForStatus } from "@/lib/status-tone";
 import type { AdminAvailabilityDTO, TeamNoteTopicCountDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
-
-/** Five bold card-background gradients, cycled by a hash of the person's name so a given
- *  person's card color is stable across a reload rather than reshuffling. Two of the five are
- *  TTC's own brand colors (pink, blue); the other three are Tailwind's amber/emerald/violet
- *  500→700 pairs, matching the hues already used elsewhere in this app (TeamPtoCards' old
- *  per-type chips, status pills) so nothing here introduces an off-brand color. CB (Sept 2026,
- *  round two of the card redesign), after seeing the first version's small colored chips on a
- *  white card: she wanted the bold, magazine-style color-per-card look of a reference sports
- *  app she shared, "complementary" rather than clashing — a full-card gradient plus
- *  same-hue-family translucent chips reads as one considered color per card instead of five
- *  different hues competing on one screen. */
-const CARD_TONES = [
-  { from: "var(--ttc-pink)", to: "var(--ttc-pink-ink)" },
-  { from: "var(--ttc-blue)", to: "var(--ttc-blue-ink)" },
-  { from: "#f59e0b", to: "#b45309" }, // amber-500 → amber-700
-  { from: "#10b981", to: "#047857" }, // emerald-500 → emerald-700
-  { from: "#8b5cf6", to: "#6d28d9" }, // violet-500 → violet-700
-];
-
-function toneForName(name: string) {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
-  return CARD_TONES[hash % CARD_TONES.length];
-}
 
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -257,7 +235,11 @@ function Card({
   onMessagePosted: () => void;
 }) {
   const chips = slotChips(r.slots);
-  const tone = toneForName(r.employeeName);
+  // CB, Sept 2026, round three: "instead of the yellow background, I want the pink
+  // background" (Approved) / "I think the pending color should be that yellow as well" —
+  // confirmed this replaces the old per-employee tone entirely: color now signals the
+  // decision itself (Pending/Approved/Denied), same everywhere, not who or what it's about.
+  const tone = toneForStatus(r.status);
   const isPending = r.status === "PENDING";
   const openChip = chips.find((c) => c.date === openDate);
 
@@ -377,20 +359,35 @@ function Card({
       )}
 
       {openChip && (
-        <div className="mt-3.5">
-          <p className="text-xs font-semibold text-white/80 mb-1.5 flex items-center gap-1.5">
-            <span className="h-1.5 w-1.5 rounded-full bg-white/80" />
-            {openChip.dateLabel} — conversation
-          </p>
-          <TeamNotesThread
-            employeeId={r.employeeId}
-            viewerId={viewerId}
-            topicType="AVAILABILITY_DATE"
-            topicId={r.id}
-            topicDate={openChip.date}
-            placeholder="Write a message about this date…"
-            onMessagePosted={onMessagePosted}
-          />
+        <div className="mt-3.5 space-y-3.5">
+          {/* CB, Sept 2026: "I like how we have a texting feature but I feel like we should be
+              also able to push different tasks within that specific day" — a discrete,
+              checkable item per date, separate from free-form messages below, with its own
+              two-way approval (DateTasksPanel pushes it, the employee's dashboard marks it
+              done, this panel confirms it). */}
+          <div>
+            <p className="text-xs font-semibold text-white/80 mb-1.5 flex items-center gap-1.5">
+              <ChecklistIcon className="h-3.5 w-3.5 text-white/80" />
+              {openChip.dateLabel} — tasks
+            </p>
+            <DateTasksPanel employeeId={r.employeeId} taskDate={openChip.date} />
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-white/80 mb-1.5 flex items-center gap-1.5">
+              <span className="h-1.5 w-1.5 rounded-full bg-white/80" />
+              {openChip.dateLabel} — conversation
+            </p>
+            <TeamNotesThread
+              employeeId={r.employeeId}
+              viewerId={viewerId}
+              topicType="AVAILABILITY_DATE"
+              topicId={r.id}
+              topicDate={openChip.date}
+              placeholder="Write a message about this date…"
+              onMessagePosted={onMessagePosted}
+            />
+          </div>
         </div>
       )}
     </div>
