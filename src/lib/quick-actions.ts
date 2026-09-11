@@ -37,7 +37,10 @@ export interface QuickActionDef {
 const BASE_ACTIONS: QuickActionDef[] = [
   { key: "documents", label: "View Documents", href: "/documents", icon: FolderIcon, tone: "amber" },
   { key: "onboarding", label: "View Onboarding", href: "/onboarding", icon: ChecklistIcon, tone: "emerald" },
-  { key: "notes", label: "Notes", href: "/notes", icon: ChatIcon, tone: "violet" },
+  // key stays "notes" (not renamed to "messages") so nobody's already-saved quick-action picks
+  // silently drop this tile — see this file's own doc comment on why the key, not the href/
+  // label, is what a saved pick actually points at.
+  { key: "notes", label: "My Messages", href: "/messages", icon: ChatIcon, tone: "violet" },
   { key: "directory", label: "Directory", href: "/directory", icon: UsersIcon, tone: "blue" },
   { key: "announcements", label: "Announcements", href: "/announcements", icon: MegaphoneIcon, tone: "pink" },
   { key: "profile", label: "My Profile", href: "/profile", icon: UserCircleIcon, tone: "blue" },
