@@ -397,6 +397,54 @@ export async function decideOnboardingItem(
   await recomputeOnboardingCompletion(actor, item.onboardingId);
 }
 
+/**
+ * CB, Sept 2026: onboarding steps "shouldn't feel like it's final" — a reviewer (admin, or the
+ * employee's own supervisor, same authority as decideOnboardingItem above) can send a COMPLETED
+ * DOCUMENT/TRAINING/MEETING/CERTIFICATION step back to NOT_STARTED, the same state it started
+ * in, so the employee can go through it again. Only meaningful for a step that's actually
+ * COMPLETED — a TASK never needs this at all (advanceOnboardingItem already lets the employee,
+ * or an admin acting for them, toggle a TASK's own checkbox back off), and a step still sitting
+ * in AWAITING_APPROVAL already has a real undo of its own (Return, via decideOnboardingItem).
+ *
+ * Clears every trace of the approval (completedAt/completedBy/approvedBy/approvedAt), not just
+ * the status, so the step doesn't read as "completed" anywhere once reverted. A CERTIFICATION
+ * step's past attempts are left alone in CertificationAttempt — this only reopens the *step*,
+ * it doesn't erase the test history a reviewer already graded; the employee will need to submit
+ * a fresh attempt to complete it again. withSequencing (see its own doc comment above) then
+ * automatically re-locks whichever later steps this one was gating — nothing else to update.
+ */
+export async function revertOnboardingItem(actor: CurrentEmployee, itemId: string) {
+  const item = await withRlsContext({ employeeId: actor.id, role: actor.role }, (tx) =>
+    tx.onboardingItem.findUnique({ where: { id: itemId }, include: { onboarding: true } })
+  );
+  if (!item) throw new OnboardingNotFoundError("That checklist item doesn't exist.");
+
+  await assertCanReviewOnboarding(actor, item.onboarding.employeeId);
+
+  if (item.itemType === "TASK") {
+    throw new InvalidOnboardingError("A task step is undone with its own checkbox, not this action.");
+  }
+  if (item.status !== "COMPLETED") {
+    throw new InvalidOnboardingError("This step isn't completed yet, so there's nothing to revert.");
+  }
+
+  await withRlsContext({ employeeId: actor.id, role: actor.role }, (tx) =>
+    tx.onboardingItem.update({
+      where: { id: itemId },
+      data: {
+        status: "NOT_STARTED",
+        submittedAt: null,
+        completedAt: null,
+        completedBy: null,
+        approvedBy: null,
+        approvedAt: null,
+        returnReason: null,
+      },
+    })
+  );
+  await recomputeOnboardingCompletion(actor, item.onboardingId);
+}
+
 /** Admin/supervisor roster: every active employee they may manage (everyone for an admin,
  *  direct reports only for a supervisor), whether or not their checklist has been started. */
 export async function listOnboardingForManager(actor: CurrentEmployee): Promise<OnboardingAdminSummaryDTO[]> {
