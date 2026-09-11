@@ -40,6 +40,11 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
   const [ptoLoadState, setPtoLoadState] = useState<LoadState>("loading");
   const [ptoSubmitting, setPtoSubmitting] = useState(false);
   const [ptoCancellingId, setPtoCancellingId] = useState<string | null>(null);
+  // CB, round five, on the dashboard's own Time off list first, now asking for the same thing
+  // here: "I should be able to delete these as well" — a Cancelled request can be removed for
+  // good (see deletePtoRequest's doc comment in src/lib/pto-actions.ts for why only Cancelled
+  // qualifies), same underlying DELETE route TimeOffSection already uses on the dashboard.
+  const [ptoDeletingId, setPtoDeletingId] = useState<string | null>(null);
   const [ptoError, setPtoError] = useState<string | undefined>();
   const [standaloneFormOpen, setStandaloneFormOpen] = useState(false);
   // Set while adjusting a denied request — CB, round four: "if they got denied... we should be
@@ -158,6 +163,16 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
     }
   }
 
+  async function deletePtoRequestRow(requestId: string) {
+    setPtoDeletingId(requestId);
+    try {
+      const res = await fetch(`/api/pto/requests/${requestId}`, { method: "DELETE" });
+      if (res.ok) setPtoRequests((prev) => prev.filter((r) => r.id !== requestId));
+    } finally {
+      setPtoDeletingId(null);
+    }
+  }
+
   return (
     // Wider than a plain reading-width column (CB: the calendar had a huge dead gutter of
     // white space next to it) — the calendar column below is flex-1, so it now actually uses
@@ -268,6 +283,18 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
                           {ptoCancellingId === r.id ? "Cancelling…" : "Cancel"}
                         </button>
                       )}
+                      {/* CB, round five: "I should be able to delete these as well" — same
+                          Cancelled-only rule as the dashboard's TimeOffSection. Text link here
+                          (not just the swipe action below) for anyone on a non-touch device. */}
+                      {r.status === "CANCELLED" && (
+                        <button
+                          onClick={() => deletePtoRequestRow(r.id)}
+                          disabled={ptoDeletingId === r.id}
+                          className="text-xs text-muted hover:text-accent underline disabled:opacity-50"
+                        >
+                          {ptoDeletingId === r.id ? "Deleting…" : "Delete"}
+                        </button>
+                      )}
                     </div>
                   </div>
                   {r.status === "DENIED" && r.reviewComment && (
@@ -316,25 +343,44 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
                 </div>
               );
 
-              // CB, round four: "I should be able to slide to the left... and delete it" — only
-              // a PENDING request can actually be cancelled (cancelPtoRequest itself enforces
-              // this), so only PENDING rows get the swipe action; the inline "Cancel" text link
-              // above stays too, for anyone on a non-touch device.
-              return r.status === "PENDING" ? (
-                <SwipeReveal
-                  key={r.id}
-                  actionSide="right"
-                  actionLabel="Delete"
-                  actionIcon={<TrashIcon className="h-4 w-4" />}
-                  actionClassName="bg-rose-600 text-white"
-                  busy={ptoCancellingId === r.id}
-                  onAction={() => cancelPtoRequest(r.id)}
-                >
-                  {rowContent}
-                </SwipeReveal>
-              ) : (
-                <div key={r.id}>{rowContent}</div>
-              );
+              // CB, round four: "I should be able to slide to the left... and delete it" — a
+              // PENDING request swipes to Cancel (cancelPtoRequest itself enforces that only
+              // PENDING can be cancelled). CB, round five, the same swipe now also covers
+              // Cancelled rows — "I should be able to delete these as well" — swiping there
+              // calls the real DELETE (deletePtoRequestRow) instead, since a Cancelled request
+              // has nothing left to "cancel" into. The inline text link above (Cancel/Delete)
+              // stays either way, for anyone on a non-touch device.
+              if (r.status === "PENDING") {
+                return (
+                  <SwipeReveal
+                    key={r.id}
+                    actionSide="right"
+                    actionLabel="Cancel"
+                    actionIcon={<TrashIcon className="h-4 w-4" />}
+                    actionClassName="bg-rose-600 text-white"
+                    busy={ptoCancellingId === r.id}
+                    onAction={() => cancelPtoRequest(r.id)}
+                  >
+                    {rowContent}
+                  </SwipeReveal>
+                );
+              }
+              if (r.status === "CANCELLED") {
+                return (
+                  <SwipeReveal
+                    key={r.id}
+                    actionSide="right"
+                    actionLabel="Delete"
+                    actionIcon={<TrashIcon className="h-4 w-4" />}
+                    actionClassName="bg-rose-600 text-white"
+                    busy={ptoDeletingId === r.id}
+                    onAction={() => deletePtoRequestRow(r.id)}
+                  >
+                    {rowContent}
+                  </SwipeReveal>
+                );
+              }
+              return <div key={r.id}>{rowContent}</div>;
             })}
           </div>
         )}
