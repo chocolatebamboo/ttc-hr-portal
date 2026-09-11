@@ -1,3 +1,10 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import {
+  CheckCircleIcon,
+  ChecklistIcon,
+  ...
 // ---------------------------------------------------------------------------
 // Admin: certification answer-key editor. Only the KEY fields are editable here — question
 // wording, order, and points are code-seeded (see CertificationQuestion's doc comment in
