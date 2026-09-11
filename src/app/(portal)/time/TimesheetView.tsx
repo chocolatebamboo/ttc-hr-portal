@@ -7,7 +7,6 @@ import type { CorrectionValues } from "@/components/TimesheetTable";
 import PtoStatusPill from "@/components/PtoStatusPill";
 import TeamNotesThread from "@/components/TeamNotesThread";
 import SwipeReveal from "@/components/SwipeReveal";
-import MyAvailabilityPreview from "@/components/MyAvailabilityPreview";
 import { ChatIcon, TrashIcon } from "@/components/icons";
 import { PTO_TYPE_LABEL, formatDateRange } from "@/lib/time";
 import type { PtoRequestDTO, PtoType, TeamNoteTopicCountDTO, TimeEntryDTO } from "@/types";
@@ -183,33 +182,26 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
         <h1 className="page-title text-2xl">My Time</h1>
       </div>
 
-      {/* CB, Sept 2026: "a preview of the dates and times... selected in the availability," not
-          a second calendar — and CB again, round two of this same request: this summary leads
-          the page now, with the logged-hours calendar below it rather than above. Editing still
-          only happens on the Availability page itself (linked from here) — this is a preview. */}
-      <MyAvailabilityPreview />
-
-      {/* Logged hours, corrections, and day-click PTO requests — kept on this page (CB: "keep
-          the calendar functions on My Time"), just demoted below the summary above instead of
-          being the first thing on the page. Month navigation is scroll, not click — see
-          TimesheetCalendar's own doc comment. Loading/error states are per-month now (each month
-          section shows its own), so there's no page-level loading/error block here anymore. */}
-      <div className="mt-8">
-        <h2 className="text-sm font-medium text-muted mb-2">Logged hours</h2>
-        <TimesheetCalendar
-          loadEntries={loadEntriesForMonth}
-          refreshKey={refreshKey}
-          correction={{ onSubmit: submitCorrection, busyEntryId, error: correctionError }}
-          ptoRequests={ptoRequests}
-          pto={{
-            onSubmit: submitPtoRequest,
-            onCancel: cancelPtoRequest,
-            submitting: ptoSubmitting,
-            cancellingId: ptoCancellingId,
-            error: ptoError,
-          }}
-        />
-      </div>
+      {/* Month navigation is scroll, not click — see TimesheetCalendar's own doc comment.
+          Loading/error states are per-month now (each month section shows its own), so there's
+          no page-level loading/error block here anymore.
+          CB, Sept 2026: My Time is strictly about hours actually worked, corrections, and
+          time-off — a preview of Availability submissions briefly lived on this page too, but
+          CB's follow-up moved it onto the Availability page instead (next to the calendar you
+          actually submit from), so each page stays about one thing. */}
+      <TimesheetCalendar
+        loadEntries={loadEntriesForMonth}
+        refreshKey={refreshKey}
+        correction={{ onSubmit: submitCorrection, busyEntryId, error: correctionError }}
+        ptoRequests={ptoRequests}
+        pto={{
+          onSubmit: submitPtoRequest,
+          onCancel: cancelPtoRequest,
+          submitting: ptoSubmitting,
+          cancellingId: ptoCancellingId,
+          error: ptoError,
+        }}
+      />
 
       {/* Time Off, folded in here rather than living on its own page — clicking a day above
           covers most requests, but a date outside the month currently showing (or scrolled
