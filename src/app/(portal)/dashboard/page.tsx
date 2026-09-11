@@ -11,6 +11,7 @@ import { listTeamNoteTopicCounts, listAllTeamNoteTopicCounts } from "@/lib/team-
 import TimeClockCard from "@/components/TimeClockCard";
 import TimeOffSection from "@/components/TimeOffSection";
 import AvailabilityStatusSection from "@/components/AvailabilityStatusSection";
+import DateTasksSection from "@/components/DateTasksSection";
 import { FolderIcon, ChecklistIcon, MegaphoneIcon, ChartIcon, BellIcon, ChatIcon, type IconProps } from "@/components/icons";
 import { formatHoursCompact } from "@/lib/time";
 import type { AnnouncementDTO, DocumentDTO } from "@/types";
@@ -110,11 +111,33 @@ export default async function DashboardPage() {
 
   return (
     <div className="max-w-5xl">
-      <div className="animate-in">
-        <h1 className="page-title text-2xl md:text-3xl">
-          Welcome, {employee.preferredName || employee.firstName}
-        </h1>
-        <p className="text-sm text-muted mt-0.5">{employee.jobTitle}</p>
+      <div className="animate-in flex items-start justify-between gap-3">
+        <div>
+          <h1 className="page-title text-2xl md:text-3xl">
+            Welcome, {employee.preferredName || employee.firstName}
+          </h1>
+          <p className="text-sm text-muted mt-0.5">{employee.jobTitle}</p>
+        </div>
+        {/* CB, Sept 2026: "an icon on the home dashboard to kinda signify that we got a
+            message... similar to where we could see all the different messages for its
+            respective day" — a quick-glance shortcut into the new /messages inbox, kept
+            alongside (not instead of) MessagesBanner below per her own confirmation both should
+            stay. */}
+        <Link
+          href="/messages"
+          className="relative shrink-0 h-10 w-10 rounded-full bg-surface border border-border flex items-center justify-center hover:bg-black/[0.03] transition-colors"
+          title="Messages"
+        >
+          <ChatIcon className="h-5 w-5 text-muted" />
+          {messagesFromOthers > 0 && (
+            <span
+              className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-white text-[10px] font-bold flex items-center justify-center"
+              style={{ background: "#8b5cf6" }}
+            >
+              {messagesFromOthers > 9 ? "9+" : messagesFromOthers}
+            </span>
+          )}
+        </Link>
       </div>
 
       {/* Admin-only "notification" that a team member is waiting on a decision — same one
@@ -191,6 +214,7 @@ export default async function DashboardPage() {
           onboardingAttention={onboardingAttention}
           pendingAcknowledgments={pendingAcknowledgments}
         />
+        <DateTasksSection className="animate-in animate-in-4" employeeId={employee.id} />
         <AnnouncementsSection
           className="animate-in animate-in-5"
           featuredAnnouncement={featuredAnnouncement}
@@ -235,6 +259,7 @@ export default async function DashboardPage() {
             onboardingAttention={onboardingAttention}
             pendingAcknowledgments={pendingAcknowledgments}
           />
+          <DateTasksSection className="animate-in animate-in-2" employeeId={employee.id} />
           <AnnouncementsSection
             className="animate-in animate-in-3"
             featuredAnnouncement={featuredAnnouncement}
