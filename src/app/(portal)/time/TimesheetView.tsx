@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Month } from "@/lib/month";
-import TimesheetCalendar, { type PtoQuickRequestValues } from "@/components/TimesheetCalendar";
-import type { CorrectionValues } from "@/components/TimesheetTable";
+import { getWeek, formatWeekRange } from "@/lib/week";
+import TimesheetTable, { type CorrectionValues } from "@/components/TimesheetTable";
 import PtoStatusPill from "@/components/PtoStatusPill";
 import TeamNotesThread from "@/components/TeamNotesThread";
 import SwipeReveal from "@/components/SwipeReveal";
@@ -15,27 +14,49 @@ type LoadState = "loading" | "ready" | "error" | "empty";
 
 const PTO_TYPE_OPTIONS: PtoType[] = ["VACATION", "SICK", "PERSONAL", "OTHER_APPROVED_LEAVE"];
 
+/** Values a PTO request is submitted with (type/hours/optional reason) — the date range comes
+ *  separately from wherever the request originated. Previously re-exported from
+ *  TimesheetCalendar; defined here now that this page no longer renders that component. */
+export type PtoQuickRequestValues = { type: PtoType; hours: number; reason?: string };
+
 export default function TimesheetView({ employeeId }: { employeeId: string }) {
+  // CB, Sept 2026: "I don't want to have, like, a calendar there" — My Time is now a plain
+  // week-at-a-time table, the same shape as the supervisor's own review view
+  // (ReviewTimesheetView, src/app/(portal)/team/[employeeId]/ReviewTimesheetView.tsx) just
+  // with `correction` controls in place of `review` ones, rather than the scrolling calendar
+  // grid (TimesheetCalendar) it used to be. offset 0 = this week, -1 = last week, etc — no
+  // future weeks, same cap ReviewTimesheetView already applies.
+  const [offset, setOffset] = useState(0);
+  const [entries, setEntries] = useState<TimeEntryDTO[]>([]);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
   const [busyEntryId, setBusyEntryId] = useState<string | null>(null);
   const [correctionError, setCorrectionError] = useState<string | undefined>();
-  // Bumped after a correction is resubmitted so TimesheetCalendar (which now owns which months'
-  // entries are loaded) re-fetches everything it already has in memory — see its own comment.
-  const [refreshKey, setRefreshKey] = useState(0);
 
-  // TimesheetCalendar decides which months to ask for (it owns the infinite-scroll list); this
-  // page only knows how to fetch one, since it's the one that knows the API route.
-  async function loadEntriesForMonth(month: Month): Promise<TimeEntryDTO[]> {
-    const res = await fetch(`/api/time/timesheet?start=${month.start}&end=${month.end}`);
-    if (!res.ok) throw new Error("Failed to load timesheet");
-    const data = await res.json();
-    return data.entries as TimeEntryDTO[];
+  const week = getWeek(offset);
+
+  async function load() {
+    setLoadState("loading");
+    try {
+      const res = await fetch(`/api/time/timesheet?start=${week.start}&end=${week.end}`);
+      if (!res.ok) throw new Error("Failed to load timesheet");
+      const data = await res.json();
+      setEntries(data.entries);
+      setLoadState(data.entries.length === 0 ? "empty" : "ready");
+    } catch {
+      setLoadState("error");
+    }
   }
 
-  // PTO requests aren't month-scoped on the server (GET /api/pto/requests returns the whole
-  // history, same as the old separate Time Off page did) — loaded once on mount and refreshed
-  // after any request/cancel, independent of which month the calendar is currently showing.
-  // This same state backs both the calendar's day panel AND the "Your requests" list below it,
-  // so the two stay in sync without a second fetch.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offset]);
+
+  // PTO requests aren't week-scoped on the server (GET /api/pto/requests returns the whole
+  // history) — loaded once on mount and refreshed after any request/cancel/delete, independent
+  // of which week the table above is currently showing. Submitting one now only happens through
+  // the "Request for another date" form below, since there's no calendar day to click anymore.
   const [ptoRequests, setPtoRequests] = useState<PtoRequestDTO[]>([]);
   const [ptoLoadState, setPtoLoadState] = useState<LoadState>("loading");
   const [ptoSubmitting, setPtoSubmitting] = useState(false);
@@ -112,7 +133,7 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
         setCorrectionError(data.error ?? "Unable to submit your correction. Please try again.");
         return;
       }
-      setRefreshKey((k) => k + 1);
+      await load();
     } catch {
       setCorrectionError("Unable to reach the server. Check your connection and try again.");
     } finally {
@@ -120,9 +141,7 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
     }
   }
 
-  // Shared by both PTO entry points: the calendar's day panel (a range formed by clicking) and
-  // the standalone form below the list (any typed start/end, for a date the calendar isn't
-  // currently showing).
+  // Used only by the standalone "Request for another date" form now — see its own comment.
   async function submitPtoRequest(range: { startDate: string; endDate: string }, values: PtoQuickRequestValues) {
     setPtoSubmitting(true);
     setPtoError(undefined);
@@ -175,37 +194,68 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
 
   return (
     // Wider than a plain reading-width column (CB: the calendar had a huge dead gutter of
-    // white space next to it) — the calendar column below is flex-1, so it now actually uses
-    // this width instead of sitting in a fixed-width card floating in the middle of the page.
+    // white space next to it) — the table below fills this width naturally with its own
+    // columns, so the page keeps using it rather than sitting in a fixed-width card floating
+    // in the middle of the page.
     <div className="max-w-6xl">
       <div className="flex items-center justify-between mb-4">
         <h1 className="page-title text-2xl">My Time</h1>
       </div>
 
-      {/* Month navigation is scroll, not click — see TimesheetCalendar's own doc comment.
-          Loading/error states are per-month now (each month section shows its own), so there's
-          no page-level loading/error block here anymore.
-          CB, Sept 2026: My Time is strictly about hours actually worked, corrections, and
-          time-off — a preview of Availability submissions briefly lived on this page too, but
-          CB's follow-up moved it onto the Availability page instead (next to the calendar you
-          actually submit from), so each page stays about one thing. */}
-      <TimesheetCalendar
-        loadEntries={loadEntriesForMonth}
-        refreshKey={refreshKey}
-        correction={{ onSubmit: submitCorrection, busyEntryId, error: correctionError }}
-        ptoRequests={ptoRequests}
-        pto={{
-          onSubmit: submitPtoRequest,
-          onCancel: cancelPtoRequest,
-          submitting: ptoSubmitting,
-          cancellingId: ptoCancellingId,
-          error: ptoError,
-        }}
-      />
+      {/* CB, Sept 2026: My Time is strictly about hours actually worked, corrections, and
+          time-off — no availability info here (that lives on the Availability page), and as of
+          this round, no calendar grid either. Week navigation instead of the old scroll/month
+          list. */}
+      <div className="flex items-center gap-2 mb-3">
+        <button
+          onClick={() => setOffset((o) => o - 1)}
+          className="btn-neutral h-8 w-8 text-sm"
+          aria-label="Previous week"
+        >
+          ←
+        </button>
+        <span className="text-sm text-muted min-w-[150px] text-center tabular-nums">
+          {formatWeekRange(week.start, week.end)}
+        </span>
+        <button
+          onClick={() => setOffset((o) => Math.min(0, o + 1))}
+          disabled={offset === 0}
+          className="btn-neutral h-8 w-8 text-sm"
+          aria-label="Next week"
+        >
+          →
+        </button>
+        {offset !== 0 && (
+          <button
+            onClick={() => setOffset(0)}
+            className="text-xs text-accent-ink font-medium hover:underline ml-1"
+          >
+            This week
+          </button>
+        )}
+      </div>
 
-      {/* Time Off, folded in here rather than living on its own page — clicking a day above
-          covers most requests, but a date outside the month currently showing (or scrolled
-          past) is faster to type than to scroll back to reach. */}
+      {loadState === "loading" && (
+        <div className="rounded-xl border border-border bg-surface p-6 animate-pulse h-64" />
+      )}
+
+      {loadState === "error" && (
+        <div className="rounded-xl border border-border bg-surface p-6 text-sm text-accent">
+          Unable to load your timesheet. Please try again or contact HR.
+        </div>
+      )}
+
+      {(loadState === "ready" || loadState === "empty") && (
+        <TimesheetTable
+          days={week.days}
+          entries={entries}
+          correction={{ onSubmit: submitCorrection, busyEntryId, error: correctionError }}
+        />
+      )}
+
+      {/* Time Off, folded in here rather than living on its own page. PTO is now requested only
+          through the form below (no calendar day to click), so it's the one way in, not a
+          fallback for dates the calendar wasn't currently showing. */}
       <div className="mt-8">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-sm font-medium text-muted">Your time-off requests</h2>
@@ -216,7 +266,7 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
             }}
             className={standaloneFormOpen ? "btn-neutral text-xs px-3 py-1.5" : "text-xs text-accent-ink font-medium hover:underline"}
           >
-            {standaloneFormOpen ? "Cancel" : "Request for another date"}
+            {standaloneFormOpen ? "Cancel" : "Request time off"}
           </button>
         </div>
 
@@ -347,13 +397,6 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
                 </div>
               );
 
-              // CB, round four: "I should be able to slide to the left... and delete it" — a
-              // PENDING request swipes to Cancel (cancelPtoRequest itself enforces that only
-              // PENDING can be cancelled). CB, round five, the same swipe now also covers
-              // Cancelled rows — "I should be able to delete these as well" — swiping there
-              // calls the real DELETE (deletePtoRequestRow) instead, since a Cancelled request
-              // has nothing left to "cancel" into. The inline text link above (Cancel/Delete)
-              // stays either way, for anyone on a non-touch device.
               if (r.status === "PENDING") {
                 return (
                   <SwipeReveal
@@ -403,7 +446,7 @@ function StandalonePtoForm({
   submitting: boolean;
   error?: string;
   /** Pre-fills the form from a denied request being adjusted & resubmitted — omitted for a
-   *  plain "Request for another date." */
+   *  plain "Request time off." */
   initial?: { type: PtoType; startDate: string; endDate: string; hours: string; reason: string };
 }) {
   const [type, setType] = useState<PtoType>(initial?.type ?? "VACATION");
