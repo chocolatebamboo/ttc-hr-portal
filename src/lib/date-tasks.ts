@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { withRlsContext } from "@/lib/db";
 import { assertCanAccessEmployeeRecords, assertCanAssignTasks, assertIsAdmin } from "@/lib/authorization";
+import { getSignedDownloadUrl } from "@/lib/storage";
 import type { CurrentEmployee, DateTaskDTO } from "@/types";
 
 export class InvalidDateTaskError extends Error {
@@ -23,6 +24,8 @@ type TaskRow = {
   createdById: string;
   taskDate: string;
   description: string;
+  attachmentKey: string | null;
+  attachmentName: string | null;
   status: string;
   completedAt: Date | null;
   approvedById: string | null;
@@ -46,6 +49,8 @@ function toDTO(row: TaskRow): DateTaskDTO {
     createdByName: nameOf(row.createdBy),
     taskDate: row.taskDate,
     description: row.description,
+    hasAttachment: row.attachmentKey !== null,
+    attachmentName: row.attachmentName,
     status: row.status as DateTaskDTO["status"],
     completedAt: row.completedAt?.toISOString() ?? null,
     approvedById: row.approvedById,
@@ -103,12 +108,15 @@ export async function listAllPendingReviewDateTasks(actor: CurrentEmployee): Pro
 }
 
 /** Push a task onto one employee's specific date — admin or that employee's own supervisor
- *  only (assertCanAssignTasks), never the employee themselves. */
+ *  only (assertCanAssignTasks), never the employee themselves. `attachment` is optional — CB,
+ *  Sept 2026: "I should be able to choose file or add files into that as well," same one-file-
+ *  per-post shape TeamNote messages already use. */
 export async function createDateTask(
   actor: CurrentEmployee,
   employeeId: string,
   taskDate: string,
-  description: string
+  description: string,
+  attachment?: { key: string; name: string }
 ): Promise<DateTaskDTO> {
   await assertCanAssignTasks(actor, employeeId);
 
@@ -120,11 +128,40 @@ export async function createDateTask(
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const row = await tx.dateTask.create({
-      data: { employeeId, createdById: actor.id, taskDate, description: trimmed },
+      data: {
+        employeeId,
+        createdById: actor.id,
+        taskDate,
+        description: trimmed,
+        attachmentKey: attachment?.key ?? null,
+        attachmentName: attachment?.name ?? null,
+      },
       include: TASK_INCLUDE,
     });
     return toDTO(row);
   });
+}
+
+/**
+ * A short-lived signed URL for one task's attachment — same "resolve under the caller's own
+ * identity first, then sign" shape as getTeamNoteAttachmentUrl. Anyone who may already see this
+ * task (self, its employee's supervisor, or an admin) may download its attachment; access isn't
+ * narrowed to just the admin/supervisor who originally pushed it.
+ */
+export async function getDateTaskAttachmentUrl(actor: CurrentEmployee, taskId: string): Promise<string> {
+  const row: { employeeId: string; attachmentKey: string | null } | null = await withRlsContext(
+    { employeeId: actor.id, role: actor.role },
+    async (tx) => {
+      return tx.dateTask.findUnique({ where: { id: taskId }, select: { employeeId: true, attachmentKey: true } });
+    }
+  );
+
+  if (!row || !row.attachmentKey) {
+    throw new DateTaskNotFoundError();
+  }
+  await assertCanAccessEmployeeRecords(actor, row.employeeId);
+
+  return getSignedDownloadUrl(row.attachmentKey);
 }
 
 async function loadOwnTaskRow(tx: PrismaClient, taskId: string) {
