@@ -19,10 +19,38 @@ function formatAnnouncementDate(iso: string): string {
  *  everyone and an admin-only "Manage" tab for composing/removing posts. */
 export default function AnnouncementsView({ canManage }: { canManage: boolean }) {
   const [tab, setTab] = useState<"feed" | "manage">("feed");
+  // CB, Sept 2026: "creating an announcement currently requires going through Manage first" —
+  // she wants that extra step gone and the create action itself more visible. This opens the
+  // same ComposeAnnouncementForm the Manage tab already uses, right here on the main page, so
+  // posting one is a single click from wherever an admin already is — Manage still exists
+  // underneath for editing the list/deleting, this is just a faster front door to the same form.
+  const [composeOpen, setComposeOpen] = useState(false);
+  // Bumped after a successful post so the feed below (which owns its own fetch-on-mount state)
+  // re-fetches by remounting, rather than this view reaching into AnnouncementFeed's internals.
+  const [feedKey, setFeedKey] = useState(0);
 
   return (
     <div className="max-w-3xl">
-      <h1 className="page-title text-2xl mb-4">Announcements</h1>
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <h1 className="page-title text-2xl">Announcements</h1>
+        {canManage && (
+          <button
+            onClick={() => setComposeOpen((o) => !o)}
+            className={composeOpen ? "btn-neutral text-sm px-3.5 py-2 shrink-0" : "btn-primary text-sm px-3.5 py-2 shrink-0"}
+          >
+            {composeOpen ? "Cancel" : "New Announcement"}
+          </button>
+        )}
+      </div>
+
+      {composeOpen && (
+        <ComposeAnnouncementForm
+          onCreated={() => {
+            setComposeOpen(false);
+            setFeedKey((k) => k + 1);
+          }}
+        />
+      )}
 
       {canManage && (
         <div className="flex gap-1.5 mb-5 border-b border-border">
@@ -35,7 +63,7 @@ export default function AnnouncementsView({ canManage }: { canManage: boolean })
         </div>
       )}
 
-      {tab === "feed" ? <AnnouncementFeed /> : <AdminAnnouncementsPanel />}
+      {tab === "feed" ? <AnnouncementFeed key={feedKey} /> : <AdminAnnouncementsPanel />}
     </div>
   );
 }
