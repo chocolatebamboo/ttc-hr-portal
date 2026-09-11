@@ -29,7 +29,15 @@ export default function AvailabilityStatusSection({
 }) {
   return (
     <div className={className}>
-      <h2 className="text-sm font-medium text-muted mb-2">Availability</h2>
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-sm font-medium text-muted">Availability</h2>
+        {/* CB, round four: "if they click availability... toward the bottom on the home
+            page... it should go to that page of the availability that's on the pink" — same
+            /dashboard/availability destination as the pink StatCard above. */}
+        <Link href="/dashboard/availability" className="text-xs font-medium text-accent-ink hover:underline">
+          See all →
+        </Link>
+      </div>
       {recentAvailability.length === 0 ? (
         <div className="rounded-xl border border-border bg-surface px-4 py-4 text-sm text-muted">
           No availability submitted yet.
