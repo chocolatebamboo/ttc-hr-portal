@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { GearIcon } from "@/components/icons";
-import { availableQuickActions, resolveQuickActions, type QuickActionTone } from "@/lib/quick-actions";
+import { SlidersIcon, GripIcon } from "@/components/icons";
+import { DragReorderList } from "@/components/DragReorderList";
+import { availableQuickActions, resolveQuickActions, type QuickActionDef, type QuickActionTone } from "@/lib/quick-actions";
 import type { Role } from "@/types";
 
 const CHIP_TONE: Record<QuickActionTone, string> = {
@@ -15,15 +16,25 @@ const CHIP_TONE: Record<QuickActionTone, string> = {
 };
 
 /**
- * The dashboard's "Quick actions" card, plus the gear-icon picker that customizes it — CB,
- * round five: "I should be able to customize what quick actions is there... based off of
- * what's available in the more tab," confirmed as a gear icon opening a checklist, saved per
- * person. `variant` swaps between the two visual treatments this card already had (a 4-across
- * colored-circle grid on mobile, a plain icon-over-label grid on desktop) without duplicating
- * the picker itself — two instances of this component sit side by side in the dashboard page
- * (one per breakpoint, toggled by Tailwind's responsive `hidden` classes exactly as the old
- * static markup was), so only the one actually on screen is ever interacted with even though
- * both are mounted.
+ * The dashboard's "Quick actions" card, plus the picker that customizes it — CB, round five:
+ * "I should be able to customize what quick actions is there... based off of what's available
+ * in the more tab," confirmed as an icon opening a checklist, saved per person. `variant` swaps
+ * between the two visual treatments this card already had (a 4-across colored-circle grid on
+ * mobile, a plain icon-over-label grid on desktop) without duplicating the picker itself — two
+ * instances of this component sit side by side in the dashboard page (one per breakpoint,
+ * toggled by Tailwind's responsive `hidden` classes exactly as the old static markup was), so
+ * only the one actually on screen is ever interacted with even though both are mounted.
+ *
+ * CB, Sept 2026, two follow-ups on this same picker: (1) the gear icon "is too similar to one
+ * of the icons for another platform" — swapped for SlidersIcon, a customize/adjust glyph rather
+ * than a generic settings gear (see icons.tsx). (2) "I should be able to click and hold to
+ * reorganize the different actions" — the picker is now two sections instead of one flat
+ * checklist: "Your quick actions" is the current selection, in the order it actually renders on
+ * the dashboard, each row press-and-hold draggable via DragReorderList; "Add more" is everything
+ * else still available to add. Splitting them (rather than one list of checkboxes) is what makes
+ * "the order of what's checked" a distinct, draggable thing instead of tangled up with "which
+ * ones are checked" — you can't meaningfully drag-reorder a flat list where most rows are
+ * unchecked filler between the ones that matter.
  */
 export default function QuickActionsCard({
   role,
@@ -41,14 +52,29 @@ export default function QuickActionsCard({
 
   const available = availableQuickActions(role);
   const actions = resolveQuickActions(role, keys);
+  const byKey = new Map(available.map((a) => [a.key, a]));
 
   function openPicker() {
     setDraftKeys(keys.length > 0 ? keys : actions.map((a) => a.key));
     setPickerOpen(true);
   }
 
-  function toggleDraft(key: string) {
-    setDraftKeys((d) => (d.includes(key) ? d.filter((k) => k !== key) : [...d, key]));
+  // The two lists below are just draftKeys' order re-derived, never the other way around — so
+  // there's exactly one source of truth for "which ones, in what order" and no risk of the
+  // selected list and the checked state drifting out of sync.
+  const draftActions = draftKeys.map((k) => byKey.get(k)).filter((a): a is QuickActionDef => !!a);
+  const addableActions = available.filter((a) => !draftKeys.includes(a.key));
+
+  function addAction(key: string) {
+    setDraftKeys((d) => [...d, key]);
+  }
+
+  function removeAction(key: string) {
+    setDraftKeys((d) => d.filter((k) => k !== key));
+  }
+
+  function reorderDraft(nextOrder: QuickActionDef[]) {
+    setDraftKeys(nextOrder.map((a) => a.key));
   }
 
   async function save() {
@@ -79,7 +105,7 @@ export default function QuickActionsCard({
           aria-label="Customize quick actions"
           className="h-7 w-7 rounded-full flex items-center justify-center text-muted hover:text-accent-ink hover:bg-black/[0.04] transition-colors"
         >
-          <GearIcon className="h-4 w-4" />
+          <SlidersIcon className="h-4 w-4" />
         </button>
       </div>
 
@@ -123,29 +149,70 @@ export default function QuickActionsCard({
             onClick={(e) => e.stopPropagation()}
           >
             <p className="text-sm font-semibold mb-1">Customize quick actions</p>
-            <p className="text-xs text-muted mb-3">Choose what shows here — anything in More is fair game.</p>
-            <div className="space-y-1">
-              {available.map((action) => {
-                const checked = draftKeys.includes(action.key);
-                return (
-                  <label
-                    key={action.key}
-                    className="flex items-center gap-3 rounded-xl px-2.5 py-2 hover:bg-black/[0.03] cursor-pointer"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleDraft(action.key)}
-                      className="h-4 w-4 rounded border-border accent-accent"
-                    />
-                    <span className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${CHIP_TONE[action.tone]}`}>
-                      <action.icon className="h-4 w-4" />
-                    </span>
-                    <span className="text-sm">{action.label}</span>
-                  </label>
-                );
-              })}
-            </div>
+            <p className="text-xs text-muted mb-3">Choose what shows here, and drag to reorder — anything in More is fair game.</p>
+
+            {draftActions.length > 0 && (
+              <div className="mb-4">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted/70 mb-1.5 px-0.5">
+                  Your quick actions
+                </p>
+                <DragReorderList
+                  items={draftActions}
+                  keyFn={(a) => a.key}
+                  onReorder={reorderDraft}
+                  className="space-y-1"
+                  renderItem={(action, { dragging, dragHandleProps }) => (
+                    <div
+                      className={`flex items-center gap-2 rounded-xl px-2 py-2 bg-surface ${dragging ? "shadow-lg" : ""}`}
+                    >
+                      <button
+                        type="button"
+                        {...dragHandleProps}
+                        aria-label={`Drag to reorder ${action.label}`}
+                        className="h-7 w-7 shrink-0 flex items-center justify-center text-muted/50"
+                      >
+                        <GripIcon className="h-4 w-4" />
+                      </button>
+                      <span className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${CHIP_TONE[action.tone]}`}>
+                        <action.icon className="h-4 w-4" />
+                      </span>
+                      <span className="text-sm flex-1 min-w-0 truncate">{action.label}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeAction(action.key)}
+                        aria-label={`Remove ${action.label}`}
+                        className="h-7 w-7 shrink-0 rounded-full flex items-center justify-center text-muted/60 hover:text-accent hover:bg-black/[0.04] text-sm leading-none"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  )}
+                />
+              </div>
+            )}
+
+            {addableActions.length > 0 && (
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted/70 mb-1.5 px-0.5">Add more</p>
+                <div className="space-y-1">
+                  {addableActions.map((action) => (
+                    <button
+                      type="button"
+                      key={action.key}
+                      onClick={() => addAction(action.key)}
+                      className="w-full flex items-center gap-3 rounded-xl px-2.5 py-2 hover:bg-black/[0.03] text-left"
+                    >
+                      <span className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${CHIP_TONE[action.tone]}`}>
+                        <action.icon className="h-4 w-4" />
+                      </span>
+                      <span className="text-sm flex-1">{action.label}</span>
+                      <span className="text-lg leading-none text-muted/50">+</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center gap-2 mt-4">
               <button type="button" onClick={save} disabled={saving} className="btn-primary text-sm px-4 py-2 flex-1 disabled:opacity-60">
                 {saving ? "Saving…" : "Save"}
