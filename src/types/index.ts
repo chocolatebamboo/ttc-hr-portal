@@ -282,6 +282,50 @@ export interface TeamNoteTopicCountDTO {
   fromOthers: number;
 }
 
+/** What a DM references, once one is attached — see DirectMessage's doc comment in
+ *  prisma/schema.prisma. `label` is resolved server-side (src/lib/direct-messages.ts) so the
+ *  UI never has to re-fetch the referenced record just to render the card. */
+export type DirectMessageRefType = "AVAILABILITY_DATE" | "PTO_REQUEST" | "DATE_TASK";
+
+export interface DirectMessageRefDTO {
+  type: DirectMessageRefType;
+  id: string;
+  date: string | null;
+  label: string;
+}
+
+/**
+ * One message in a peer-to-peer conversation — CB, Sept 2026: "instead of notes, I want it to
+ * be messages... I should be able to look up members and send them individual messages." Unlike
+ * TeamNoteDTO (always about one employee's own HR-facing thread), a DirectMessage is between
+ * any two people; `senderId`/`recipientId` are just who sent it, not whose "thread" it is.
+ */
+export interface DirectMessageDTO {
+  id: string;
+  senderId: string;
+  senderName: string;
+  recipientId: string;
+  body: string;
+  hasAttachment: boolean;
+  attachmentName: string | null;
+  createdAt: string; // ISO
+  ref: DirectMessageRefDTO | null;
+}
+
+/** One row per DM conversation, most-recent-activity-first — same total/fromOthers shape as
+ *  TeamNoteTopicCountDTO above, folded down from the message rows the same way
+ *  aggregateTopicCounts does, so the unified My Messages inbox can sort/badge every kind of
+ *  conversation identically. `employeeId`/`employeeName` here is always the OTHER person, never
+ *  the viewer. */
+export interface DirectConversationSummaryDTO {
+  employeeId: string;
+  employeeName: string;
+  lastMessage: string;
+  lastMessageAt: string; // ISO
+  total: number;
+  fromOthers: number;
+}
+
 /**
  * A task an admin/supervisor pushes for one specific calendar date — CB, Sept 2026: "I like
  * how we have a texting feature but I feel like we should be also able to push different
