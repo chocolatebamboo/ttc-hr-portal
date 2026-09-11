@@ -155,6 +155,48 @@ export async function cancelAvailabilitySubmission(actor: CurrentEmployee, submi
   });
 }
 
+/**
+ * Employee removes ONE date out of one of their own multi-date submissions — CB, Sept 2026:
+ * "if you select multiple days and we have different times... if I click on one of the dates
+ * and I say clear... it deletes all of them that I selected. It should only be one at a time."
+ * "Clear this submission" (cancelAvailabilitySubmission) stays for when she genuinely wants to
+ * drop the whole batch at once; this is the one-date-at-a-time counterpart. Same eligibility as
+ * cancelAvailabilitySubmission — a Pending or Denied submission only, never Approved. Removing
+ * the LAST remaining date is just cancelAvailabilitySubmission by another name: same CANCELLED
+ * outcome, so the date goes right back to being selectable either way rather than leaving a
+ * submission with an empty slots array sitting around.
+ */
+export async function removeAvailabilityDate(
+  actor: CurrentEmployee,
+  submissionId: string,
+  date: string
+): Promise<AvailabilityDTO> {
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const existing = await tx.availabilitySubmission.findUnique({ where: { id: submissionId } });
+    if (!existing || existing.employeeId !== actor.id) {
+      throw new InvalidAvailabilityError("Submission not found.");
+    }
+    if (existing.status !== "PENDING" && existing.status !== "DENIED") {
+      throw new InvalidAvailabilityError('Only a "Pending" or "Denied" submission can be cleared.');
+    }
+
+    const slots = existing.slots as unknown as AvailabilitySlot[];
+    const remaining = slots.filter((s) => s.date !== date);
+    if (remaining.length === slots.length) {
+      throw new InvalidAvailabilityError("That date isn't part of this submission.");
+    }
+
+    const row =
+      remaining.length === 0
+        ? await tx.availabilitySubmission.update({ where: { id: submissionId }, data: { status: "CANCELLED" } })
+        : await tx.availabilitySubmission.update({
+            where: { id: submissionId },
+            data: { slots: remaining as unknown as Prisma.InputJsonValue },
+          });
+    return toDTO(row);
+  });
+}
+
 type Decision = "APPROVED" | "DENIED";
 
 /** Supervisor/HR decides on one submission. Authorization (is the reviewer actually this
