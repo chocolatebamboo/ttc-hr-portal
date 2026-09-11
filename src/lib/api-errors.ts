@@ -19,6 +19,7 @@ import { InvalidPayrollRangeError } from "@/lib/payroll";
 import { CertificationNotFoundError, InvalidCertificationError } from "@/lib/certification";
 import { InvalidProfileError } from "@/lib/profile";
 import { InvalidTeamNoteError, TeamNoteNotFoundError } from "@/lib/team-notes";
+import { InvalidDateTaskError, DateTaskNotFoundError } from "@/lib/date-tasks";
 
 /** Maps our typed domain errors to the right HTTP status instead of leaking a 500 + stack. */
 export function toErrorResponse(err: unknown) {
@@ -36,7 +37,8 @@ export function toErrorResponse(err: unknown) {
     err instanceof OnboardingNotFoundError ||
     err instanceof AnnouncementNotFoundError ||
     err instanceof CertificationNotFoundError ||
-    err instanceof TeamNoteNotFoundError
+    err instanceof TeamNoteNotFoundError ||
+    err instanceof DateTaskNotFoundError
   ) {
     return NextResponse.json({ error: err.message }, { status: 404 });
   }
@@ -56,7 +58,8 @@ export function toErrorResponse(err: unknown) {
     err instanceof InvalidPayrollRangeError ||
     err instanceof InvalidCertificationError ||
     err instanceof InvalidProfileError ||
-    err instanceof InvalidTeamNoteError
+    err instanceof InvalidTeamNoteError ||
+    err instanceof InvalidDateTaskError
   ) {
     return NextResponse.json({ error: err.message }, { status: 400 });
   }
