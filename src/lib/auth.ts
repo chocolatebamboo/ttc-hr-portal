@@ -50,6 +50,7 @@ export async function getCurrentEmployee(): Promise<CurrentEmployee | null> {
     departmentId: employee.departmentId,
     supervisorId: employee.supervisorId,
     avatarUrl: employee.avatarStorageKey ? getAvatarPublicUrl(employee.avatarStorageKey) : null,
+    quickActionKeys: employee.quickActionKeys,
   };
 }
 
