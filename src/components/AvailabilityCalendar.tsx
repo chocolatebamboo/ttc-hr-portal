@@ -4,7 +4,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AvailabilityStatusPill from "@/components/AvailabilityStatusPill";
 import JumpToTodayButton from "@/components/JumpToTodayButton";
 import TeamNotesThread from "@/components/TeamNotesThread";
-import { ChatIcon, ChevronDownIcon, TrashIcon } from "@/components/icons";
+import MyDateTasksPanel from "@/components/MyDateTasksPanel";
+import SwipeReveal from "@/components/SwipeReveal";
+import { ChatIcon, ChecklistIcon, ChevronDownIcon, TrashIcon } from "@/components/icons";
 import { formatSlotDate, formatTime12h } from "@/lib/availability-format";
 import { todayDateKey, PTO_TYPE_LABEL } from "@/lib/time";
 import { getMonth, type Month } from "@/lib/month";
@@ -96,6 +98,15 @@ export interface AvailabilityCalendarControls {
   /** "submissionId:date" of whichever single-date removal is currently in flight, so only that
    *  one row's own button shows a busy state. */
   removingDateKey: string | null;
+  /** CB, Sept 2026: "we should be able to remove the whole thing entirely if we wanted to" —
+   *  confirmed scope: still cancel first (keeps the record of what was offered and withdrawn,
+   *  same reasoning cancelAvailabilitySubmission's doc comment already gives), but a genuinely
+   *  permanent delete is now reachable right here once it's Cancelled, instead of only from the
+   *  separate Your Submissions list. See deleteAvailabilitySubmission's doc comment in
+   *  src/lib/availability.ts for why this stays Cancelled-only. */
+  onDeleteSubmission: (submissionId: string) => void;
+  /** Which submission (if any) a permanent delete is currently in flight for. */
+  deletingSubmissionId: string | null;
   /** CB, Sept 2026, after the first version just handed the tapped dates off to a separate
    *  section below the calendar: "it needs to live within that pop up" — submits a time-off
    *  request without ever leaving the date-tap popup. Same underlying POST /api/pto/requests
@@ -311,10 +322,22 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
     );
   }
 
-  // Clearing closes the panel too — once Cancelled, submissionsByDate no longer resolves this
-  // date to this submission (see its doc comment above), so there's nothing left here to view.
+  // CB, Sept 2026: wanted a permanent delete reachable right after clearing, not a separate trip
+  // to Your Submissions — so clearing no longer closes the panel. `submissions` still updates in
+  // place (AvailabilityView's own handleCancel), so `viewingSubmission` below re-resolves to the
+  // same id with its new Cancelled status, and SubmissionDetail swaps its "Clear" button for a
+  // "Delete permanently" one. Tapping a calendar cell for this date now starts a fresh draft
+  // instead (submissionsByDate skips Cancelled ones) — but the panel that's already open for it
+  // stays open on its own until closed or actually deleted, by design.
   function handleCancel(submissionId: string) {
     controls.onCancel(submissionId);
+  }
+
+  // The real, permanent delete — only ever reachable once a submission is already Cancelled
+  // (see AvailabilityCalendarControls.onDeleteSubmission's doc comment above). This DOES close
+  // the panel: unlike cancelling, there's nothing left to keep showing once the row is gone.
+  function handleDeleteSubmission(submissionId: string) {
+    controls.onDeleteSubmission(submissionId);
     setViewingId(null);
   }
 
@@ -432,6 +455,8 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
           cancelling={!!viewingSubmission && controls.cancellingId === viewingSubmission.id}
           onRemoveSubmissionDate={viewingSubmission ? (date) => controls.onRemoveDate(viewingSubmission.id, date) : undefined}
           removingDateKey={controls.removingDateKey}
+          onDeleteSubmission={viewingSubmission ? () => handleDeleteSubmission(viewingSubmission.id) : undefined}
+          deleting={!!viewingSubmission && controls.deletingSubmissionId === viewingSubmission.id}
         />
       )}
     </div>
@@ -565,6 +590,8 @@ function Panel({
   cancelling,
   onRemoveSubmissionDate,
   removingDateKey,
+  onDeleteSubmission,
+  deleting,
 }: {
   viewingSubmission: AvailabilityDTO | undefined;
   employeeId: string;
@@ -595,6 +622,10 @@ function Panel({
    *  in this one destructure. */
   onRemoveSubmissionDate?: (date: string) => void;
   removingDateKey: string | null;
+  /** The real, permanent delete — only ever passed for a submission that's already Cancelled;
+   *  see AvailabilityCalendarControls.onDeleteSubmission's doc comment above. */
+  onDeleteSubmission?: () => void;
+  deleting?: boolean;
 }) {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -653,6 +684,8 @@ function Panel({
           cancelling={cancelling}
           onRemoveDate={onRemoveSubmissionDate}
           removingDateKey={removingDateKey}
+          onDelete={onDeleteSubmission}
+          deleting={deleting}
         />
       ) : (
         <DraftForm
@@ -682,6 +715,8 @@ function SubmissionDetail({
   cancelling,
   onRemoveDate,
   removingDateKey,
+  onDelete,
+  deleting,
 }: {
   submission: AvailabilityDTO;
   employeeId: string;
@@ -696,9 +731,15 @@ function SubmissionDetail({
    *  submission" below stays as the deliberate clear-everything-at-once action. */
   onRemoveDate?: (date: string) => void;
   removingDateKey: string | null;
+  /** The real, permanent delete — only ever passed (and only ever rendered, see canDelete
+   *  below) once this submission is already Cancelled. See
+   *  AvailabilityCalendarControls.onDeleteSubmission's doc comment above. */
+  onDelete?: () => void;
+  deleting?: boolean;
 }) {
   const lines = [...submission.slots].sort((a, b) => a.date.localeCompare(b.date));
   const canClear = submission.status === "PENDING" || submission.status === "DENIED";
+  const canDelete = submission.status === "CANCELLED";
   // Which date's conversation is open — local to this one submission's panel rather than lifted
   // up, since Panel remounts this component fresh (key={viewingSubmission?.id ?? "draft"})
   // every time a different submission is opened, so there's never a stale open date to carry
@@ -723,40 +764,75 @@ function SubmissionDetail({
             const msgCount = messageCounts.get(`${submission.id}:${s.date}`) ?? 0;
             const active = openDate === s.date;
             const removingThisDate = removingDateKey === `${submission.id}:${s.date}`;
-            return (
-              <li key={s.date} className="-mx-2 px-2 rounded-lg">
-                <div
-                  className={`flex items-center gap-1 rounded-lg transition-colors ${active ? "bg-white/15" : "hover:bg-white/10"}`}
+            const row = (
+              <div
+                className={`flex items-center gap-1 rounded-lg transition-colors ${active ? "bg-white/15" : "hover:bg-white/10"}`}
+              >
+                <button
+                  type="button"
+                  onClick={() => setOpenDate(active ? null : s.date)}
+                  className="flex-1 min-w-0 flex items-center justify-between gap-2 px-2 py-1.5 text-left"
                 >
+                  <span>
+                    {formatSlotDate(s.date)}: {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
+                  </span>
+                  <span className="flex items-center gap-1 shrink-0 text-xs text-white/60">
+                    <ChatIcon className="h-3 w-3" />
+                    {msgCount > 0 ? msgCount : "Message"}
+                  </span>
+                </button>
+                {/* One date at a time, distinct from "Clear this submission" below (CB, Sept
+                    2026 — see this component's doc comment above). */}
+                {canClear && onRemoveDate && (
                   <button
                     type="button"
-                    onClick={() => setOpenDate(active ? null : s.date)}
-                    className="flex-1 min-w-0 flex items-center justify-between gap-2 px-2 py-1.5 text-left"
+                    onClick={() => onRemoveDate(s.date)}
+                    disabled={removingThisDate}
+                    aria-label={`Remove ${formatSlotDate(s.date)}`}
+                    className="h-7 w-7 mr-1 shrink-0 flex items-center justify-center rounded-full text-white/50 hover:text-white hover:bg-white/10 disabled:opacity-50"
                   >
-                    <span>
-                      {formatSlotDate(s.date)}: {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
-                    </span>
-                    <span className="flex items-center gap-1 shrink-0 text-xs text-white/60">
-                      <ChatIcon className="h-3 w-3" />
-                      {msgCount > 0 ? msgCount : "Message"}
-                    </span>
+                    <TrashIcon className="h-3.5 w-3.5" />
                   </button>
-                  {/* One date at a time, distinct from "Clear this submission" below (CB, Sept
-                      2026 — see this component's doc comment above). */}
-                  {canClear && onRemoveDate && (
-                    <button
-                      type="button"
-                      onClick={() => onRemoveDate(s.date)}
-                      disabled={removingThisDate}
-                      aria-label={`Remove ${formatSlotDate(s.date)}`}
-                      className="h-7 w-7 mr-1 shrink-0 flex items-center justify-center rounded-full text-white/50 hover:text-white hover:bg-white/10 disabled:opacity-50"
-                    >
-                      <TrashIcon className="h-3.5 w-3.5" />
-                    </button>
-                  )}
-                </div>
+                )}
+              </div>
+            );
+            return (
+              <li key={s.date} className="-mx-2 px-2 rounded-lg">
+                {/* CB, Sept 2026: "we should be able to delete it by... sliding to the left" —
+                    same swipe-to-delete gesture as every other list in this app (TimeOffRequests,
+                    MyAvailabilityPreview, My Time), now here too, alongside the trash-icon button
+                    the row already had for anyone on a non-touch device. Only wrapped when this
+                    date is actually removable — same canClear/onRemoveDate gate as the button. */}
+                {canClear && onRemoveDate ? (
+                  <SwipeReveal
+                    actionSide="right"
+                    actionLabel="Delete"
+                    actionIcon={<TrashIcon className="h-4 w-4" />}
+                    actionClassName="bg-rose-600 text-white rounded-lg"
+                    busy={removingThisDate}
+                    onAction={() => onRemoveDate(s.date)}
+                  >
+                    {row}
+                  </SwipeReveal>
+                ) : (
+                  row
+                )}
                 {active && (
-                  <div className="mt-1.5 mb-2">
+                  <div className="mt-1.5 mb-2 space-y-2">
+                    {/* CB, Sept 2026: "I probably want some of the features of what was
+                        approved or what was selected to reflect on the availability page" and
+                        "once we create the task... they'll be able to... click a check mark" —
+                        the same per-date task list a supervisor/admin already sees and pushes to
+                        from their own card (TeamAvailabilityCards' DateTasksPanel), now visible
+                        and markable-done from the employee's own side too, right where they're
+                        already looking at this date. */}
+                    <div>
+                      <p className="text-xs font-semibold text-white/60 mb-1 flex items-center gap-1.5">
+                        <ChecklistIcon className="h-3.5 w-3.5 text-white/60" />
+                        Tasks for this date
+                      </p>
+                      <MyDateTasksPanel employeeId={employeeId} taskDate={s.date} />
+                    </div>
                     <TeamNotesThread
                       employeeId={employeeId}
                       viewerId={employeeId}
@@ -806,6 +882,26 @@ function SubmissionDetail({
         >
           {cancelling ? "Clearing…" : lines.length > 1 ? `Clear all ${lines.length} dates` : "Clear this submission"}
         </button>
+      )}
+
+      {/* CB, Sept 2026: "we should be able to remove the whole thing entirely if we wanted to.
+          But that's only if... it's not fully approved" — confirmed this stays a second step
+          after Clear rather than an immediate delete (same reasoning cancelAvailabilitySubmission
+          already gives for keeping a Cancelled record), but now reachable right here the moment
+          it's Cancelled instead of only from the separate Your Submissions list. Same
+          Cancelled-only rule MyAvailabilityPreview's own delete button already enforces. */}
+      {canDelete && onDelete && (
+        <div className="rounded-2xl bg-rose-500/10 border border-rose-500/20 p-3.5 space-y-2">
+          <p className="text-sm text-white/70">Cancelled. You can remove it for good, or just leave it here.</p>
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={deleting}
+            className="w-full rounded-2xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 py-3 text-sm font-medium text-white"
+          >
+            {deleting ? "Deleting…" : "Delete permanently"}
+          </button>
+        </div>
       )}
     </div>
   );
