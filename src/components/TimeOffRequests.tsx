@@ -32,6 +32,7 @@ export type PtoQuickRequestValues = { type: PtoType; hours: number; reason?: str
 export default function TimeOffRequests({
   employeeId,
   refreshSignal,
+  showHeading = true,
 }: {
   employeeId: string;
   /** CB, Sept 2026: on the Availability page, a time-off request can now be made directly from
@@ -41,6 +42,13 @@ export default function TimeOffRequests({
    *  (e.g. Date.now(), same "nonce" idea as before) triggers a refetch; left undefined/null,
    *  nothing changes, which is what My Time's own use of this component relies on. */
   refreshSignal?: number | null;
+  /** CB, Sept 2026 — wanting this section collapsed behind its own toggle on Availability so
+   *  the calendar gets more room by default: AvailabilityView's own disclosure button already
+   *  shows "Time off" before this is ever expanded, so the "Your time-off requests" text here
+   *  would just repeat it. The "Request time off" button stays either way (that's a real
+   *  control, not a label) — only the heading text hides. Defaults to true so My Time's own use
+   *  of this component (its own page, no outer toggle) is unaffected. */
+  showHeading?: boolean;
 }) {
   const [ptoRequests, setPtoRequests] = useState<PtoRequestDTO[]>([]);
   const [ptoLoadState, setPtoLoadState] = useState<LoadState>("loading");
@@ -161,7 +169,7 @@ export default function TimeOffRequests({
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <h2 className="text-sm font-medium text-muted">Your time-off requests</h2>
+        {showHeading ? <h2 className="text-sm font-medium text-muted">Your time-off requests</h2> : <span />}
         <button
           onClick={() => {
             setResubmitFrom(null);
