@@ -2,13 +2,14 @@
 
 import { useState, useEffect } from "react";
 import AvailabilityStatusPill from "@/components/AvailabilityStatusPill";
+import ShiftStatusPill from "@/components/ShiftStatusPill";
 import TeamNotesThread from "@/components/TeamNotesThread";
 import DateTasksPanel from "@/components/DateTasksPanel";
 import SwipeReveal from "@/components/SwipeReveal";
-import { ChatIcon, ChecklistIcon, CheckCircleIcon } from "@/components/icons";
+import { ChatIcon, ChecklistIcon, CheckCircleIcon, CalendarIcon } from "@/components/icons";
 import { slotChips } from "@/lib/availability-format";
 import { toneForStatus, YOU_TONE } from "@/lib/status-tone";
-import type { AdminAvailabilityDTO, TeamNoteTopicCountDTO } from "@/types";
+import type { AdminAvailabilityDTO, AdminShiftDTO, TeamNoteTopicCountDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -55,6 +56,13 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
   const [denyComment, setDenyComment] = useState("");
   const [openDate, setOpenDate] = useState<{ submissionId: string; date: string } | null>(null);
   const [messageCounts, setMessageCounts] = useState<Map<string, number>>(new Map());
+  // Phase 1 of the scheduling workflow rebuild (client spec, Sept 2026): whether a given
+  // date-chip on an APPROVED card has already been converted into a real confirmed Shift —
+  // "Scheduling" is a deliberate second step after "Approve," not something Approve does by
+  // itself (see Shift's own doc comment in prisma/schema.prisma). Keyed "submissionId:date",
+  // same convention messageCounts already uses just above.
+  const [shiftsByDate, setShiftsByDate] = useState<Map<string, AdminShiftDTO>>(new Map());
+  const [convertingDate, setConvertingDate] = useState<string | null>(null);
   // CB, Sept 2026: "[approve/deny] with no way to close out afterward" — once a card has been
   // decided, swiping it away clears it from view, same SwipeReveal "Clear" pattern Messages
   // already uses (actionSide="left", CheckCircleIcon). Client-side only, same as Messages' own
@@ -90,11 +98,45 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
     }
   }
 
+  // Best-effort, same reasoning as loadCounts above — a chip missing its "already scheduled"
+  // badge isn't worth failing the card list over.
+  async function loadShifts() {
+    try {
+      const res = await fetch("/api/admin/shifts");
+      if (!res.ok) return;
+      const data: { shifts: AdminShiftDTO[] } = await res.json();
+      const map = new Map<string, AdminShiftDTO>();
+      for (const s of data.shifts) {
+        if (s.sourceAvailabilitySubmissionId && s.status !== "CANCELLED") {
+          map.set(`${s.sourceAvailabilitySubmissionId}:${s.date}`, s);
+        }
+      }
+      setShiftsByDate(map);
+    } catch {
+      // ignored — see comment above
+    }
+  }
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
     loadCounts();
+    loadShifts();
   }, []);
+
+  async function convertToShift(submissionId: string, date: string) {
+    setConvertingDate(`${submissionId}:${date}`);
+    try {
+      await fetch(`/api/admin/availability/${submissionId}/convert-to-shift`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date }),
+      });
+    } finally {
+      setConvertingDate(null);
+      loadShifts();
+    }
+  }
 
   async function decide(submissionId: string, decision: "APPROVED" | "DENIED", comment?: string) {
     setBusyId(submissionId);
@@ -164,6 +206,8 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                 denyComment={denyComment}
                 openDate={openDate?.submissionId === r.id ? openDate.date : null}
                 messageCounts={messageCounts}
+                shiftsByDate={shiftsByDate}
+                convertingDate={convertingDate}
                 onToggleDate={(date) =>
                   setOpenDate(openDate?.submissionId === r.id && openDate.date === date ? null : { submissionId: r.id, date })
                 }
@@ -172,6 +216,7 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                 onDecide={decide}
                 onUndo={undo}
                 onMessagePosted={loadCounts}
+                onConvertToShift={convertToShift}
               />
             ))}
           </div>
@@ -209,6 +254,8 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                   denyComment=""
                   openDate={openDate?.submissionId === r.id ? openDate.date : null}
                   messageCounts={messageCounts}
+                  shiftsByDate={shiftsByDate}
+                  convertingDate={convertingDate}
                   onToggleDate={(date) =>
                     setOpenDate(openDate?.submissionId === r.id && openDate.date === date ? null : { submissionId: r.id, date })
                   }
@@ -217,6 +264,7 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                   onDecide={() => {}}
                   onUndo={undo}
                   onMessagePosted={loadCounts}
+                  onConvertToShift={convertToShift}
                 />
               </SwipeReveal>
             ))}
@@ -235,12 +283,15 @@ function Card({
   denyComment,
   openDate,
   messageCounts,
+  shiftsByDate,
+  convertingDate,
   onToggleDate,
   onDenyToggle,
   onDenyCommentChange,
   onDecide,
   onUndo,
   onMessagePosted,
+  onConvertToShift,
 }: {
   row: AdminAvailabilityDTO;
   viewerId: string;
@@ -249,12 +300,15 @@ function Card({
   denyComment: string;
   openDate: string | null;
   messageCounts: Map<string, number>;
+  shiftsByDate: Map<string, AdminShiftDTO>;
+  convertingDate: string | null;
   onToggleDate: (date: string) => void;
   onDenyToggle: () => void;
   onDenyCommentChange: (v: string) => void;
   onDecide: (submissionId: string, decision: "APPROVED" | "DENIED", comment?: string) => void;
   onUndo: (submissionId: string) => void;
   onMessagePosted: () => void;
+  onConvertToShift: (submissionId: string, date: string) => void;
 }) {
   const chips = slotChips(r.slots);
   // CB, Sept 2026, round three: "instead of the yellow background, I want the pink
@@ -392,6 +446,37 @@ function Card({
 
       {openChip && (
         <div className="mt-3.5 space-y-3.5">
+          {/* Phase 1 of the scheduling workflow rebuild (client spec, Sept 2026): Approving
+              availability is not the same as scheduling a shift — "Availability must not
+              automatically become a confirmed shift." Only an APPROVED date ever gets this
+              row; it either shows the confirmed Shift's own status (already converted) or a
+              "Confirm as Shift" button that creates one via convert-to-shift. */}
+          {r.status === "APPROVED" && (() => {
+            const existingShift = shiftsByDate.get(`${r.id}:${openChip.date}`);
+            const isConverting = convertingDate === `${r.id}:${openChip.date}`;
+            return (
+              <div className="flex items-center gap-2 bg-white/15 rounded-xl px-3 py-2">
+                <CalendarIcon className="h-3.5 w-3.5 text-white/80 shrink-0" />
+                {existingShift ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-white/85">Scheduled as a shift</span>
+                    <ShiftStatusPill status={existingShift.displayStatus} />
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onConvertToShift(r.id, openChip.date)}
+                    disabled={isConverting}
+                    className="rounded-full bg-white px-3 py-1.5 text-xs font-semibold shadow-sm hover:brightness-95 disabled:opacity-60"
+                    style={{ color: tone.to }}
+                  >
+                    {isConverting ? "Scheduling…" : "Confirm as Shift"}
+                  </button>
+                )}
+              </div>
+            );
+          })()}
+
           {/* CB, Sept 2026: "I like how we have a texting feature but I feel like we should be
               also able to push different tasks within that specific day" — a discrete,
               checkable item per date, separate from free-form messages below, with its own
