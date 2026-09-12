@@ -228,4 +228,19 @@ body {
   .btn-neutral:disabled {
     opacity: 0.5;
   }
+
+  /* CB, Sept 2026, after the Availability calendar's own scroll region started actually
+     scrolling on its own (previously the whole page did, since fixed — see src/app/layout.tsx):
+     "I don't want that... where the scroll bar is" — pointing at the native scrollbar track
+     Chrome/Windows draws down that column's right edge. The region still scrolls exactly the
+     same (this only hides the visual track/thumb, not the scroll behavior itself, and standard
+     trackpad/touch/keyboard scrolling are unaffected), it just doesn't draw a persistent bar
+     over content the way a desktop browser otherwise would. */
+  .scrollbar-hide {
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* older Edge/IE */
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Chromium Edge */
+  }
 }
