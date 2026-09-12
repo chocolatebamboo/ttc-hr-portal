@@ -22,6 +22,7 @@ import { InvalidProfileError } from "@/lib/profile";
 import { InvalidTeamNoteError, TeamNoteNotFoundError } from "@/lib/team-notes";
 import { InvalidDateTaskError, DateTaskNotFoundError } from "@/lib/date-tasks";
 import { InvalidDirectMessageError, DirectMessageNotFoundError } from "@/lib/direct-messages";
+import { InvalidShiftError, ShiftNotFoundError } from "@/lib/shifts";
 
 /** Maps our typed domain errors to the right HTTP status instead of leaking a 500 + stack. */
 export function toErrorResponse(err: unknown) {
@@ -41,7 +42,8 @@ export function toErrorResponse(err: unknown) {
     err instanceof CertificationNotFoundError ||
     err instanceof TeamNoteNotFoundError ||
     err instanceof DateTaskNotFoundError ||
-    err instanceof DirectMessageNotFoundError
+    err instanceof DirectMessageNotFoundError ||
+    err instanceof ShiftNotFoundError
   ) {
     return NextResponse.json({ error: err.message }, { status: 404 });
   }
@@ -64,7 +66,8 @@ export function toErrorResponse(err: unknown) {
     err instanceof InvalidProfileError ||
     err instanceof InvalidTeamNoteError ||
     err instanceof InvalidDateTaskError ||
-    err instanceof InvalidDirectMessageError
+    err instanceof InvalidDirectMessageError ||
+    err instanceof InvalidShiftError
   ) {
     return NextResponse.json({ error: err.message }, { status: 400 });
   }
