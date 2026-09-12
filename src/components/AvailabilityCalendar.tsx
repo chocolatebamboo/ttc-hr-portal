@@ -571,3 +571,562 @@ function MonthSection({
     </div>
   );
 }
+function Panel({
+  viewingSubmission,
+  employeeId,
+  messageCounts,
+  onMessagePosted,
+  draftDates,
+  draft,
+  onUpdateTime,
+  onRemoveDate,
+  onClearDraft,
+  onSubmitTimeOff,
+  submittingTimeOff,
+  timeOffError,
+  onSubmit,
+  submitting,
+  error,
+  onClose,
+  onResubmit,
+  onCancel,
+  cancelling,
+  onRemoveSubmissionDate,
+  removingDateKey,
+  onDeleteSubmission,
+  deleting,
+}: {
+  viewingSubmission: AvailabilityDTO | undefined;
+  employeeId: string;
+  messageCounts: Map<string, number>;
+  onMessagePosted: () => void;
+  draftDates: string[];
+  draft: Record<string, { startTime: string; endTime: string }>;
+  onUpdateTime: (dateKey: string, field: "startTime" | "endTime", value: string) => void;
+  /** Drops an undrafted date from the draft form before submit — nothing to do with the
+   *  already-submitted case below. */
+  onRemoveDate: (dateKey: string) => void;
+  onClearDraft: () => void;
+  /** "Request time off instead," submitted right there in the popup — see
+   *  AvailabilityCalendarControls.onSubmitTimeOff's doc comment above. */
+  onSubmitTimeOff: (values: { type: PtoType; hours: number; reason?: string }) => Promise<boolean>;
+  submittingTimeOff: boolean;
+  timeOffError?: string;
+  onSubmit: (note?: string) => void;
+  submitting: boolean;
+  error?: string;
+  onClose: () => void;
+  onResubmit?: () => void;
+  onCancel?: () => void;
+  cancelling?: boolean;
+  /** Removes ONE date out of an already-submitted, still-Pending/Denied submission via the real
+   *  DELETE route — see AvailabilityCalendarControls.onRemoveDate's doc comment above. Distinct
+   *  name from the draft form's own onRemoveDate (different job entirely) to avoid a collision
+   *  in this one destructure. */
+  onRemoveSubmissionDate?: (date: string) => void;
+  removingDateKey: string | null;
+  /** The real, permanent delete — only ever passed for a submission that's already Cancelled;
+   *  see AvailabilityCalendarControls.onDeleteSubmission's doc comment above. */
+  onDeleteSubmission?: () => void;
+  deleting?: boolean;
+}) {
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  const headerLabel = viewingSubmission
+    ? draftDates.length > 0
+      ? "Submission"
+      : "Submission detail"
+    : draftDates.length === 1
+      ? formatSlotDate(draftDates[0])
+      : `${draftDates.length} dates selected`;
+
+  return (
+    <div
+      // On desktop this is a normal (non-sticky, non-absolute) flex sibling of the calendar
+      // column, stretched by the row's own `items-stretch` default to that row's real,
+      // md:min-h-0-bounded height — so it simply never moves while the calendar scrolls next to
+      // it, rather than tracking scroll position the way `sticky` does. `overflow-y-auto` (in
+      // the unconditional classes below) is what gives IT an independent scrollbar if enough
+      // dates are selected to make its own content taller than that fixed height — see this
+      // component's doc comment above for why sticky was replaced rather than added to.
+      className="fixed z-50 bg-neutral-900 text-white shadow-2xl overflow-y-auto p-4
+        inset-x-3 bottom-24 max-h-[75vh] rounded-3xl
+        md:static md:inset-auto md:z-auto md:h-full md:max-h-full md:min-h-0 md:w-[320px] md:shrink-0 md:rounded-2xl"
+    >
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <p className="text-sm font-medium">{headerLabel}</p>
+        {viewingSubmission ? (
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="h-7 w-7 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-base leading-none shrink-0"
+          >
+            ×
+          </button>
+        ) : (
+          <button onClick={onClearDraft} className="text-xs text-white/60 hover:text-white underline shrink-0">
+            Clear
+          </button>
+        )}
+      </div>
+
+      {viewingSubmission ? (
+        <SubmissionDetail
+          submission={viewingSubmission}
+          employeeId={employeeId}
+          messageCounts={messageCounts}
+          onMessagePosted={onMessagePosted}
+          onResubmit={onResubmit}
+          onCancel={onCancel}
+          cancelling={cancelling}
+          onRemoveDate={onRemoveSubmissionDate}
+          removingDateKey={removingDateKey}
+          onDelete={onDeleteSubmission}
+          deleting={deleting}
+        />
+      ) : (
+        <DraftForm
+          draftDates={draftDates}
+          draft={draft}
+          onUpdateTime={onUpdateTime}
+          onRemoveDate={onRemoveDate}
+          onSubmitTimeOff={onSubmitTimeOff}
+          submittingTimeOff={submittingTimeOff}
+          timeOffError={timeOffError}
+          onSubmit={onSubmit}
+          submitting={submitting}
+          error={error}
+        />
+      )}
+    </div>
+  );
+}
+
+function SubmissionDetail({
+  submission,
+  employeeId,
+  messageCounts,
+  onMessagePosted,
+  onResubmit,
+  onCancel,
+  cancelling,
+  onRemoveDate,
+  removingDateKey,
+  onDelete,
+  deleting,
+}: {
+  submission: AvailabilityDTO;
+  employeeId: string;
+  messageCounts: Map<string, number>;
+  onMessagePosted: () => void;
+  onResubmit?: () => void;
+  onCancel?: () => void;
+  cancelling?: boolean;
+  /** CB, Sept 2026: "if I click on one of the dates and I say clear... it deletes all of them
+   *  that I selected. It should only be one at a time" — removes just the one date this row is
+   *  for, via DELETE /api/availability/[id]/dates/[date] (removeAvailabilityDate). "Clear this
+   *  submission" below stays as the deliberate clear-everything-at-once action. */
+  onRemoveDate?: (date: string) => void;
+  removingDateKey: string | null;
+  /** The real, permanent delete — only ever passed (and only ever rendered, see canDelete
+   *  below) once this submission is already Cancelled. See
+   *  AvailabilityCalendarControls.onDeleteSubmission's doc comment above. */
+  onDelete?: () => void;
+  deleting?: boolean;
+}) {
+  const lines = [...submission.slots].sort((a, b) => a.date.localeCompare(b.date));
+  const canClear = submission.status === "PENDING" || submission.status === "DENIED";
+  const canDelete = submission.status === "CANCELLED";
+  // Which date's conversation is open — local to this one submission's panel rather than lifted
+  // up, since Panel remounts this component fresh (key={viewingSubmission?.id ?? "draft"})
+  // every time a different submission is opened, so there's never a stale open date to carry
+  // over from one submission to the next.
+  const [openDate, setOpenDate] = useState<string | null>(null);
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-2xl bg-white/5 p-4">
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <p className="text-xs text-white/50 uppercase tracking-wide">Dates & times</p>
+          <AvailabilityStatusPill status={submission.status} />
+        </div>
+        <ul className="text-sm space-y-1">
+          {/* CB, Sept 2026: "I send it to Sean, I don't see where Sean could see those
+              messages that I put for that specific day" — this is that missing other half.
+              Tapping a date opens the exact same per-date conversation
+              (topicType="AVAILABILITY_DATE") a supervisor/admin opens from their own card for
+              this same submission, so a message posted from either side lands in one shared
+              thread instead of two that never meet. */}
+          {lines.map((s) => {
+            const msgCount = messageCounts.get(`${submission.id}:${s.date}`) ?? 0;
+            const active = openDate === s.date;
+            const removingThisDate = removingDateKey === `${submission.id}:${s.date}`;
+            const row = (
+              <div
+                className={`flex items-center gap-1 rounded-lg transition-colors ${active ? "bg-white/15" : "hover:bg-white/10"}`}
+              >
+                <button
+                  type="button"
+                  onClick={() => setOpenDate(active ? null : s.date)}
+                  className="flex-1 min-w-0 flex items-center justify-between gap-2 px-2 py-1.5 text-left"
+                >
+                  <span>
+                    {formatSlotDate(s.date)}: {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
+                  </span>
+                  <span className="flex items-center gap-1 shrink-0 text-xs text-white/60">
+                    <ChatIcon className="h-3 w-3" />
+                    {msgCount > 0 ? msgCount : "Message"}
+                  </span>
+                </button>
+                {/* One date at a time, distinct from "Clear this submission" below (CB, Sept
+                    2026 — see this component's doc comment above). */}
+                {canClear && onRemoveDate && (
+                  <button
+                    type="button"
+                    onClick={() => onRemoveDate(s.date)}
+                    disabled={removingThisDate}
+                    aria-label={`Remove ${formatSlotDate(s.date)}`}
+                    className="h-7 w-7 mr-1 shrink-0 flex items-center justify-center rounded-full text-white/50 hover:text-white hover:bg-white/10 disabled:opacity-50"
+                  >
+                    <TrashIcon className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            );
+            return (
+              <li key={s.date} className="-mx-2 px-2 rounded-lg">
+                {/* CB, Sept 2026: "we should be able to delete it by... sliding to the left" —
+                    same swipe-to-delete gesture as every other list in this app (TimeOffRequests,
+                    MyAvailabilityPreview, My Time), now here too, alongside the trash-icon button
+                    the row already had for anyone on a non-touch device. Only wrapped when this
+                    date is actually removable — same canClear/onRemoveDate gate as the button. */}
+                {canClear && onRemoveDate ? (
+                  <SwipeReveal
+                    actionSide="right"
+                    actionLabel="Delete"
+                    actionIcon={<TrashIcon className="h-4 w-4" />}
+                    actionClassName="bg-rose-600 text-white rounded-lg"
+                    busy={removingThisDate}
+                    onAction={() => onRemoveDate(s.date)}
+                  >
+                    {row}
+                  </SwipeReveal>
+                ) : (
+                  row
+                )}
+                {active && (
+                  <div className="mt-1.5 mb-2 space-y-2">
+                    {/* CB, Sept 2026: "I probably want some of the features of what was
+                        approved or what was selected to reflect on the availability page" and
+                        "once we create the task... they'll be able to... click a check mark" —
+                        the same per-date task list a supervisor/admin already sees and pushes to
+                        from their own card (TeamAvailabilityCards' DateTasksPanel), now visible
+                        and markable-done from the employee's own side too, right where they're
+                        already looking at this date. */}
+                    <div>
+                      <p className="text-xs font-semibold text-white/60 mb-1 flex items-center gap-1.5">
+                        <ChecklistIcon className="h-3.5 w-3.5 text-white/60" />
+                        Tasks for this date
+                      </p>
+                      <MyDateTasksPanel employeeId={employeeId} taskDate={s.date} />
+                    </div>
+                    <TeamNotesThread
+                      employeeId={employeeId}
+                      viewerId={employeeId}
+                      topicType="AVAILABILITY_DATE"
+                      topicId={submission.id}
+                      topicDate={s.date}
+                      placeholder="Message your supervisor or HR about this date…"
+                      onMessagePosted={onMessagePosted}
+                    />
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+        {submission.note && <p className="text-sm text-white/70 mt-2">&ldquo;{submission.note}&rdquo;</p>}
+        {submission.status === "DENIED" && submission.reviewComment && (
+          <p className="text-sm text-rose-300 mt-2">Denied: {submission.reviewComment}</p>
+        )}
+      </div>
+
+      {submission.status === "PENDING" && <p className="text-sm text-white/60">Waiting on a supervisor or HR to approve.</p>}
+
+      {/* Denied isn't final — this reopens the same dates as an editable draft, pre-filled
+          with the denied times, so there's a clear next step instead of a dead end. */}
+      {submission.status === "DENIED" && onResubmit && (
+        <button
+          type="button"
+          onClick={onResubmit}
+          className="w-full rounded-2xl bg-white text-neutral-900 hover:bg-white/90 py-3 text-sm font-medium"
+        >
+          Submit different times
+        </button>
+      )}
+
+      {/* Withdraws a Pending submission, or clears a Denied one out for good instead of
+          resubmitting it — either way the dates go right back to being selectable (see this
+          component's doc comment above). Not offered once Approved. Label spells out "all N
+          dates" when there's more than one, so it reads as the deliberate bulk action it is,
+          distinct from the per-date trash icon above each line. */}
+      {canClear && onCancel && (
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={cancelling}
+          className="w-full rounded-2xl bg-white/10 hover:bg-white/20 disabled:opacity-50 py-3 text-sm font-medium"
+        >
+          {cancelling ? "Clearing…" : lines.length > 1 ? `Clear all ${lines.length} dates` : "Clear this submission"}
+        </button>
+      )}
+
+      {/* CB, Sept 2026: "we should be able to remove the whole thing entirely if we wanted to.
+          But that's only if... it's not fully approved" — confirmed this stays a second step
+          after Clear rather than an immediate delete (same reasoning cancelAvailabilitySubmission
+          already gives for keeping a Cancelled record), but now reachable right here the moment
+          it's Cancelled instead of only from the separate Your Submissions list. Same
+          Cancelled-only rule MyAvailabilityPreview's own delete button already enforces. */}
+      {canDelete && onDelete && (
+        <div className="rounded-2xl bg-rose-500/10 border border-rose-500/20 p-3.5 space-y-2">
+          <p className="text-sm text-white/70">Cancelled. You can remove it for good, or just leave it here.</p>
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={deleting}
+            className="w-full rounded-2xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 py-3 text-sm font-medium text-white"
+          >
+            {deleting ? "Deleting…" : "Delete permanently"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DraftForm({
+  draftDates,
+  draft,
+  onUpdateTime,
+  onRemoveDate,
+  onSubmitTimeOff,
+  submittingTimeOff,
+  timeOffError,
+  onSubmit,
+  submitting,
+  error,
+}: {
+  draftDates: string[];
+  draft: Record<string, { startTime: string; endTime: string }>;
+  onUpdateTime: (dateKey: string, field: "startTime" | "endTime", value: string) => void;
+  onRemoveDate: (dateKey: string) => void;
+  onSubmitTimeOff: (values: { type: PtoType; hours: number; reason?: string }) => Promise<boolean>;
+  submittingTimeOff: boolean;
+  timeOffError?: string;
+  onSubmit: (note?: string) => void;
+  submitting: boolean;
+  error?: string;
+}) {
+  const [note, setNote] = useState("");
+  // CB, Sept 2026, after the first version handed the tapped dates off to a separate section
+  // below the calendar: "it needs to live within that pop up" — flips this same panel over to
+  // an actual time-off request form (TimeOffInlineForm below) instead of leaving here at all.
+  // "← Back to availability" returns to this draft form with nothing lost, since `draft` itself
+  // is never touched while that's open.
+  const [requestingTimeOff, setRequestingTimeOff] = useState(false);
+
+  if (requestingTimeOff) {
+    return (
+      <TimeOffInlineForm
+        dates={draftDates}
+        onBack={() => setRequestingTimeOff(false)}
+        onSubmit={onSubmitTimeOff}
+        submitting={submittingTimeOff}
+        error={timeOffError}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-white/60">
+        Set a time for each date, then submit them together for approval.
+      </p>
+
+      {/* CB, Sept 2026: "I need to have options within the view of when they click on a date
+          and that pop up comes up, we need the options to see and make time off if needed" —
+          not every tapped date is about being AVAILABLE to work; some are the opposite. Flips
+          this same panel over to TimeOffInlineForm below rather than leaving this popup at all
+          (CB's follow-up: "it needs to live within that pop up"). */}
+      <button
+        type="button"
+        onClick={() => setRequestingTimeOff(true)}
+        className="w-full flex items-center justify-between gap-2 rounded-2xl bg-white/5 hover:bg-white/10 px-4 py-3 text-left transition-colors"
+      >
+        <span className="text-sm">
+          Need {draftDates.length === 1 ? "this day" : "these days"} off instead?
+        </span>
+        <span className="text-xs font-medium text-white/70 shrink-0">Request time off →</span>
+      </button>
+
+      <div className="space-y-2">
+        {draftDates.map((dateKey) => {
+          const row = draft[dateKey];
+          return (
+            <div key={dateKey} className="rounded-2xl bg-white/5 p-3">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <p className="text-sm font-medium">{formatSlotDate(dateKey)}</p>
+                <button
+                  type="button"
+                  onClick={() => onRemoveDate(dateKey)}
+                  aria-label={`Remove ${dateKey}`}
+                  className="h-6 w-6 shrink-0 rounded-full bg-white/10 hover:bg-white/20 text-sm leading-none"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="time"
+                  value={row.startTime}
+                  onChange={(e) => onUpdateTime(dateKey, "startTime", e.target.value)}
+                  className="rounded-md bg-white/10 border border-white/10 px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-white/30"
+                />
+                <span className="text-sm text-white/50">to</span>
+                <input
+                  type="time"
+                  value={row.endTime}
+                  onChange={(e) => onUpdateTime(dateKey, "endTime", e.target.value)}
+                  className="rounded-md bg-white/10 border border-white/10 px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-white/30"
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="rounded-2xl bg-white/5 p-4">
+        <label className="block text-xs text-white/50 mb-1">Note (optional)</label>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          rows={2}
+          className="w-full bg-transparent text-sm outline-none resize-none placeholder:text-white/30"
+          placeholder="Add a note for your supervisor"
+        />
+      </div>
+
+      {error && <p className="text-xs text-rose-300">{error}</p>}
+
+      <button
+        type="button"
+        onClick={() => onSubmit(note.trim() || undefined)}
+        disabled={submitting || draftDates.length === 0}
+        className="w-full rounded-2xl bg-white text-neutral-900 hover:bg-white/90 disabled:opacity-50 py-3 text-sm font-medium"
+      >
+        {submitting ? "Submitting…" : `Submit ${draftDates.length === 1 ? "this date" : "these dates"} for approval`}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The actual time-off request — CB, Sept 2026: "it needs to live within that pop up," not hand
+ * the tapped dates off to a separate section elsewhere on the page. Same three fields
+ * StandalonePtoForm (src/components/TimeOffRequests.tsx) asks for on a plain "Request time
+ * off" — type, hours, an optional reason — just without its own date pickers, since the dates
+ * here are already fixed to whatever's currently drafted on the calendar above. Submitting
+ * posts straight through AvailabilityCalendarControls.onSubmitTimeOff, which AvailabilityView
+ * turns into the same POST /api/pto/requests call the shared widget itself makes.
+ */
+function TimeOffInlineForm({
+  dates,
+  onBack,
+  onSubmit,
+  submitting,
+  error,
+}: {
+  dates: string[];
+  onBack: () => void;
+  onSubmit: (values: { type: PtoType; hours: number; reason?: string }) => Promise<boolean>;
+  submitting: boolean;
+  error?: string;
+}) {
+  const [type, setType] = useState<PtoType>("VACATION");
+  const [hours, setHours] = useState("");
+  const [reason, setReason] = useState("");
+
+  const sorted = [...dates].sort();
+  const rangeLabel =
+    sorted.length === 1 ? formatSlotDate(sorted[0]) : `${formatSlotDate(sorted[0])} – ${formatSlotDate(sorted[sorted.length - 1])}`;
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    onSubmit({ type, hours: Number(hours), reason: reason.trim() || undefined });
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-3">
+      <button type="button" onClick={onBack} className="text-xs text-white/60 hover:text-white underline">
+        ← Back to availability
+      </button>
+
+      <p className="text-sm text-white/60">Requesting time off for {rangeLabel}.</p>
+
+      <div className="rounded-2xl bg-white/5 p-4 space-y-3">
+        <div>
+          <label className="block text-xs text-white/50 mb-1">Type of leave</label>
+          <select
+            value={type}
+            onChange={(e) => setType(e.target.value as PtoType)}
+            className="w-full rounded-lg bg-white/10 border border-white/10 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-white/30"
+          >
+            {PTO_TYPE_OPTIONS.map((t) => (
+              <option key={t} value={t}>
+                {PTO_TYPE_LABEL[t]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-white/50 mb-1">Number of hours</label>
+          <input
+            type="number"
+            required
+            min="0.5"
+            step="0.5"
+            value={hours}
+            onChange={(e) => setHours(e.target.value)}
+            placeholder="e.g. 8"
+            className="w-full rounded-lg bg-white/10 border border-white/10 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-white/30"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-white/50 mb-1">Reason / comment (optional)</label>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            rows={2}
+            className="w-full rounded-lg bg-white/10 border border-white/10 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-white/30"
+          />
+        </div>
+      </div>
+
+      {error && <p className="text-xs text-rose-300">{error}</p>}
+
+      <button
+        type="submit"
+        disabled={submitting}
+        className="w-full rounded-2xl bg-white text-neutral-900 hover:bg-white/90 disabled:opacity-50 py-3 text-sm font-medium"
+      >
+        {submitting ? "Submitting…" : "Submit time-off request"}
+      </button>
+    </form>
+  );
+}
