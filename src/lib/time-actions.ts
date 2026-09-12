@@ -285,14 +285,27 @@ export class InvalidTimeEntryDeleteError extends Error {
 
 /**
  * CB, Sept 2026: "I should be able to delete those times... if I swipe... on the respective
- * date block." Deliberately narrower than deletePtoRequest's own delete: a TimeEntry's audit
- * trail is documented as an immutable log ("a TimeEntry is never silently overwritten" — see
- * prisma/schema.prisma) precisely so real worked hours are never quietly erased, so this only
- * ever removes an entry with zero recorded time — the accidental double clock-in/clock-out
- * taps that show up as "0h 00m" rows, never a real day's hours (those go through Edit &
- * resubmit once Returned, same as any other correction). Deletes the entry's own audit rows
- * first since there's nothing worth preserving for a mistake that was never real time, then the
- * entry itself (its sessions cascade per the schema).
+ * date block." Then Sept 2026 again, after seeing it in practice: a team member should be able
+ * to fully revert a logged day before it's "confirmed" — i.e. any entry still Awaiting Approval,
+ * not just an accidental zero-minute one. Confirmed scope (her own words): "I like... true
+ * delete[,] awaiting approval only... they wouldn't be able to do that on their side once we
+ * approve." That last part is a hard, no-exceptions lock: once a supervisor or HR/Super Admin
+ * approves a day, the employee can't remove it here at all — not even an old zero-minute mistake
+ * that happened to get swept up in a bulk-approve. (If that turns out to matter in practice, it's
+ * a discrepancy for HR/Admin to handle on their side, per CB's own follow-up about that — see
+ * ReviewTimesheetView, which doesn't have that capability yet.)
+ *
+ * That lock is deliberate, not incidental: a TimeEntry's audit trail is documented as an
+ * immutable log ("a TimeEntry is never silently overwritten" — see prisma/schema.prisma)
+ * precisely so real worked hours are never quietly erased once someone has signed off on them —
+ * a real wage/hour recordkeeping concern for actual hourly employees, not just a UI nicety. Below
+ * Approved, the rule is unchanged from before: any Awaiting Approval day, or a zero-minute
+ * mistake regardless of its (non-Approved) status. A Returned day with real time on it still
+ * isn't deletable here — it already has a path back (Edit & resubmit), and that path is what
+ * keeps the supervisor's return comment attached to something.
+ *
+ * Deletes the entry's own audit rows first since there's nothing worth preserving for a day
+ * that's being fully withdrawn, then the entry itself (its sessions cascade per the schema).
  */
 export async function deleteEmployeeTimeEntry(actor: CurrentEmployee, entryId: string): Promise<void> {
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
@@ -300,9 +313,15 @@ export async function deleteEmployeeTimeEntry(actor: CurrentEmployee, entryId: s
     if (!entry || entry.employeeId !== actor.id) {
       throw new InvalidTimeEntryDeleteError("Time entry not found.");
     }
-    if ((entry.totalMinutes ?? 0) !== 0) {
+    if (entry.status === "APPROVED") {
       throw new InvalidTimeEntryDeleteError(
-        "Only an entry with no recorded time can be deleted — use Edit & resubmit to fix real hours instead."
+        "An approved day can't be deleted — contact your supervisor or HR about a correction."
+      );
+    }
+    const isEmptyMistake = (entry.totalMinutes ?? 0) === 0;
+    if (entry.status !== "AWAITING_APPROVAL" && !isEmptyMistake) {
+      throw new InvalidTimeEntryDeleteError(
+        "Only a day that's Awaiting Approval (or has no recorded time) can be deleted — use Edit & resubmit to fix a Returned day instead."
       );
     }
     await tx.timeEntryAuditEvent.deleteMany({ where: { timeEntryId: entryId } });
