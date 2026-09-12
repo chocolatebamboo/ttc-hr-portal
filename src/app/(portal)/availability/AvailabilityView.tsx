@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import AvailabilityCalendar from "@/components/AvailabilityCalendar";
 import MyAvailabilityPreview from "@/components/MyAvailabilityPreview";
 import TimeOffRequests from "@/components/TimeOffRequests";
+import { ChevronDownIcon } from "@/components/icons";
 import type { AvailabilityDTO, AvailabilitySlot, PtoType } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
@@ -51,6 +52,13 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
   // new request — that list otherwise only loads once on its own mount, and has no other way to
   // know a request was just created somewhere else on this page.
   const [ptoRefreshSignal, setPtoRefreshSignal] = useState<number | null>(null);
+  // CB, Sept 2026, after the page's scroll bug was fixed and she could finally see how much
+  // room these two sections were taking: "I feel like they could be kind of like a drop down or
+  // like a preview" — both start collapsed so the calendar gets the bulk of the page's height
+  // by default, same reasoning as everything else on this page that stays out of the calendar's
+  // way (see the md:shrink-0/md:max-h wrappers below, now only relevant once expanded).
+  const [submissionsOpen, setSubmissionsOpen] = useState(false);
+  const [timeOffOpen, setTimeOffOpen] = useState(false);
 
   // CB, Sept 2026: "it needs to live within that pop up" — same POST /api/pto/requests the
   // shared TimeOffRequests widget's own form uses, just called directly from here since this
@@ -194,14 +202,33 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
 
       {/* CB, Sept 2026: wanted "a preview of the dates and times... selected," "cleanly," next
           to the calendar itself — this was briefly on My Time, then moved here per her follow-up
-          so Availability is the one place for everything about when you're free to work. Capped
-          height + its own scroll on desktop (md:max-h-56 md:overflow-y-auto) so a long submission
-          history doesn't eat into the calendar row's own space below; unconstrained on mobile,
-          where the whole page already scrolls as one piece. showLink={false}: a "submit or
-          edit" link back to this same page would be circular. */}
+          so Availability is the one place for everything about when you're free to work.
+          Collapsed by default behind its own toggle (CB, same month, once the page's scroll bug
+          was fixed and this was visibly eating into the calendar's own space): the count next to
+          the label is what a glance actually needs; the full list is one tap away. Expanded, it
+          keeps the same capped height + its own scroll on desktop (md:max-h-56 md:overflow-y-auto)
+          so a long submission history still can't eat into the calendar row's own space below.
+          showLink={false}/showHeading={false}: a "submit or edit" link back to this same page
+          would be circular, and this toggle button is already this section's heading. */}
       {loadState === "ready" && submissions.length > 0 && (
-        <div className="mb-4 md:shrink-0 md:max-h-56 md:overflow-y-auto">
-          <MyAvailabilityPreview title="Your submissions" showLink={false} />
+        <div className="mb-4 md:shrink-0">
+          <button
+            type="button"
+            onClick={() => setSubmissionsOpen((v) => !v)}
+            className="w-full flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3 text-left"
+          >
+            <span className="text-sm font-medium">
+              Your submissions <span className="text-muted font-normal">({submissions.length})</span>
+            </span>
+            <ChevronDownIcon
+              className={`h-4 w-4 text-muted shrink-0 transition-transform ${submissionsOpen ? "rotate-180" : ""}`}
+            />
+          </button>
+          {submissionsOpen && (
+            <div className="mt-2 md:max-h-56 md:overflow-y-auto">
+              <MyAvailabilityPreview title="Your submissions" showLink={false} showHeading={false} />
+            </div>
+          )}
         </div>
       )}
 
@@ -210,14 +237,29 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
           Deliberately placed ABOVE the calendar, not below it: the calendar can span up to 6
           months of dates to scroll through, and on mobile its own date-picker panel is a fixed,
           always-on-top overlay while a date is selected — CB kept not finding this section when
-          it lived below all of that ("I'm still not seeing it"). Up here it's visible the
-          moment the page loads, with no scrolling past the calendar required. Capped height +
-          its own scroll on desktop (md:shrink-0 md:max-h-80 md:overflow-y-auto), same treatment
-          as the submissions preview above, so it doesn't eat into the calendar row's own space;
-          unconstrained on mobile, where the page just scrolls a little further if the list is
-          long. */}
-      <div className="mb-4 md:shrink-0 md:max-h-80 md:overflow-y-auto">
-        <TimeOffRequests employeeId={employeeId} refreshSignal={ptoRefreshSignal} />
+          it lived below all of that ("I'm still not seeing it"). Collapsed by default behind its
+          own toggle, same reasoning and same timing as the submissions preview above; expanded,
+          it keeps the same capped height + its own scroll on desktop (md:max-h-80
+          md:overflow-y-auto) so it still can't eat into the calendar row's own space.
+          showHeading={false}: same "the toggle button is already the heading" reasoning as
+          above — the "Request time off" button inside stays either way, since that's a real
+          control rather than a label. */}
+      <div className="mb-4 md:shrink-0">
+        <button
+          type="button"
+          onClick={() => setTimeOffOpen((v) => !v)}
+          className="w-full flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3 text-left"
+        >
+          <span className="text-sm font-medium">Time off</span>
+          <ChevronDownIcon
+            className={`h-4 w-4 text-muted shrink-0 transition-transform ${timeOffOpen ? "rotate-180" : ""}`}
+          />
+        </button>
+        {timeOffOpen && (
+          <div className="mt-2 md:max-h-80 md:overflow-y-auto">
+            <TimeOffRequests employeeId={employeeId} refreshSignal={ptoRefreshSignal} showHeading={false} />
+          </div>
+        )}
       </div>
 
       {loadState === "loading" && <div className="h-64 rounded-xl border border-border bg-surface animate-pulse" />}
