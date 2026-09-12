@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import AvailabilityStatusPill from "@/components/AvailabilityStatusPill";
+import { TrashIcon } from "@/components/icons";
 import { slotChips } from "@/lib/availability-format";
 import type { AvailabilityDTO } from "@/types";
 
@@ -30,6 +31,10 @@ export default function MyAvailabilityPreview({
 }) {
   const [submissions, setSubmissions] = useState<AvailabilityDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
+  // CB, Sept 2026: "the deleting isn't working on these" — pointing at old Cancelled entries
+  // sitting in this list with no way to get rid of them. Which one (if any) a delete is
+  // currently in flight for, so only that row shows a busy state.
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -46,6 +51,19 @@ export default function MyAvailabilityPreview({
     }
     load();
   }, []);
+
+  // Cancelled-only, same rule as the Time Off list's own delete (see
+  // deleteAvailabilitySubmission's doc comment in src/lib/availability.ts) — a Pending, Denied,
+  // or Approved submission still means something, so this never touches those.
+  async function handleDelete(id: string) {
+    setDeletingId(id);
+    try {
+      const res = await fetch(`/api/availability/${id}`, { method: "DELETE" });
+      if (res.ok) setSubmissions((prev) => prev.filter((s) => s.id !== id));
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   return (
     <div>
@@ -97,7 +115,23 @@ export default function MyAvailabilityPreview({
                 ) : (
                   <span />
                 )}
-                <AvailabilityStatusPill status={s.status} />
+                <div className="flex items-center gap-2 shrink-0">
+                  <AvailabilityStatusPill status={s.status} />
+                  {/* CB, Sept 2026: "the deleting isn't working on these" — a Cancelled
+                      submission has nothing left to act on, so it can go away for good; same
+                      Cancelled-only rule as the Time Off list's own delete. */}
+                  {s.status === "CANCELLED" && (
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(s.id)}
+                      disabled={deletingId === s.id}
+                      aria-label="Delete this submission"
+                      className="h-6 w-6 flex items-center justify-center rounded-full text-muted hover:text-accent hover:bg-accent/10 transition-colors disabled:opacity-50"
+                    >
+                      <TrashIcon className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {slotChips(s.slots).map((c) => (
