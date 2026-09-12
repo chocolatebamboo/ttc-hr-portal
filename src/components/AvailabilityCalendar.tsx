@@ -6,9 +6,14 @@ import JumpToTodayButton from "@/components/JumpToTodayButton";
 import TeamNotesThread from "@/components/TeamNotesThread";
 import { ChatIcon, ChevronDownIcon, TrashIcon } from "@/components/icons";
 import { formatSlotDate, formatTime12h } from "@/lib/availability-format";
-import { todayDateKey } from "@/lib/time";
+import { todayDateKey, PTO_TYPE_LABEL } from "@/lib/time";
 import { getMonth, type Month } from "@/lib/month";
-import type { AvailabilityDTO, AvailabilitySlot, TeamNoteTopicCountDTO } from "@/types";
+import type { AvailabilityDTO, AvailabilitySlot, PtoType, TeamNoteTopicCountDTO } from "@/types";
+
+// Same four options TimeOffRequests' own standalone form offers (src/components/
+// TimeOffRequests.tsx) — small enough that duplicating it here beats exporting/importing it
+// across components for one four-item array; it's the exact same PtoType union either way.
+const PTO_TYPE_OPTIONS: PtoType[] = ["VACATION", "SICK", "PERSONAL", "OTHER_APPROVED_LEAVE"];
 
 const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
 
@@ -91,13 +96,18 @@ export interface AvailabilityCalendarControls {
   /** "submissionId:date" of whichever single-date removal is currently in flight, so only that
    *  one row's own button shows a busy state. */
   removingDateKey: string | null;
-  /** CB, Sept 2026: "I need to have options within the view of when they click on a date and
-   *  that pop up comes up, we need the options to see and make time off if needed." Fires when
-   *  the "Request time off instead" button in the draft panel is used, with every date currently
-   *  drafted for availability — the caller (AvailabilityView) turns that into a pre-filled time
-   *  off request rather than this component owning any PTO logic of its own (that already lives
-   *  entirely in TimeOffRequests, shared with My Time). */
-  onRequestTimeOff: (dates: string[]) => void;
+  /** CB, Sept 2026, after the first version just handed the tapped dates off to a separate
+   *  section below the calendar: "it needs to live within that pop up" — submits a time-off
+   *  request without ever leaving the date-tap popup. Same underlying POST /api/pto/requests
+   *  the shared TimeOffRequests widget uses; AvailabilityView owns the actual fetch (and
+   *  refreshes the Time Off list below so the new request shows up there too, without this
+   *  component needing to know anything about that list). Resolves true on success, so this
+   *  component knows to clear its draft and close the popup; false leaves the popup and
+   *  whatever was typed exactly as it was, so a validation error or network hiccup never loses
+   *  anything. */
+  onSubmitTimeOff: (dates: string[], values: { type: PtoType; hours: number; reason?: string }) => Promise<boolean>;
+  submittingTimeOff: boolean;
+  timeOffError?: string;
 }
 
 /**
@@ -308,14 +318,16 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
     setViewingId(null);
   }
 
-  // "Request time off instead" in the draft panel — CB, Sept 2026: options to make a time off
-  // request right from the same popup used to mark availability. These dates were never
-  // submitted as availability, so they're cleared from the draft (there's nothing to keep them
-  // drafted for) and handed off to the caller, which owns turning them into a pre-filled PTO
-  // request via the shared TimeOffRequests widget.
-  function handleRequestTimeOff(dates: string[]) {
-    controls.onRequestTimeOff(dates);
-    setDraft({});
+  // "Request time off instead" in the draft panel, submitted from right there — CB, Sept 2026:
+  // "it needs to live within that pop up." These dates were never submitted as availability, so
+  // a successful time-off submission clears the draft (there's nothing to keep them drafted
+  // for) exactly the way a successful availability submit does, which is also what closes the
+  // popup (showPanel below goes false once draftDates is empty). A failed submission leaves the
+  // draft — and whatever was typed into the time-off form — untouched.
+  async function handleSubmitTimeOff(dates: string[], values: { type: PtoType; hours: number; reason?: string }) {
+    const ok = await controls.onSubmitTimeOff(dates, values);
+    if (ok) setDraft({});
+    return ok;
   }
 
   function handleDayClick(dateKey: string) {
@@ -408,7 +420,9 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
             })
           }
           onClearDraft={() => setDraft({})}
-          onRequestTimeOff={() => handleRequestTimeOff(draftDates)}
+          onSubmitTimeOff={(values) => handleSubmitTimeOff(draftDates, values)}
+          submittingTimeOff={controls.submittingTimeOff}
+          timeOffError={controls.timeOffError}
           onSubmit={(note) => controls.onSubmit(draftDates.map((date) => ({ date, ...draft[date] })), note)}
           submitting={controls.submitting}
           error={controls.error}
@@ -539,7 +553,9 @@ function Panel({
   onUpdateTime,
   onRemoveDate,
   onClearDraft,
-  onRequestTimeOff,
+  onSubmitTimeOff,
+  submittingTimeOff,
+  timeOffError,
   onSubmit,
   submitting,
   error,
@@ -561,9 +577,11 @@ function Panel({
    *  already-submitted case below. */
   onRemoveDate: (dateKey: string) => void;
   onClearDraft: () => void;
-  /** "Request time off instead" — see AvailabilityCalendarControls.onRequestTimeOff's doc
-   *  comment above. */
-  onRequestTimeOff: () => void;
+  /** "Request time off instead," submitted right there in the popup — see
+   *  AvailabilityCalendarControls.onSubmitTimeOff's doc comment above. */
+  onSubmitTimeOff: (values: { type: PtoType; hours: number; reason?: string }) => Promise<boolean>;
+  submittingTimeOff: boolean;
+  timeOffError?: string;
   onSubmit: (note?: string) => void;
   submitting: boolean;
   error?: string;
@@ -642,7 +660,9 @@ function Panel({
           draft={draft}
           onUpdateTime={onUpdateTime}
           onRemoveDate={onRemoveDate}
-          onRequestTimeOff={onRequestTimeOff}
+          onSubmitTimeOff={onSubmitTimeOff}
+          submittingTimeOff={submittingTimeOff}
+          timeOffError={timeOffError}
           onSubmit={onSubmit}
           submitting={submitting}
           error={error}
@@ -796,7 +816,9 @@ function DraftForm({
   draft,
   onUpdateTime,
   onRemoveDate,
-  onRequestTimeOff,
+  onSubmitTimeOff,
+  submittingTimeOff,
+  timeOffError,
   onSubmit,
   submitting,
   error,
@@ -805,12 +827,32 @@ function DraftForm({
   draft: Record<string, { startTime: string; endTime: string }>;
   onUpdateTime: (dateKey: string, field: "startTime" | "endTime", value: string) => void;
   onRemoveDate: (dateKey: string) => void;
-  onRequestTimeOff: () => void;
+  onSubmitTimeOff: (values: { type: PtoType; hours: number; reason?: string }) => Promise<boolean>;
+  submittingTimeOff: boolean;
+  timeOffError?: string;
   onSubmit: (note?: string) => void;
   submitting: boolean;
   error?: string;
 }) {
   const [note, setNote] = useState("");
+  // CB, Sept 2026, after the first version handed the tapped dates off to a separate section
+  // below the calendar: "it needs to live within that pop up" — flips this same panel over to
+  // an actual time-off request form (TimeOffInlineForm below) instead of leaving here at all.
+  // "← Back to availability" returns to this draft form with nothing lost, since `draft` itself
+  // is never touched while that's open.
+  const [requestingTimeOff, setRequestingTimeOff] = useState(false);
+
+  if (requestingTimeOff) {
+    return (
+      <TimeOffInlineForm
+        dates={draftDates}
+        onBack={() => setRequestingTimeOff(false)}
+        onSubmit={onSubmitTimeOff}
+        submitting={submittingTimeOff}
+        error={timeOffError}
+      />
+    );
+  }
 
   return (
     <div className="space-y-3">
@@ -820,13 +862,12 @@ function DraftForm({
 
       {/* CB, Sept 2026: "I need to have options within the view of when they click on a date
           and that pop up comes up, we need the options to see and make time off if needed" —
-          not every tapped date is about being AVAILABLE to work; some are the opposite. Rather
-          than teach this popup a second, unrelated form, this hands the dates off to the same
-          Time Off widget My Time already uses (see AvailabilityView's onRequestTimeOff), pre-
-          filled and ready to finish there. */}
+          not every tapped date is about being AVAILABLE to work; some are the opposite. Flips
+          this same panel over to TimeOffInlineForm below rather than leaving this popup at all
+          (CB's follow-up: "it needs to live within that pop up"). */}
       <button
         type="button"
-        onClick={onRequestTimeOff}
+        onClick={() => setRequestingTimeOff(true)}
         className="w-full flex items-center justify-between gap-2 rounded-2xl bg-white/5 hover:bg-white/10 px-4 py-3 text-left transition-colors"
       >
         <span className="text-sm">
@@ -893,5 +934,100 @@ function DraftForm({
         {submitting ? "Submitting…" : `Submit ${draftDates.length === 1 ? "this date" : "these dates"} for approval`}
       </button>
     </div>
+  );
+}
+
+/**
+ * The actual time-off request — CB, Sept 2026: "it needs to live within that pop up," not hand
+ * the tapped dates off to a separate section elsewhere on the page. Same three fields
+ * StandalonePtoForm (src/components/TimeOffRequests.tsx) asks for on a plain "Request time
+ * off" — type, hours, an optional reason — just without its own date pickers, since the dates
+ * here are already fixed to whatever's currently drafted on the calendar above. Submitting
+ * posts straight through AvailabilityCalendarControls.onSubmitTimeOff, which AvailabilityView
+ * turns into the same POST /api/pto/requests call the shared widget itself makes.
+ */
+function TimeOffInlineForm({
+  dates,
+  onBack,
+  onSubmit,
+  submitting,
+  error,
+}: {
+  dates: string[];
+  onBack: () => void;
+  onSubmit: (values: { type: PtoType; hours: number; reason?: string }) => Promise<boolean>;
+  submitting: boolean;
+  error?: string;
+}) {
+  const [type, setType] = useState<PtoType>("VACATION");
+  const [hours, setHours] = useState("");
+  const [reason, setReason] = useState("");
+
+  const sorted = [...dates].sort();
+  const rangeLabel =
+    sorted.length === 1 ? formatSlotDate(sorted[0]) : `${formatSlotDate(sorted[0])} – ${formatSlotDate(sorted[sorted.length - 1])}`;
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    onSubmit({ type, hours: Number(hours), reason: reason.trim() || undefined });
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-3">
+      <button type="button" onClick={onBack} className="text-xs text-white/60 hover:text-white underline">
+        ← Back to availability
+      </button>
+
+      <p className="text-sm text-white/60">Requesting time off for {rangeLabel}.</p>
+
+      <div className="rounded-2xl bg-white/5 p-4 space-y-3">
+        <div>
+          <label className="block text-xs text-white/50 mb-1">Type of leave</label>
+          <select
+            value={type}
+            onChange={(e) => setType(e.target.value as PtoType)}
+            className="w-full rounded-lg bg-white/10 border border-white/10 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-white/30"
+          >
+            {PTO_TYPE_OPTIONS.map((t) => (
+              <option key={t} value={t}>
+                {PTO_TYPE_LABEL[t]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-white/50 mb-1">Number of hours</label>
+          <input
+            type="number"
+            required
+            min="0.5"
+            step="0.5"
+            value={hours}
+            onChange={(e) => setHours(e.target.value)}
+            placeholder="e.g. 8"
+            className="w-full rounded-lg bg-white/10 border border-white/10 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-white/30"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-white/50 mb-1">Reason / comment (optional)</label>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            rows={2}
+            className="w-full rounded-lg bg-white/10 border border-white/10 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-white/30"
+          />
+        </div>
+      </div>
+
+      {error && <p className="text-xs text-rose-300">{error}</p>}
+
+      <button
+        type="submit"
+        disabled={submitting}
+        className="w-full rounded-2xl bg-white text-neutral-900 hover:bg-white/90 disabled:opacity-50 py-3 text-sm font-medium"
+      >
+        {submitting ? "Submitting…" : "Submit time-off request"}
+      </button>
+    </form>
   );
 }
