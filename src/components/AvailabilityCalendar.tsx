@@ -91,6 +91,13 @@ export interface AvailabilityCalendarControls {
   /** "submissionId:date" of whichever single-date removal is currently in flight, so only that
    *  one row's own button shows a busy state. */
   removingDateKey: string | null;
+  /** CB, Sept 2026: "I need to have options within the view of when they click on a date and
+   *  that pop up comes up, we need the options to see and make time off if needed." Fires when
+   *  the "Request time off instead" button in the draft panel is used, with every date currently
+   *  drafted for availability — the caller (AvailabilityView) turns that into a pre-filled time
+   *  off request rather than this component owning any PTO logic of its own (that already lives
+   *  entirely in TimeOffRequests, shared with My Time). */
+  onRequestTimeOff: (dates: string[]) => void;
 }
 
 /**
@@ -301,6 +308,16 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
     setViewingId(null);
   }
 
+  // "Request time off instead" in the draft panel — CB, Sept 2026: options to make a time off
+  // request right from the same popup used to mark availability. These dates were never
+  // submitted as availability, so they're cleared from the draft (there's nothing to keep them
+  // drafted for) and handed off to the caller, which owns turning them into a pre-filled PTO
+  // request via the shared TimeOffRequests widget.
+  function handleRequestTimeOff(dates: string[]) {
+    controls.onRequestTimeOff(dates);
+    setDraft({});
+  }
+
   function handleDayClick(dateKey: string) {
     const existing = byDate.get(dateKey);
     if (existing) {
@@ -391,6 +408,7 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
             })
           }
           onClearDraft={() => setDraft({})}
+          onRequestTimeOff={() => handleRequestTimeOff(draftDates)}
           onSubmit={(note) => controls.onSubmit(draftDates.map((date) => ({ date, ...draft[date] })), note)}
           submitting={controls.submitting}
           error={controls.error}
@@ -521,6 +539,7 @@ function Panel({
   onUpdateTime,
   onRemoveDate,
   onClearDraft,
+  onRequestTimeOff,
   onSubmit,
   submitting,
   error,
@@ -542,6 +561,9 @@ function Panel({
    *  already-submitted case below. */
   onRemoveDate: (dateKey: string) => void;
   onClearDraft: () => void;
+  /** "Request time off instead" — see AvailabilityCalendarControls.onRequestTimeOff's doc
+   *  comment above. */
+  onRequestTimeOff: () => void;
   onSubmit: (note?: string) => void;
   submitting: boolean;
   error?: string;
@@ -620,6 +642,7 @@ function Panel({
           draft={draft}
           onUpdateTime={onUpdateTime}
           onRemoveDate={onRemoveDate}
+          onRequestTimeOff={onRequestTimeOff}
           onSubmit={onSubmit}
           submitting={submitting}
           error={error}
@@ -773,6 +796,7 @@ function DraftForm({
   draft,
   onUpdateTime,
   onRemoveDate,
+  onRequestTimeOff,
   onSubmit,
   submitting,
   error,
@@ -781,6 +805,7 @@ function DraftForm({
   draft: Record<string, { startTime: string; endTime: string }>;
   onUpdateTime: (dateKey: string, field: "startTime" | "endTime", value: string) => void;
   onRemoveDate: (dateKey: string) => void;
+  onRequestTimeOff: () => void;
   onSubmit: (note?: string) => void;
   submitting: boolean;
   error?: string;
@@ -792,6 +817,23 @@ function DraftForm({
       <p className="text-sm text-white/60">
         Set a time for each date, then submit them together for approval.
       </p>
+
+      {/* CB, Sept 2026: "I need to have options within the view of when they click on a date
+          and that pop up comes up, we need the options to see and make time off if needed" —
+          not every tapped date is about being AVAILABLE to work; some are the opposite. Rather
+          than teach this popup a second, unrelated form, this hands the dates off to the same
+          Time Off widget My Time already uses (see AvailabilityView's onRequestTimeOff), pre-
+          filled and ready to finish there. */}
+      <button
+        type="button"
+        onClick={onRequestTimeOff}
+        className="w-full flex items-center justify-between gap-2 rounded-2xl bg-white/5 hover:bg-white/10 px-4 py-3 text-left transition-colors"
+      >
+        <span className="text-sm">
+          Need {draftDates.length === 1 ? "this day" : "these days"} off instead?
+        </span>
+        <span className="text-xs font-medium text-white/70 shrink-0">Request time off →</span>
+      </button>
 
       <div className="space-y-2">
         {draftDates.map((dateKey) => {
