@@ -276,6 +276,40 @@ export async function submitEmployeeCorrection(
   });
 }
 
+export class InvalidTimeEntryDeleteError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidTimeEntryDeleteError";
+  }
+}
+
+/**
+ * CB, Sept 2026: "I should be able to delete those times... if I swipe... on the respective
+ * date block." Deliberately narrower than deletePtoRequest's own delete: a TimeEntry's audit
+ * trail is documented as an immutable log ("a TimeEntry is never silently overwritten" — see
+ * prisma/schema.prisma) precisely so real worked hours are never quietly erased, so this only
+ * ever removes an entry with zero recorded time — the accidental double clock-in/clock-out
+ * taps that show up as "0h 00m" rows, never a real day's hours (those go through Edit &
+ * resubmit once Returned, same as any other correction). Deletes the entry's own audit rows
+ * first since there's nothing worth preserving for a mistake that was never real time, then the
+ * entry itself (its sessions cascade per the schema).
+ */
+export async function deleteEmployeeTimeEntry(actor: CurrentEmployee, entryId: string): Promise<void> {
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const entry = await tx.timeEntry.findUnique({ where: { id: entryId } });
+    if (!entry || entry.employeeId !== actor.id) {
+      throw new InvalidTimeEntryDeleteError("Time entry not found.");
+    }
+    if ((entry.totalMinutes ?? 0) !== 0) {
+      throw new InvalidTimeEntryDeleteError(
+        "Only an entry with no recorded time can be deleted — use Edit & resubmit to fix real hours instead."
+      );
+    }
+    await tx.timeEntryAuditEvent.deleteMany({ where: { timeEntryId: entryId } });
+    await tx.timeEntry.delete({ where: { id: entryId } });
+  });
+}
+
 export async function getTodayEntry(actor: CurrentEmployee) {
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const workDate = new Date(`${todayDateKey()}T00:00:00.000Z`);
