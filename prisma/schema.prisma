@@ -1,454 +1,606 @@
-// TTC HR Portal — data model
-// Design notes:
-// - `Employee.userId` is the Supabase Auth user id (uuid). Auth identity/session/password
-//   handling lives entirely in Supabase Auth — this schema never stores credentials.
-// - Every table an employee should NOT freely read/write also gets a Postgres row-level
-//   security (RLS) policy (see prisma/rls.sql) as a second enforcement layer behind the
-//   application's own server-side authorization checks in src/lib/authorization.ts.
-// - Nothing here stores SSNs, bank details, or payroll credentials — see Section 13 of the
-//   project brief. Payroll math itself is out of scope; this schema only holds APPROVED hours.
-
-generator client {
-  provider = "prisma-client-js"
-}
-
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
-
 // ---------------------------------------------------------------------------
-// Core identity & org structure
+// Team notes (admin/supervisor <-> team member messaging)
 // ---------------------------------------------------------------------------
 
-enum Role {
-  SUPER_ADMIN
-  HR_ADMIN
-  SUPERVISOR
-  EMPLOYEE
-}
+// CB, Sept 2026: "I would be able to add notes, add documents, or anything like that within
+// there. So we could communicate through there" — one ongoing thread per team member (not one
+// per PTO/availability request), readable and postable by that employee themselves, their
+// supervisor, or an admin — same three-way access shape PtoRequest and AvailabilitySubmission
+// already use (see prisma/rls.sql's team_note_select/team_note_write and
+// assertCanAccessEmployeeRecords in src/lib/authorization.ts). Attachments are simple files
+// dropped into the thread (attachmentKey/attachmentName), stored in the same private
+// "documents" Supabase bucket under a "team-notes/" prefix (src/lib/storage.ts) rather than a
+// new bucket — they're not part of the formal company Documents library (no category,
+// visibility, or acknowledgment tracking), just whatever's attached to a message.
+model TeamNote {
+  id         String   @id @default(uuid())
+  employeeId String // whose thread this belongs to
+  employee   Employee @relation("TeamNoteSubject", fields: [employeeId], references: [id])
+  authorId   String // who wrote this message — the employee themselves, their supervisor, or an admin
+  author     Employee @relation("TeamNoteAuthor", fields: [authorId], references: [id])
 
-enum EmploymentStatus {
-  ACTIVE
-  ON_LEAVE
-  INACTIVE
-  FORMER_EMPLOYEE
-}
+  body           String
+  attachmentKey  String?
+  attachmentName String?
 
-model Department {
-  id        String   @id @default(uuid())
-  name      String   @unique
+  // Sept 2026, round two of the admin card redesign — CB: "each scheduled day may have
+  // different requests... I wanted to make comments under each day that was selected." Every
+  // note still belongs to one employee (employeeId, access rule unchanged), but can now also be
+  // scoped to a specific thing about that employee rather than one big general thread. All three
+  // null (the default — every note posted before this) is the original general thread, unchanged,
+  // still what src/app/(portal)/team/[employeeId] and /notes render. "AVAILABILITY_DATE" pairs
+  // topicId (an AvailabilitySubmission id) with topicDate (one "YYYY-MM-DD" from that
+  // submission's slots) — one conversation per selected day, not per whole submission.
+  // "PTO_REQUEST" sets topicId to a PtoRequest id and leaves topicDate null — a PTO request is
+  // already a single date range, so the request itself is the scope. No formal @relation to
+  // either table (both are optional and only ever set together with topicType by
+  // src/lib/team-notes.ts) — kept as plain columns so this table doesn't need a new RLS policy;
+  // access is still governed entirely by employeeId, same as before.
+  topicType String?
+  topicId   String?
+  topicDate String?
+
   createdAt DateTime @default(now())
 
-  employees     Employee[]
-  documents     DocumentAssignment[]
-  announcements AnnouncementAudience[]
+  @@index([employeeId, createdAt])
+  @@index([employeeId, topicType, topicId, topicDate, createdAt])
 }
 
-model Employee {
-  id               String            @id @default(uuid())
-  // Supabase Auth user id (auth.users.id). Unique — one portal account per employee.
-  userId           String            @unique
-  employeeCode     String            @unique // human-friendly ID, e.g. for payroll export
-  firstName        String
-  lastName         String
-  preferredName    String?
-  jobTitle         String
-  role             Role              @default(EMPLOYEE)
-  employmentStatus EmploymentStatus  @default(ACTIVE)
-  hireDate         DateTime
+// CB, Sept 2026: "instead of notes, I want it to be messages... I should be able to look up
+// members and send them individual messages... have an internal conversation there" — a real
+// peer-to-peer DM between any two employees, unlike TeamNote above (which is always about one
+// employee's own HR-facing thread with their supervisor chain, never a conversation between two
+// arbitrary teammates). Deliberately no separate "Conversation" table: a conversation's identity
+// is just the unordered {senderId, recipientId} pair, folded down from the message rows
+// themselves — the same "derive it, don't store it" shape aggregateTopicCounts already uses for
+// TeamNote's topic conversations (src/lib/team-notes.ts). Kept as its own table rather than a
+// wider TeamNote (a fourth topicType) because access is fundamentally different: a TeamNote
+// row's visibility is about whose EMPLOYEE RECORD it is (self/supervisor/admin), a DirectMessage
+// row's visibility is about who actually sent or received IT (see prisma/rls.sql's
+// direct_message_select) — two different rules that don't belong in one policy.
+model DirectMessage {
+  id          String   @id @default(uuid())
+  senderId    String
+  sender      Employee @relation("DirectMessageSender", fields: [senderId], references: [id])
+  recipientId String
+  recipient   Employee @relation("DirectMessageRecipient", fields: [recipientId], references: [id])
 
-  // Storage key (path within the "avatars" Supabase Storage bucket, NOT a URL) for this
-  // employee's profile photo — null until they have one. Kept as a bare key rather than a
-  // stored URL for the same reason storageKey is used on Document: the bucket is a Supabase
-  // implementation detail that can move, and src/lib/storage.ts's getAvatarPublicUrl() is the
-  // one place that turns a key into a real URL. Unlike Document's storageKey, this bucket is
-  // PUBLIC (see README "Profile photo bucket") — an admin-uploaded headshot isn't confidential
-  // the way HR documents are, and it needs to render as a plain <img src> in lists (Employees
-  // admin, Directory, Team) without minting a signed URL per row on every page load.
-  avatarStorageKey String?
+  body           String
+  attachmentKey  String?
+  attachmentName String?
 
-  departmentId String?
-  department   Department? @relation(fields: [departmentId], references: [id])
+  // "Reference the different tasks or messages from the different dates... within the chat as
+  // well" — an optional attached reference card pointing at one AvailabilitySubmission date, a
+  // PtoRequest, or a DateTask. Same plain-columns shape as TeamNote.topicType/topicId/topicDate
+  // just above (no formal @relation — all three are optional and only ever set together by
+  // src/lib/direct-messages.ts), and same reasoning: keeps this table off those other tables'
+  // own RLS policies, since a DM's visibility never depends on what it references. Columns exist
+  // from the start so this doesn't need a second migration later; the UI to actually attach one
+  // is a follow-up on top of this round's working conversations.
+  refType String?
+  refId   String?
+  refDate String?
 
-  // Self-referencing: an employee's supervisor is another employee.
-  supervisorId String?
-  supervisor   Employee?  @relation("SupervisorToReports", fields: [supervisorId], references: [id])
-  reports      Employee[] @relation("SupervisorToReports")
+  createdAt DateTime @default(now())
 
-  ttcEmail       String  @unique
-  workPhone      String?
-  personalPhone  String?
-  personalEmail  String?
+  @@index([senderId, recipientId, createdAt])
+  @@index([recipientId, senderId, createdAt])
+}
 
-  emergencyContactName  String?
-  emergencyContactPhone String?
-  emergencyContactRelation String?
+enum DateTaskStatus {
+  PENDING
+  // Employee has marked their part done; not final until an admin/supervisor confirms it —
+  // CB, Sept 2026: "I like how we have a texting feature but I feel like we should be also
+  // able to push different tasks within that specific day," and wanted it to work as a
+  // two-way approval rather than a plain self-reported checklist, same shape as availability
+  // and PTO already use (submit → review → decide).
+  COMPLETED
+  APPROVED
+}
 
-  deactivatedAt DateTime? // set the instant HR ends access; checked on every request
+// A task an admin/supervisor pushes to a team member for one specific calendar date — sits
+// alongside TeamNote's per-date conversation (same "Fri, Oct 9" scope, same card) but is a
+// discrete, checkable item rather than free-form chat. Deliberately its own table rather than
+// piggybacking on TeamNote's topic columns: a task has real status/workflow (PENDING →
+// COMPLETED → APPROVED) a message never needs, and mixing the two would make both harder to
+// query and render correctly.
+model DateTask {
+  id         String   @id @default(uuid())
+  employeeId String // whose day this task is on
+  employee   Employee @relation("DateTaskSubject", fields: [employeeId], references: [id])
 
-  // Which Quick Actions tiles this person has chosen to keep on their own dashboard — CB,
-  // round five: "I should be able to customize what quick actions is there... based off of
-  // what's available in the more tab." Stable keys (see src/lib/quick-actions.ts), not
-  // hrefs/labels, so a route rename doesn't silently drop someone's saved picks. Empty means
-  // "never customized" — the dashboard falls back to the plain defaults (defaultQuickActionKeys)
-  // rather than showing nothing.
-  quickActionKeys String[] @default([])
+  createdById String // the admin/supervisor who pushed this task
+  createdBy   Employee @relation("DateTaskCreatedBy", fields: [createdById], references: [id])
+
+  taskDate    String // "YYYY-MM-DD" — same format TeamNote.topicDate already uses
+  description String
+
+  // Same "bare key, not a URL" shape as TeamNote.attachmentKey/attachmentName — CB, Sept 2026:
+  // "I should be able to choose file or add files into that as well," on the task feature
+  // specifically, matching what a message can already carry. Resolved to a short-lived signed
+  // URL server-side (src/lib/date-tasks.ts's getDateTaskAttachmentUrl), never stored or returned
+  // as a public link.
+  attachmentKey  String?
+  attachmentName String?
+
+  status DateTaskStatus @default(PENDING)
+
+  completedAt DateTime? // set when the employee marks it done
+
+  approvedById String?
+  approvedBy   Employee? @relation("DateTaskApprovedBy", fields: [approvedById], references: [id])
+  approvedAt   DateTime? // set when an admin/supervisor confirms it
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  timeEntries          TimeEntry[]
-  timeEntryAuditEvents TimeEntryAuditEvent[] @relation("ActorOnTimeEntryAudit")
-  ptoRequestsMade      PtoRequest[]          @relation("PtoRequester")
-  ptoRequestsReviewed  PtoRequest[]          @relation("PtoReviewer")
-  documentAssignments  DocumentAssignment[]
-  acknowledgments      DocumentAcknowledgment[]
-  onboarding           EmployeeOnboarding?
-  availabilitySubmissions AvailabilitySubmission[] @relation("AvailabilitySubject")
-  availabilityReviewed    AvailabilitySubmission[] @relation("AvailabilityReviewer")
-  shiftsAsEmployee        Shift[]                   @relation("ShiftEmployee")
-  shiftsCreated           Shift[]                   @relation("ShiftCreatedBy")
-  teamNotesAsSubject      TeamNote[]                @relation("TeamNoteSubject")
-  teamNotesWritten        TeamNote[]                @relation("TeamNoteAuthor")
-  directMessagesSent      DirectMessage[]           @relation("DirectMessageSender")
-  directMessagesReceived  DirectMessage[]           @relation("DirectMessageRecipient")
-  dateTasksAsSubject      DateTask[]                @relation("DateTaskSubject")
-  dateTasksCreated        DateTask[]                @relation("DateTaskCreatedBy")
-  dateTasksApproved       DateTask[]                @relation("DateTaskApprovedBy")
-  onboardingReadinessItems OnboardingReadinessItem[]
-  onboardingCheckpoints    OnboardingCheckpoint[]
-  certificationAttempts    CertificationAttempt[]
-  announcementsWritten Announcement[]        @relation("AnnouncementAuthor")
-  announcementAudiences AnnouncementAudience[]
-  auditLogEntries      AuditLog[]            @relation("ActorOnAuditLog")
+  @@index([employeeId, taskDate])
+  @@index([employeeId, status])
+}
 
-  @@index([supervisorId])
+// ---------------------------------------------------------------------------
+// Documents & acknowledgments
+// ---------------------------------------------------------------------------
+
+enum DocumentCategory {
+  EMPLOYEE_HANDBOOK
+  HR_POLICY
+  JOB_DESCRIPTION
+  OFFER_LETTER
+  PERFORMANCE_REVIEW
+  TRAINING
+  EMPLOYEE_FORM
+  CONFIDENTIAL_EMPLOYEE_DOCUMENT
+  // Split out from a single combined "NDA + Code of Conduct + Media Release" source packet —
+  // each is a legally distinct agreement with its own acknowledgment, so each gets its own
+  // category rather than being lumped under OTHER/EMPLOYEE_FORM (see gap-analysis discussion).
+  NDA_AGREEMENT
+  CODE_OF_CONDUCT
+  MEDIA_RELEASE
+  OTHER
+}
+
+enum DocumentVisibility {
+  GLOBAL
+  DEPARTMENT
+  INDIVIDUAL
+  CONFIDENTIAL_HR // restricted to HR_ADMIN / SUPER_ADMIN only, regardless of assignment
+}
+
+model Document {
+  id          String             @id @default(uuid())
+  title       String
+  category    DocumentCategory
+  visibility  DocumentVisibility
+  version     Int                @default(1)
+  // Path/key into private object storage (never a public bucket). Resolved to a
+  // short-lived signed URL server-side after an authorization check — see
+  // src/lib/documents.ts (to be implemented alongside the Document Center module).
+  storageKey  String
+  requiresAcknowledgment Boolean @default(false)
+  archivedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assignments             DocumentAssignment[]
+  acknowledgments         DocumentAcknowledgment[]
+  onboardingItems         OnboardingItem[]
+  onboardingTemplateItems OnboardingTemplateItem[]
+}
+
+model DocumentAssignment {
+  id           String   @id @default(uuid())
+  documentId   String
+  document     Document @relation(fields: [documentId], references: [id])
+
+  // Exactly one of employeeId / departmentId is set, matching Document.visibility.
+  employeeId   String?
+  employee     Employee?   @relation(fields: [employeeId], references: [id])
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([documentId])
+  @@index([employeeId])
   @@index([departmentId])
 }
 
-// ---------------------------------------------------------------------------
-// Time & Attendance
-// ---------------------------------------------------------------------------
+model DocumentAcknowledgment {
+  id         String   @id @default(uuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id])
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
 
-enum TimeEntryStatus {
-  IN_PROGRESS
-  AWAITING_APPROVAL
-  APPROVED
-  RETURNED
-  MISSING_ENTRY
+  documentVersion Int      // version acknowledged, so a later re-upload requires re-ack
+  acknowledgedAt  DateTime @default(now())
+
+  @@unique([documentId, employeeId, documentVersion])
 }
 
-// A day is a TimeEntry (status, workDate, the review workflow) plus however many TimeSession
-// rows the employee logged that day — CB asked to be able to clock in and out multiple times
-// (no lunch step anymore, since a break is now just an ordinary clock-out/clock-in pair), so a
-// single fixed clockIn/lunchStart/lunchEnd/clockOut shape on TimeEntry itself no longer fits.
-// See the 2026-09-03 migration for how existing single-session/lunch-split rows were split into
-// TimeSession rows without losing any recorded time.
-model TimeEntry {
+// ---------------------------------------------------------------------------
+// Onboarding
+// ---------------------------------------------------------------------------
+
+// NOT_STARTED covers both "locked" and "available" — whether a given item is actually
+// actionable yet is a SEQUENCE question (is every earlier item, by sortOrder, COMPLETED?),
+// computed at read time in src/lib/onboarding.ts rather than stored here. That keeps this
+// enum additive-only to migrate (AWAITING_APPROVAL/RETURNED are brand new values, nothing
+// existing needed to change meaning or get backfilled) and means locking never drifts out of
+// sync with the real item order the way a separately-stored LOCKED flag could.
+enum OnboardingItemStatus {
+  NOT_STARTED
+  AWAITING_APPROVAL // employee submitted a DOCUMENT/TRAINING/MEETING step; needs sign-off
+  RETURNED          // HR/supervisor sent it back (see returnReason) — employee may resubmit
+  COMPLETED
+}
+
+// Drives both what completing a step actually means and whether it needs sign-off (see
+// REQUIRES_APPROVAL_BY_TYPE in src/lib/onboarding.ts — TASK auto-completes on check, the
+// other three go through AWAITING_APPROVAL first).
+enum OnboardingItemType {
+  TASK      // plain checkbox — "Review the Staff Directory"
+  DOCUMENT  // completing it means acknowledging the linked Document (see documentId below)
+  TRAINING  // e.g. a course or video with no document behind it
+  MEETING   // e.g. "Meet with Your Supervisor" — someone confirms it happened
+  // Completing it means passing the linked CertificationAttempt (see
+  // CertificationAttempt.onboardingItemId and src/lib/certification.ts) — the employee submits
+  // answers to the full New Hire Excellence Certification Test rather than a single click, so it
+  // does NOT go through advanceOnboardingItem like the other three approval-requiring types;
+  // see submitCertificationAttempt instead. Reuses the same AWAITING_APPROVAL/RETURNED state
+  // machine for the surrounding step once a test is submitted.
+  CERTIFICATION
+}
+
+model EmployeeOnboarding {
+  id         String   @id @default(uuid())
+  employeeId String   @unique
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  startedAt   DateTime @default(now())
+  completedAt DateTime?
+
+  items OnboardingItem[]
+}
+
+model OnboardingItem {
+  id           String                @id @default(uuid())
+  onboardingId String
+  onboarding   EmployeeOnboarding    @relation(fields: [onboardingId], references: [id])
+
+  label        String                // e.g. "Employee Handbook Acknowledged"
+  description  String?               // optional longer "what this involves" copy shown to the employee
+  itemType     OnboardingItemType    @default(TASK)
+  status       OnboardingItemStatus  @default(NOT_STARTED)
+  dueDate      DateTime?
+  sortOrder    Int                   @default(0)
+
+  // Only set (and only meaningful) when itemType = DOCUMENT — the document the employee must
+  // read and acknowledge to complete this step. Reuses the real Document/DocumentAcknowledgment
+  // flow (src/lib/documents.ts) rather than a second, honor-system copy of "did they read it."
+  documentId String?
+  document   Document? @relation(fields: [documentId], references: [id])
+
+  // Employee-side: when they submitted (moved NOT_STARTED/RETURNED -> AWAITING_APPROVAL).
+  // Null for a plain TASK, which has no separate submission step — it goes straight to
+  // completedAt.
+  submittedAt  DateTime?
+  completedAt  DateTime?
+  completedBy  String?               // employee.id of self-completion (TASK), or an admin marking it done
+
+  // Reviewer-side: who approved/returned this and when. approvedBy is null for a plain TASK,
+  // which has no separate reviewer step.
+  approvedBy   String?
+  approvedAt   DateTime?
+  returnReason String?               // required when status is set to RETURNED
+
+  // Only set (and only meaningful) when itemType = CERTIFICATION — every attempt the employee
+  // has submitted against this step (retakes after a RETURN included), newest last. See
+  // CertificationAttempt below and src/lib/certification.ts.
+  certificationAttempts CertificationAttempt[]
+
+  @@index([onboardingId])
+  @@index([documentId])
+}
+
+// A reusable starting checklist HR hand-builds once per role ("Camp Counselor," "Front Desk")
+// and picks from when starting a new hire's checklist — instead of typing the same steps in by
+// hand every time. Applying a template just copies its items into a fresh EmployeeOnboarding;
+// the template itself is never referenced again afterward, so editing or deleting a template
+// later never affects a checklist someone already started from it. Admin-only end to end (see
+// prisma/rls.sql) — starting a checklist is already admin-only (src/lib/onboarding.ts), so
+// there's no supervisor-facing template concept to support.
+model OnboardingTemplate {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items OnboardingTemplateItem[]
+}
+
+model OnboardingTemplateItem {
+  id         String             @id @default(uuid())
+  templateId String
+  template   OnboardingTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  label       String
+  description String?
+  itemType    OnboardingItemType @default(TASK)
+  sortOrder   Int                @default(0)
+
+  // Same rules as OnboardingItem.documentId — only set when itemType = DOCUMENT. Applying the
+  // template re-checks visibility/assignment at that moment (src/lib/onboarding.ts), the same
+  // as adding a one-off DOCUMENT step today, since the document's own state may have changed
+  // (archived, visibility changed) since the template was built.
+  documentId String?
+  document   Document? @relation(fields: [documentId], references: [id])
+
+  // Optional: due date = the new checklist's startedAt + this many days. Left null for a step
+  // with no deadline.
+  dueOffsetDays Int?
+
+  @@index([templateId])
+  @@index([documentId])
+}
+
+// Internal admin/supervisor-only readiness tasks — TTC's own real Day-1 prep work (background
+// check, TTC email account created, Drive access granted, equipment issued, workspace prepared,
+// site tour completed, welcome meeting completed, payroll setup completed externally). These are
+// human tasks TTC wants TRACKED, not automated (see the Aug 2026 document gap analysis) — a
+// deliberate mirror-image of EmployeeOnboarding/OnboardingItem: unordered (no locking/sequence),
+// never gated on each other, and — unlike every other onboarding table — never visible to the
+// employee at all (see prisma/rls.sql: no self-access clause on this one). Not attached to a
+// specific EmployeeOnboarding, because readiness prep (e.g. a background check) often needs to
+// start before HR is ready to start the employee's own guided checklist.
+model OnboardingReadinessItem {
   id         String   @id @default(uuid())
   employeeId String
   employee   Employee @relation(fields: [employeeId], references: [id])
 
-  workDate     DateTime // date only, stored at midnight UTC for the employee's work day
+  label     String
+  sortOrder Int    @default(0)
 
-  // Computed on write (see computeTotalMinutes in src/lib/time.ts): the sum of every closed
-  // session's (clockOut - clockIn) for this day. Never null once an entry exists — 0 while the
-  // day's only session(s) are still open, so "Hours today" always has a real number to show
-  // rather than looking broken mid-shift.
-  totalMinutes Int?
-
-  status TimeEntryStatus @default(IN_PROGRESS)
+  completedAt DateTime?
+  completedBy String? // employee.id of the admin/supervisor who checked it off
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  sessions    TimeSession[]
-  auditEvents TimeEntryAuditEvent[]
-
-  @@unique([employeeId, workDate]) // one entry per employee per day
-  @@index([employeeId, workDate])
-}
-
-// One clock-in/clock-out pair. A day can have any number of these — clock in, clock out for a
-// break or the day, clock back in later, repeat. `clockOut` is null exactly while that session
-// is the currently open one (there is at most one open session per TimeEntry at a time, enforced
-// in src/lib/time-actions.ts, not by the schema).
-model TimeSession {
-  id          String    @id @default(uuid())
-  timeEntryId String
-  timeEntry   TimeEntry @relation(fields: [timeEntryId], references: [id], onDelete: Cascade)
-
-  clockIn  DateTime
-  clockOut DateTime?
-
-  // Set once a "you're still clocked in" reminder email has gone out for this session, so the
-  // reminder job (src/lib/clockout-reminders.ts) never sends a second one for the same open
-  // session — cleared implicitly by clocking out (a closed session is never eligible again).
-  reminderSentAt DateTime?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([timeEntryId])
-}
-
-enum TimeAuditAction {
-  ENTRY_CREATED
-  CLOCK_IN
-  // LUNCH_STARTED/LUNCH_ENDED are no longer produced (lunch was removed as its own step — see
-  // TimeSession above) but stay in this enum, unremoved, because past audit rows already
-  // reference them; dropping a value a stored row still uses breaks that row, not just the code.
-  LUNCH_STARTED
-  LUNCH_ENDED
-  CLOCK_OUT
-  EMPLOYEE_CORRECTION_REQUESTED
-  SUPERVISOR_CORRECTION
-  HR_CORRECTION
-  TIMESHEET_APPROVED
-  TIMESHEET_RETURNED
-  // A session the team member never closed themselves, force-closed by the auto-clockout job
-  // (src/lib/auto-clockout.ts) once it's been open past the 4-hour cap — CB, Sept 2026: "it
-  // went over twelve hours, and then it documented it to be twelve hours. I don't necessarily
-  // want that because that's not necessarily true." No actor behind this one (see actorId
-  // below) — it's the system closing the gap, not a person.
-  AUTO_CLOCK_OUT
-}
-
-// Immutable log — a TimeEntry is never silently overwritten. Every change appends a row here.
-model TimeEntryAuditEvent {
-  id          String           @id @default(uuid())
-  timeEntryId String
-  timeEntry   TimeEntry        @relation(fields: [timeEntryId], references: [id])
-
-  action      TimeAuditAction
-  // Nullable — same reasoning as AvailabilitySubmission.reviewedById: most audit rows have a
-  // real employee behind them (whoever clocked in/out or reviewed), but AUTO_CLOCK_OUT rows
-  // (src/lib/auto-clockout.ts) are the system acting on a stale open session with no signed-in
-  // employee to attribute it to. Null here means exactly that — not a missing/unknown actor.
-  actorId     String?
-  actor       Employee?        @relation("ActorOnTimeEntryAudit", fields: [actorId], references: [id])
-
-  fieldName   String?          // e.g. "clockOut" — which field changed, when applicable
-  oldValue    String?
-  newValue    String?
-  comment     String?
-
-  createdAt   DateTime         @default(now())
-
-  @@index([timeEntryId])
-}
-
-// ---------------------------------------------------------------------------
-// PTO
-// ---------------------------------------------------------------------------
-
-enum PtoType {
-  VACATION
-  SICK
-  PERSONAL
-  OTHER_APPROVED_LEAVE
-}
-
-enum PtoStatus {
-  PENDING
-  APPROVED
-  DENIED
-  CANCELLED
-}
-
-model PtoRequest {
-  id         String   @id @default(uuid())
-  employeeId String
-  employee   Employee @relation("PtoRequester", fields: [employeeId], references: [id])
-
-  type      PtoType
-  startDate DateTime
-  endDate   DateTime
-  hours     Float
-  reason    String?
-
-  status     PtoStatus @default(PENDING)
-  reviewedById String?
-  reviewedBy   Employee? @relation("PtoReviewer", fields: [reviewedById], references: [id])
-  reviewedAt   DateTime?
-  reviewComment String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
 
   @@index([employeeId])
-  @@index([status])
 }
 
-enum AvailabilityStatus {
+enum OnboardingCheckpointStatus {
   PENDING
-  APPROVED
-  DENIED
-  // Added after the fact (CB, Sept 2026: "they shouldn't just be set in stone") so a team
-  // member can withdraw their own Pending or Denied submission — same shape PtoStatus already
-  // has for the identical reason on PTO requests.
-  CANCELLED
-}
-
-// A team member's submitted availability for specific calendar dates — modeled after
-// PtoRequest, not as a standing weekly template: CB (Sept 2026, after seeing the first
-// version) wants the same tap-dates-on-a-calendar experience as My Time, "week to week...
-// members just let us know when they're available, and then we will approve it so that we
-// have a record on our side." Every submission is its own row (never upserted/overwritten),
-// so approving or denying one leaves a permanent record — the same reason PtoRequest never
-// edits a past request in place, just creates a new one.
-model AvailabilitySubmission {
-  id         String   @id @default(uuid())
-  employeeId String
-  employee   Employee @relation("AvailabilitySubject", fields: [employeeId], references: [id])
-
-  // One entry per date the team member tapped: {date: "2026-09-17", startTime: "09:00",
-  // endTime: "17:00"}. A single submission can cover several (not necessarily consecutive)
-  // dates at once — everything tapped before hitting Submit becomes one record reviewed
-  // together. JSON rather than a child table for the same reason PtoRequest doesn't have one
-  // either: always read/written as one whole unit, never queried slot by slot.
-  slots Json
-
-  note String? // optional note from the team member submitting
-
-  status        AvailabilityStatus @default(PENDING)
-  submittedAt   DateTime           @default(now())
-  reviewedById  String?
-  reviewedBy    Employee?          @relation("AvailabilityReviewer", fields: [reviewedById], references: [id])
-  reviewedAt    DateTime?
-  reviewComment String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  shiftReminders AvailabilityShiftReminder[]
-  // Confirmed Shift(s) created by converting THIS submission (src/lib/shifts.ts's
-  // convertAvailabilityToShift) — see Shift's own doc comment below for why "approved
-  // availability" and "a confirmed shift" are deliberately two different records rather than
-  // one status meaning both. Plural: one submission can cover several dates, and each date is
-  // converted into its own Shift, so this can point at more than one.
-  shifts Shift[]
-
-  @@index([employeeId])
-  @@index([status])
-}
-
-// One row per (submission, date) a "your shift starts soon" email has already gone out for —
-// CB, Sept 2026: "once they pick out their availability and it's confirmed [approved]... set a
-// reminder... thirty minutes before they clock in". Slots live as JSON on AvailabilitySubmission
-// (see its own comment above), so this is a separate table rather than a field on that JSON —
-// unlike TimeSession's single reminderSentAt column (one open session, one possible reminder),
-// one submission can cover several dates and each needs its own independent sent/not-sent
-// tracking. The (submissionId, date) unique constraint is what makes a second cron run within
-// the same reminder window a no-op instead of a duplicate email — see src/lib/shift-reminders.ts.
-model AvailabilityShiftReminder {
-  id           String                 @id @default(uuid())
-  submissionId String
-  submission   AvailabilitySubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
-  date         String // "YYYY-MM-DD" — matches one entry in the submission's own slots array
-  sentAt       DateTime               @default(now())
-
-  @@unique([submissionId, date])
-}
-
-// ---------------------------------------------------------------------------
-// Shifts (confirmed schedule) — CB, Sept 2026, the four-part workflow: "Availability: when a
-// team member says they are available. Scheduling: when a supervisor approves that availability
-// as an official shift... Availability must not automatically become a confirmed shift." Before
-// this table existed, an APPROVED AvailabilitySubmission WAS treated as the confirmed schedule
-// everywhere in the app — there was no separate record, no independent lifecycle, and clock-in
-// had no relationship to it at all. This table is that missing, deliberate second step: a
-// Shift is a distinct row, created by a supervisor/admin EITHER by converting one date out of an
-// approved submission (sourceAvailabilitySubmissionId set) OR by hand for a date nobody
-// necessarily submitted availability for (sourceAvailabilitySubmissionId null) — "Create a shift
-// manually when needed." Approving availability alone still only changes
-// AvailabilitySubmission.status; nothing about that action alone creates a row here.
-// ---------------------------------------------------------------------------
-
-enum ShiftStatus {
-  UPCOMING
-  IN_PROGRESS
   COMPLETED
-  // Employee submitted "Request Shift Change" — the ORIGINAL shift stays visible with this
-  // status (per CB: "The original shift must remain visible... until a Supervisor or Admin
-  // responds") rather than being edited in place; see requestedDate/requestedStartTime/
-  // requestedEndTime/changeReason below for what they proposed. Phase 2 (not yet wired to any
-  // UI as of this migration) — the column is reserved now so the enum only needs to grow once.
-  CHANGE_REQUESTED
-  // Same shape as CHANGE_REQUESTED, for "Request Cancellation" — changeReason holds why; no
-  // proposed new date/time applies. Also phase 2.
-  CANCELLATION_REQUESTED
-  CANCELLED
-  // Terminal — this exact shift was handed to someone else. See reassignedToShift below: the
-  // original row is never mutated into a different employee's shift, a NEW row is created for
-  // the new employee and this one is marked REASSIGNED and kept, so the schedule's own history
-  // never silently rewrites who a past shift actually belonged to.
-  REASSIGNED
-  // Nobody clocked in for a shift whose end time has already passed — see
-  // deriveShiftDisplayStatus in src/lib/shifts.ts for why this is computed at read time rather
-  // than written here directly (nothing currently flips a row to this status on its own; a
-  // future scheduled job could, but doesn't yet).
-  MISSED
 }
 
-model Shift {
+// Lightweight 30/60/90-day onboarding follow-ups (Aug 2026 document gap analysis) — explicitly
+// NOT a performance-management system: three fixed, unordered check-ins seeded alongside an
+// employee's main checklist (see startOnboarding in src/lib/onboarding.ts), each just a due
+// date, a status, and freeform notes. "Supervisor" isn't a separate field here — it's simply
+// whoever Employee.supervisorId already says it is, the same as everywhere else onboarding
+// reuses that relationship rather than duplicating it. Admin/supervisor-only, like
+// OnboardingReadinessItem above (see prisma/rls.sql) — not shown on the employee's own
+// onboarding view, at least for now.
+model OnboardingCheckpoint {
   id         String   @id @default(uuid())
   employeeId String
-  employee   Employee @relation("ShiftEmployee", fields: [employeeId], references: [id])
+  employee   Employee @relation(fields: [employeeId], references: [id])
 
-  date      String // "YYYY-MM-DD" — one shift is one calendar date, same convention as
-                    // AvailabilitySlot/DateTask.taskDate; a multi-day booking is several Shift
-                    // rows, not a date range, so each date keeps its own independent status,
-                    // attendance, tasks, and change requests.
-  startTime String // "HH:MM", 24-hour
-  endTime   String // "HH:MM", 24-hour, after startTime
+  // Plain label ("30-Day Check-In"), not an enum — so a one-off custom checkpoint someday isn't
+  // blocked by a fixed set of exactly three.
+  milestone String
+  dueDate   DateTime
+  status    OnboardingCheckpointStatus @default(PENDING)
 
-  status ShiftStatus @default(UPCOMING)
+  notes              String?
+  followUpNeeded     Boolean @default(false)
+  trainingMilestones String? // freeform — only filled in where applicable, per the source docs
+  developmentGoals   String? // freeform — only filled in where applicable, per the source docs
 
-  note String? // carried over from the source availability submission's own note when
-               // converted, or set directly for a manually-created shift; editable by whoever
-               // can already write this row (supervisor/admin) as a plain scheduling note —
-               // distinct from changeReason/cancelReason below, which are about a specific
-               // requested/decided CHANGE, not a general note.
+  completedAt DateTime?
+  completedBy String? // employee.id of the admin/supervisor who completed it
 
-  // Set when this shift was created by converting one date out of an approved availability
-  // submission — null for a shift created manually (see this model's own doc comment above).
-  // onDelete: SetNull rather than Cascade: a submission being removed later should never take
-  // an already-confirmed shift down with it — the shift is its own real record by then.
-  sourceAvailabilitySubmissionId String?
-  sourceAvailabilitySubmission   AvailabilitySubmission? @relation(fields: [sourceAvailabilitySubmissionId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
 
-  createdById String // the supervisor/admin who converted or manually created this shift
-  createdBy   Employee @relation("ShiftCreatedBy", fields: [createdById], references: [id])
+  @@index([employeeId])
+}
 
-  // CHANGE_REQUESTED / CANCELLATION_REQUESTED (phase 2): what the employee asked for. requestedDate/
-  // requestedStartTime/requestedEndTime are optional even for a change request — CB's spec allows
-  // "a reason and MAY propose a new date or time," so a request can be "I need this time changed,
-  // please suggest something" with no proposal attached. Null unless one of those two statuses is
-  // (or was) active; kept even after the supervisor decides so the record of what was asked for
-  // isn't lost.
-  changeReason      String?
-  requestedDate     String?
-  requestedStartTime String?
-  requestedEndTime   String?
+// ---------------------------------------------------------------------------
+// Certification (Aug 2026 document gap analysis, item 5) — TTC's real New Hire Excellence
+// Certification Test (TTC_TEST.pdf). A CERTIFICATION-type OnboardingItem (above) is the usual
+// way an employee encounters this, but attempts aren't hard-tied to onboarding — onboardingItemId
+// is nullable so this can also stand alone later (e.g. periodic recertification) without a
+// schema change. Deliberately NOT a general-purpose quiz/LMS builder: the question bank below
+// mirrors the source document's real 26 questions one-for-one, and only the ANSWER KEY portion
+// (correct options, accepted text variants, rubric) is meant to be admin-editable — question
+// wording/order/points stay code-seeded, matching CB's "preserve the source content, don't
+// invent new content" instruction from the gap analysis.
+// ---------------------------------------------------------------------------
 
-  cancelledAt  DateTime? // when this row itself was cancelled (CANCELLED) — not set for CANCELLATION_REQUESTED, which is still pending
-  cancelReason String?   // required whenever a supervisor/admin cancels a shift outright
+enum CertificationQuestionType {
+  MULTIPLE_CHOICE // single correct option — see correctOptionKeys (exactly one key)
+  FILL_IN_BLANK   // free text matched against acceptedAnswers (normalized, case/punctuation-insensitive)
+  CHECKBOX_ALL    // multi-select — correct only if the selection exactly matches correctOptionKeys
+  // Free-text list answers (e.g. "name three TTC programs") matched against acceptedAnswers, with
+  // partial credit down to requiredMatchCount. An empty acceptedAnswers is a valid, deliberate
+  // state — not yet configured — and is scored as needing manual review until an admin sets a
+  // key (see scoreResponse in src/lib/certification.ts). This is exactly Q11's state at launch:
+  // CB asked that its answer key be left for HR to fill in later rather than have this app guess
+  // at TTC's other official program names.
+  LIST_MATCH
+  SHORT_ANSWER    // always manual review — no key is ever configured for this type
+}
 
-  // Self-reference: reassigning a shift never edits employeeId in place (see ShiftStatus.REASSIGNED
-  // above) — the original row is marked REASSIGNED and kept exactly as it was, and a brand-new Shift
-  // row is created for the new employee, linked back here. @unique because a given original shift is
-  // reassigned to at most one replacement.
-  reassignedFromShiftId String? @unique
-  reassignedFromShift   Shift?  @relation("ShiftReassignment", fields: [reassignedFromShiftId], references: [id])
-  reassignedToShift     Shift?  @relation("ShiftReassignment")
+model CertificationQuestion {
+  id      String @id @default(uuid())
+  // Stable question number matching the source test (1-24; the two closing scenarios are 25-26
+  // since the source document doesn't number them). Never reused/reassigned — the admin editor
+  // and every attempt's snapshot both key off this for a human-readable "Question 9" reference.
+  number  Int    @unique
+  section String // e.g. "TTC Mission & Identity" — matches the source document's section headers
+  sortOrder Int
+  prompt  String
+  type    CertificationQuestionType
+  points  Int
+
+  // MULTIPLE_CHOICE / CHECKBOX_ALL only: the choices shown, as [{ "key": "A", "label": "..." }].
+  options Json?
+  // MULTIPLE_CHOICE (exactly one key) / CHECKBOX_ALL (every correct key) — admin-editable.
+  correctOptionKeys String[]
+
+  // FILL_IN_BLANK / LIST_MATCH only — admin-editable accepted answers (compared normalized:
+  // trimmed, lowercased, punctuation/whitespace-insensitive). Empty = no key configured yet, see
+  // CertificationQuestionType.LIST_MATCH above.
+  acceptedAnswers    String[]
+  requiredMatchCount Int? // LIST_MATCH only — how many distinct accepted items are required
+
+  // Shown to a reviewer grading a SHORT_ANSWER/unconfigured response — CB's own rubric ("does
+  // the employee demonstrate understanding of TTC's stated standards..."), editable per question
+  // in case a future question needs its own more specific guidance.
+  rubric String?
+
+  // Soft-disable rather than delete — a retired question must still resolve for every past
+  // attempt's CertificationResponse rows (history), so it's never actually removable once used.
+  active Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  updatedBy String? // employee.id of the admin who last changed the answer key
 
-  @@index([employeeId, date])
-  @@index([employeeId, status])
-  @@index([status])
-  @@index([date])
+  responses CertificationResponse[]
+
+  @@index([active])
+}
+
+enum CertificationAttemptStatus {
+  SUBMITTED // objective questions auto-scored; still waiting on manual review of the rest
+  PASSED    // fully reviewed, finalScorePercent >= passThresholdPercent
+  FAILED    // fully reviewed, finalScorePercent < passThresholdPercent
+}
+
+model CertificationAttempt {
+  id         String   @id @default(uuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  // Set when this attempt was taken as a step on the employee's guided checklist (the normal
+  // case) — null supports certification existing outside onboarding later without a migration.
+  onboardingItemId String?
+  onboardingItem   OnboardingItem? @relation(fields: [onboardingItemId], references: [id])
+
+  status      CertificationAttemptStatus @default(SUBMITTED)
+  submittedAt DateTime                   @default(now())
+
+  // Snapshotted at submission time (auto-scored immediately) so a later answer-key edit or
+  // question change never silently rewrites a past attempt's own result.
+  objectivePointsEarned   Int
+  objectivePointsPossible Int
+  totalPointsPossible     Int // sum of every active question's points at submission time (100 today)
+
+  // Null until every response with needsManualReview=true on this attempt has been graded — see
+  // reviewCertificationResponse in src/lib/certification.ts, which is what fills these in and
+  // flips `status` from SUBMITTED to PASSED/FAILED in the same action that completes the last
+  // outstanding review.
+  manualPointsEarned Int?
+  finalScorePercent  Float?
+
+  // 85% per TTC_TEST.pdf — kept on the attempt (not just a constant) so a future policy change
+  // never silently reinterprets an already-decided historical attempt.
+  passThresholdPercent Float @default(85)
+
+  reviewedAt DateTime?
+  reviewedBy String?
+
+  createdAt DateTime @default(now())
+
+  responses CertificationResponse[]
+
+  @@index([employeeId])
+  @@index([onboardingItemId])
+}
+
+model CertificationResponse {
+  id         String                @id @default(uuid())
+  attemptId  String
+  attempt    CertificationAttempt  @relation(fields: [attemptId], references: [id])
+  questionId String
+  question   CertificationQuestion @relation(fields: [questionId], references: [id])
+
+  answerText   String? // FILL_IN_BLANK / SHORT_ANSWER free text
+  // MULTIPLE_CHOICE (one key) / CHECKBOX_ALL (every selected key). Also reused, for a LIST_MATCH
+  // question, to hold each raw free-text list entry the employee typed — not really "keys" there,
+  // but avoids a fourth answer column for what's still fundamentally "the employee's selection(s)".
+  selectedKeys String[]
+
+  isAutoScored   Boolean  @default(false) // true the instant this was scored at submission
+  isCorrect      Boolean? // set only when isAutoScored
+  pointsEarned   Int?     // auto: set at submission; manual: set once reviewed; null until then
+  pointsPossible Int      // snapshot of question.points at submission time
+
+  needsManualReview Boolean   @default(false)
+  reviewOutcome     String?   // "MEETS" | "DOES_NOT_MEET" — set only once reviewed
+  reviewComment     String?
+  reviewedAt        DateTime?
+  reviewedBy        String?
+
+  @@index([attemptId])
+  @@index([questionId])
+}
+
+// ---------------------------------------------------------------------------
+// Announcements
+// ---------------------------------------------------------------------------
+
+model Announcement {
+  id             String    @id @default(uuid())
+  title          String
+  message        String
+  authorId       String
+  author         Employee  @relation("AnnouncementAuthor", fields: [authorId], references: [id])
+  publishDate    DateTime  @default(now())
+  expirationDate DateTime?
+  createdAt      DateTime  @default(now())
+
+  audiences AnnouncementAudience[]
+
+  @@index([publishDate])
+}
+
+// Audience "Everyone" = no rows in this table for the announcement.
+model AnnouncementAudience {
+  id             String        @id @default(uuid())
+  announcementId String
+  announcement   Announcement  @relation(fields: [announcementId], references: [id])
+  departmentId   String?
+  department     Department?   @relation(fields: [departmentId], references: [id])
+  employeeId     String?       // targets a specific employee when set
+  employee       Employee?     @relation(fields: [employeeId], references: [id])
+
+  @@index([announcementId])
+}
+
+// ---------------------------------------------------------------------------
+// System-wide audit log (admin actions outside the time-entry-specific trail above)
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  actorId   String
+  actor     Employee @relation("ActorOnAuditLog", fields: [actorId], references: [id])
+
+  action    String   // e.g. "EMPLOYEE_UPDATED", "ROLE_CHANGED", "EMPLOYEE_DEACTIVATED"
+  targetType String  // e.g. "Employee", "Document"
+  targetId  String
+  oldValue  String?
+  newValue  String?
+  comment   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([targetType, targetId])
+  @@index([actorId])
 }
