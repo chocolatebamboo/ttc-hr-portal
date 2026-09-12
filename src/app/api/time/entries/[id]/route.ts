@@ -3,9 +3,9 @@ import { requireEmployee } from "@/lib/auth";
 import { deleteEmployeeTimeEntry } from "@/lib/time-actions";
 import { toErrorResponse } from "@/lib/api-errors";
 
-/** DELETE /api/time/entries/[id] — permanently remove one of the signed-in employee's own
- *  zero-recorded-time entries (see deleteEmployeeTimeEntry's doc comment for why it's limited
- *  to that — a real logged day isn't deletable this way). */
+/** DELETE /api/time/entries/[id] — permanently remove one of the signed-in employee's own time
+ *  entries, while it's still Awaiting Approval (or has no recorded time at all) — see
+ *  deleteEmployeeTimeEntry's doc comment for the full rule and why an Approved day is locked. */
 export async function DELETE(_request: Request, ctx: RouteContext<"/api/time/entries/[id]">) {
   try {
     const employee = await requireEmployee();
