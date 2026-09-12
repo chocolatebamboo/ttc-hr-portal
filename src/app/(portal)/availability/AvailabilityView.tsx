@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import AvailabilityCalendar from "@/components/AvailabilityCalendar";
 import MyAvailabilityPreview from "@/components/MyAvailabilityPreview";
 import TimeOffRequests from "@/components/TimeOffRequests";
-import type { AvailabilityDTO, AvailabilitySlot } from "@/types";
+import type { AvailabilityDTO, AvailabilitySlot, PtoType } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -34,23 +34,59 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
   // Keyed "submissionId:date" since a submission alone doesn't uniquely identify which of its
   // dates is being removed.
   const [removingDateKey, setRemovingDateKey] = useState<string | null>(null);
-  // CB, Sept 2026: "options to see and make time off if needed" right from the calendar's own
-  // date-tap popup — set when "Request time off instead" is used there, and handed down into
-  // TimeOffRequests so its form opens pre-filled with those dates. See TimeOffRequests'
-  // prefillRequest prop for why `nonce` (not just the dates) is what actually triggers it.
-  const [ptoPrefillRequest, setPtoPrefillRequest] = useState<{ startDate: string; endDate: string; nonce: number } | null>(
-    null
-  );
-  // So requesting time off from the calendar can scroll the section into view even though it's
-  // already above the calendar on the page — useful on a small phone screen where it may have
-  // scrolled out of view while using the calendar below it.
-  const timeOffSectionRef = useRef<HTMLDivElement | null>(null);
+  // CB, Sept 2026, after the first version handed the tapped dates off to the Time Off section
+  // below the calendar: "it needs to live within that pop up" — a time-off request submitted
+  // right from the calendar's own date-tap popup, in flight or failed. Distinct from
+  // submitting/error above, which are the AVAILABILITY submit's own state — these two requests
+  // are unrelated actions that just happen to originate from the same popup.
+  const [submittingTimeOff, setSubmittingTimeOff] = useState(false);
+  const [timeOffError, setTimeOffError] = useState<string | undefined>();
+  // Bumped (to a fresh value, same "nonce" idea as a cache-buster) every time a time-off request
+  // is submitted from the calendar popup, so the Time Off list above can refetch and pick up the
+  // new request — that list otherwise only loads once on its own mount, and has no other way to
+  // know a request was just created somewhere else on this page.
+  const [ptoRefreshSignal, setPtoRefreshSignal] = useState<number | null>(null);
 
-  function handleRequestTimeOffForDates(dates: string[]) {
-    if (dates.length === 0) return;
+  // CB, Sept 2026: "it needs to live within that pop up" — same POST /api/pto/requests the
+  // shared TimeOffRequests widget's own form uses, just called directly from here since this
+  // request originates entirely inside the calendar's popup rather than that widget's form.
+  // Sparse tapped dates collapse to a single start–end range the same way the widget's own date
+  // pickers would — PTO requests are always one continuous range, never a set of separate days.
+  // Returns whether it succeeded so the calendar knows whether to clear its draft and close the
+  // popup (success) or leave the popup and whatever was typed exactly as they were (failure).
+  async function handleSubmitTimeOff(
+    dates: string[],
+    values: { type: PtoType; hours: number; reason?: string }
+  ): Promise<boolean> {
+    if (dates.length === 0) return false;
     const sorted = [...dates].sort();
-    setPtoPrefillRequest({ startDate: sorted[0], endDate: sorted[sorted.length - 1], nonce: Date.now() });
-    timeOffSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setSubmittingTimeOff(true);
+    setTimeOffError(undefined);
+    try {
+      const res = await fetch("/api/pto/requests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: values.type,
+          startDate: sorted[0],
+          endDate: sorted[sorted.length - 1],
+          hours: values.hours,
+          reason: values.reason,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setTimeOffError(data.error ?? "Unable to submit your request. Please try again.");
+        return false;
+      }
+      setPtoRefreshSignal(Date.now());
+      return true;
+    } catch {
+      setTimeOffError("Unable to reach the server. Check your connection and try again.");
+      return false;
+    } finally {
+      setSubmittingTimeOff(false);
+    }
   }
 
   async function load() {
@@ -137,8 +173,8 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
         </div>
       )}
 
-      <div ref={timeOffSectionRef} className="mb-4 md:shrink-0 md:max-h-80 md:overflow-y-auto">
-        <TimeOffRequests employeeId={employeeId} prefillRequest={ptoPrefillRequest} />
+      <div className="mb-4 md:shrink-0 md:max-h-80 md:overflow-y-auto">
+        <TimeOffRequests employeeId={employeeId} refreshSignal={ptoRefreshSignal} />
       </div>
 
       {loadState === "loading" && <div className="h-64 rounded-xl border border-border bg-surface animate-pulse" />}
@@ -161,7 +197,9 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
             cancellingId,
             onRemoveDate: handleRemoveDate,
             removingDateKey,
-            onRequestTimeOff: handleRequestTimeOffForDates,
+            onSubmitTimeOff: handleSubmitTimeOff,
+            submittingTimeOff,
+            timeOffError,
           }}
         />
       )}
