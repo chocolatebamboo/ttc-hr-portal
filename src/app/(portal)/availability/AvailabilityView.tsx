@@ -106,74 +106,70 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
   }
 
   return (
-    // A Fragment, not a single wrapping div — the h-full block below needs to be a DIRECT
-    // child of `main` (see (portal)/layout.tsx) for its own md:h-full to resolve against
-    // main's actual height; nesting it one level deeper to add the Time Off section as a
-    // sibling would break that percentage and undo the whole scroll-containment fix described
-    // in its own comment below. The Time Off block after it is deliberately plain, unbounded
-    // document flow — same as every other simple page in this app (My Time, most notably) —
-    // so `main`'s own md:overflow-y-auto just scrolls a little further to reveal it, rather
-    // than trying to squeeze it into the calendar's fixed-height budget.
-    <>
-      {/* md:h-full md:flex md:flex-col md:min-h-0 (CB, Sept 2026, restructuring this page's
-          layout): gives AvailabilityCalendar's own row a real, bounded height to stretch into —
-          exactly `main`'s own available height under the portal shell's fixed header — instead
-          of the calendar sizing itself to its content and letting `main` scroll the whole page
-          as one piece. Mobile is untouched (no md: prefix means none of this applies below the
-          breakpoint): the page still scrolls normally there, same as before. */}
-      <div className="md:h-full md:flex md:flex-col md:min-h-0">
-        <h1 className="page-title text-2xl mb-1 md:shrink-0">Availability</h1>
-        <p className="text-sm text-muted mb-4 md:shrink-0">
-          Tap the dates you&apos;re available, set a time for each, and submit them for your
-          supervisor or HR to approve — so they don&apos;t have to ask you individually.
-        </p>
+    // md:h-full md:flex md:flex-col md:min-h-0 (CB, Sept 2026, restructuring this page's
+    // layout): gives AvailabilityCalendar's own row a real, bounded height to stretch into —
+    // exactly `main`'s own available height under the portal shell's fixed header — instead
+    // of the calendar sizing itself to its content and letting `main` scroll the whole page
+    // as one piece. Mobile is untouched (no md: prefix means none of this applies below the
+    // breakpoint): the page still scrolls normally there, same as before.
+    <div className="md:h-full md:flex md:flex-col md:min-h-0">
+      <h1 className="page-title text-2xl mb-1 md:shrink-0">Availability</h1>
+      <p className="text-sm text-muted mb-4 md:shrink-0">
+        Tap the dates you&apos;re available, set a time for each, and submit them for your
+        supervisor or HR to approve — so they don&apos;t have to ask you individually.
+      </p>
 
-        {/* CB, Sept 2026: wanted "a preview of the dates and times... selected," "cleanly," next
-            to the calendar itself — this was briefly on My Time, then moved here per her follow-up
-            so Availability is the one place for everything about when you're free to work. Capped
-            height + its own scroll on desktop (md:max-h-56 md:overflow-y-auto) so a long submission
-            history doesn't eat into the calendar row's own space below; unconstrained on mobile,
-            where the whole page already scrolls as one piece. showLink={false}: a "submit or
-            edit" link back to this same page would be circular. */}
-        {loadState === "ready" && submissions.length > 0 && (
-          <div className="mb-4 md:shrink-0 md:max-h-56 md:overflow-y-auto">
-            <MyAvailabilityPreview title="Your submissions" showLink={false} />
-          </div>
-        )}
-
-        {loadState === "loading" && <div className="h-64 rounded-xl border border-border bg-surface animate-pulse" />}
-
-        {loadState === "error" && (
-          <div className="rounded-xl border border-border bg-surface p-6 text-sm text-accent">
-            Unable to load your availability. Please try again or contact HR.
-          </div>
-        )}
-
-        {loadState === "ready" && (
-          <AvailabilityCalendar
-            controls={{
-              employeeId,
-              submissions,
-              onSubmit: handleSubmit,
-              submitting,
-              error,
-              onCancel: handleCancel,
-              cancellingId,
-              onRemoveDate: handleRemoveDate,
-              removingDateKey,
-            }}
-          />
-        )}
-      </div>
+      {/* CB, Sept 2026: wanted "a preview of the dates and times... selected," "cleanly," next
+          to the calendar itself — this was briefly on My Time, then moved here per her follow-up
+          so Availability is the one place for everything about when you're free to work. Capped
+          height + its own scroll on desktop (md:max-h-56 md:overflow-y-auto) so a long submission
+          history doesn't eat into the calendar row's own space below; unconstrained on mobile,
+          where the whole page already scrolls as one piece. showLink={false}: a "submit or
+          edit" link back to this same page would be circular. */}
+      {loadState === "ready" && submissions.length > 0 && (
+        <div className="mb-4 md:shrink-0 md:max-h-56 md:overflow-y-auto">
+          <MyAvailabilityPreview title="Your submissions" showLink={false} />
+        </div>
+      )}
 
       {/* CB, Sept 2026: "I don't see [time off] on the availability calendar to make those
-          adjustments... it needs to be multifunctional" — the exact same Time Off widget My
-          Time renders, so requesting/viewing/cancelling time off is reachable from here too,
-          without teaching the calendar above (already the most complex piece in this app) a
-          second, unrelated kind of request. */}
-      <div className="max-w-6xl mt-8 md:mt-10">
+          adjustments... it needs to be multifunctional" — same Time Off widget My Time renders.
+          Deliberately placed ABOVE the calendar, not below it: the calendar can span up to 6
+          months of dates to scroll through, and on mobile its own date-picker panel is a fixed,
+          always-on-top overlay while a date is selected — CB kept not finding this section when
+          it lived below all of that ("I'm still not seeing it"). Up here it's visible the
+          moment the page loads, with no scrolling past the calendar required. Capped height +
+          its own scroll on desktop (md:shrink-0 md:max-h-80 md:overflow-y-auto), same treatment
+          as the submissions preview above, so it doesn't eat into the calendar row's own space;
+          unconstrained on mobile, where the page just scrolls a little further if the list is
+          long. */}
+      <div className="mb-4 md:shrink-0 md:max-h-80 md:overflow-y-auto">
         <TimeOffRequests employeeId={employeeId} />
       </div>
-    </>
+
+      {loadState === "loading" && <div className="h-64 rounded-xl border border-border bg-surface animate-pulse" />}
+
+      {loadState === "error" && (
+        <div className="rounded-xl border border-border bg-surface p-6 text-sm text-accent">
+          Unable to load your availability. Please try again or contact HR.
+        </div>
+      )}
+
+      {loadState === "ready" && (
+        <AvailabilityCalendar
+          controls={{
+            employeeId,
+            submissions,
+            onSubmit: handleSubmit,
+            submitting,
+            error,
+            onCancel: handleCancel,
+            cancellingId,
+            onRemoveDate: handleRemoveDate,
+            removingDateKey,
+          }}
+        />
+      )}
+    </div>
   );
 }
