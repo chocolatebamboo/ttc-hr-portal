@@ -115,3 +115,18 @@ export async function assertCanAssignTasks(
   if (actor.role !== "SUPERVISOR") throw new ForbiddenError();
   await assertCanAccessEmployeeRecords(actor, targetEmployeeId);
 }
+
+/** Same rule again, for converting approved availability into a confirmed Shift, creating one
+ *  manually, or cancelling/reassigning one — client spec (Sept 2026): scheduling is a
+ *  supervisor/admin action, never something a team member does to their own record (a confirmed
+ *  shift can only be changed through a Request Shift Change / Request Cancellation, not a direct
+ *  edit — see Shift's own doc comment in prisma/schema.prisma). Same authority as reviewing that
+ *  employee's availability/PTO/timesheet — one relationship, checked the same way everywhere. */
+export async function assertCanManageShifts(
+  actor: CurrentEmployee,
+  targetEmployeeId: string
+): Promise<void> {
+  if (isAdmin(actor)) return;
+  if (actor.role !== "SUPERVISOR") throw new ForbiddenError();
+  await assertCanAccessEmployeeRecords(actor, targetEmployeeId);
+}
