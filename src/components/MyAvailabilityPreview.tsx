@@ -21,13 +21,21 @@ type LoadState = "loading" | "ready" | "error" | "empty";
  * `showLink`/`title` let the one component serve both call sites without reading oddly on
  * either: on the Availability page itself, a "Submit or edit →" link back to the very page it's
  * already on would be circular, so AvailabilityView passes showLink={false}.
+ *
+ * `showHeading` (CB, Sept 2026 — wanting "Your submissions" collapsed behind its own toggle so
+ * the calendar gets more room by default): AvailabilityView now wraps this whole component in
+ * its own collapsible disclosure button, which already shows the "Your submissions" label (plus
+ * a count) before it's ever expanded — rendering this component's own heading again right below
+ * would just repeat that same text. Defaults to true so the one other place nothing changes.
  */
 export default function MyAvailabilityPreview({
   title = "Your availability",
   showLink = true,
+  showHeading = true,
 }: {
   title?: string;
   showLink?: boolean;
+  showHeading?: boolean;
 }) {
   const [submissions, setSubmissions] = useState<AvailabilityDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
@@ -67,14 +75,16 @@ export default function MyAvailabilityPreview({
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-2">
-        <h2 className="text-sm font-medium text-muted">{title}</h2>
-        {showLink && (
-          <Link href="/availability" className="text-xs font-medium text-accent-ink hover:underline">
-            Submit or edit →
-          </Link>
-        )}
-      </div>
+      {showHeading && (
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-sm font-medium text-muted">{title}</h2>
+          {showLink && (
+            <Link href="/availability" className="text-xs font-medium text-accent-ink hover:underline">
+              Submit or edit →
+            </Link>
+          )}
+        </div>
+      )}
 
       {loadState === "loading" && (
         <div className="space-y-2">
