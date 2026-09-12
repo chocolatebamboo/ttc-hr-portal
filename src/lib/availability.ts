@@ -197,6 +197,29 @@ export async function removeAvailabilityDate(
   });
 }
 
+/**
+ * Employee permanently removes one of their own CANCELLED submissions — CB, Sept 2026: "the
+ * deleting isn't working on these," pointing at old Cancelled entries piling up in the
+ * submissions preview next to the calendar. Same Cancelled-only rule as deletePtoRequest
+ * (src/lib/pto-actions.ts): a Pending, Denied, or Approved record still means something (still
+ * awaiting a decision, or a real decision that was made), so only a status the employee
+ * themselves already withdrew is ever eligible to disappear for good. No related rows worth
+ * preserving for a submission nobody's acting on anymore — its own shift-reminder rows cascade
+ * per the schema.
+ */
+export async function deleteAvailabilitySubmission(actor: CurrentEmployee, submissionId: string): Promise<void> {
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const existing = await tx.availabilitySubmission.findUnique({ where: { id: submissionId } });
+    if (!existing || existing.employeeId !== actor.id) {
+      throw new InvalidAvailabilityError("Submission not found.");
+    }
+    if (existing.status !== "CANCELLED") {
+      throw new InvalidAvailabilityError('Only a "Cancelled" submission can be deleted.');
+    }
+    await tx.availabilitySubmission.delete({ where: { id: submissionId } });
+  });
+}
+
 type Decision = "APPROVED" | "DENIED";
 
 /** Supervisor/HR decides on one submission. Authorization (is the reviewer actually this
