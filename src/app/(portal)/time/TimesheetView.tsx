@@ -33,8 +33,14 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [busyEntryId, setBusyEntryId] = useState<string | null>(null);
   const [correctionError, setCorrectionError] = useState<string | undefined>();
-  // Which entry (if any) a delete swipe is currently in flight for — see deleteEntry below.
+  // Which entry (if any) a delete is currently in flight for — see deleteEntry below.
   const [deletingEntryId, setDeletingEntryId] = useState<string | null>(null);
+  // A failed delete (e.g. the entry got Approved by a supervisor in the moment between this
+  // page loading and the tap landing) — kept per-entry so the message shows next to the row
+  // it's actually about, same idea as correctionError but scoped tighter since more than one
+  // row can now be deletable at once.
+  const [deleteError, setDeleteError] = useState<string | undefined>();
+  const [deleteErrorEntryId, setDeleteErrorEntryId] = useState<string | null>(null);
 
   async function load() {
     setLoadState("loading");
@@ -81,16 +87,32 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
   }
 
   // CB, Sept 2026: "I should be able to delete those times... if I swipe... on the respective
-  // date block." Only ever reachable for an entry with zero recorded time (see
-  // deleteEmployeeTimeEntry's doc comment on the server) — those accidental double clock-in/
-  // clock-out taps, not real logged hours. Removed from `entries` on success so it disappears
-  // immediately; since it's a real delete against the one shared TimeEntry table, it's gone from
-  // any other view reading the same data too (a supervisor's review page, most notably).
+  // date block." Then again, once she'd tried it: a whole day should be revertible while it's
+  // still Awaiting Approval, not just an accidental zero-minute one — confirmed scope is "true
+  // delete[,] awaiting approval only... they wouldn't be able to do that on their side once we
+  // approve" (see deleteEmployeeTimeEntry's doc comment on the server for the full rule and the
+  // compliance reasoning behind the Approved lock). Removed from `entries` on success so it
+  // disappears immediately; since it's a real delete against the one shared TimeEntry table,
+  // it's gone from any other view reading the same data too (a supervisor's review page, most
+  // notably). A rejection is a real, expected case now (most likely a supervisor approved the
+  // same entry a moment earlier) rather than the near-impossible edge case it was when only
+  // zero-minute rows qualified, so it's surfaced on the row instead of failing silently.
   async function deleteEntry(entryId: string) {
     setDeletingEntryId(entryId);
+    setDeleteError(undefined);
+    setDeleteErrorEntryId(null);
     try {
       const res = await fetch(`/api/time/entries/${entryId}`, { method: "DELETE" });
-      if (res.ok) setEntries((prev) => prev.filter((e) => e.id !== entryId));
+      if (res.ok) {
+        setEntries((prev) => prev.filter((e) => e.id !== entryId));
+        return;
+      }
+      const data = await res.json().catch(() => ({}) as { error?: string });
+      setDeleteError(data.error ?? "Unable to delete this entry. Please try again.");
+      setDeleteErrorEntryId(entryId);
+    } catch {
+      setDeleteError("Unable to reach the server. Check your connection and try again.");
+      setDeleteErrorEntryId(entryId);
     } finally {
       setDeletingEntryId(null);
     }
@@ -136,15 +158,29 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
       {loadState === "ready" && (
         <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
           {[...entries].reverse().map((entry) => {
-            const deletable = (entry.totalMinutes ?? 0) === 0;
+            // Mirrors deleteEmployeeTimeEntry's server-side rule exactly: Approved is locked no
+            // matter what, even an old zero-minute mistake — everything else can go if it's
+            // still Awaiting Approval, or has no recorded time at all.
+            const deletable =
+              entry.status !== "APPROVED" && (entry.status === "AWAITING_APPROVAL" || (entry.totalMinutes ?? 0) === 0);
             const row = (
               <TimesheetEntryRow
                 entry={entry}
                 correction={{ onSubmit: submitCorrection, busyEntryId, error: correctionError }}
+                del={{
+                  onDelete: deleteEntry,
+                  deletable,
+                  deleting: deletingEntryId === entry.id,
+                  error: deleteErrorEntryId === entry.id ? deleteError : undefined,
+                }}
               />
             );
-            // Only a zero-minute entry (an accidental double clock-tap, not real hours) can be
-            // swiped away — see deleteEntry's own comment above.
+            // See the `deletable` comment above for the exact rule. The row itself now
+            // always shows its own trash-icon button when deletable (CB, Sept 2026: "aesthetic
+            // almost similar to... the widget where it's... color coded... reads cleanly" — see
+            // TimesheetEntryRow); the swipe gesture stays alongside it as a shortcut, same as
+            // MyAvailabilityPreview and TimeOffRequests both keep a visible button next to their
+            // own swipe action rather than relying on the swipe alone.
             return deletable ? (
               <SwipeReveal
                 key={entry.id}
@@ -191,13 +227,22 @@ interface SessionRow {
  *  on Availability's own submissions preview) rather than a bordered table row. Only rendered
  *  for a day that actually has an entry — see the "no placeholder rows" comment above this
  *  component's call site. Only a Returned day gets an "Edit & resubmit" control — same rule
- *  TimesheetTable enforces. */
+ *  TimesheetTable enforces.
+ *
+ *  `del` renders the small round trash-icon button next to the status pill when this row is
+ *  deletable — CB, Sept 2026, on wanting the delete option to actually be visible: "aesthetic
+ *  almost similar to... the widget where it has, like, it's color coded... it reads cleanly."
+ *  Same button shape MyAvailabilityPreview already uses next to its own status pill, just
+ *  tinted for a destructive action (rose, matching the swipe gesture's own color) rather than
+ *  the neutral/accent tint used there. */
 function TimesheetEntryRow({
   entry,
   correction,
+  del,
 }: {
   entry: TimeEntryDTO;
   correction: { onSubmit: (entryId: string, sessions: CorrectionValues) => void; busyEntryId: string | null; error?: string };
+  del: { onDelete: (entryId: string) => void; deletable: boolean; deleting: boolean; error?: string };
 }) {
   const [editing, setEditing] = useState(false);
   const [rows, setRows] = useState<SessionRow[]>([]);
@@ -251,12 +296,25 @@ function TimesheetEntryRow({
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-sm font-medium tabular-nums">{formatMinutes(entry.totalMinutes)}</span>
           <StatusPill status={entry.status} />
+          {del.deletable && (
+            <button
+              type="button"
+              onClick={() => del.onDelete(entry.id)}
+              disabled={del.deleting}
+              aria-label="Delete this entry"
+              className="h-6 w-6 flex items-center justify-center rounded-full text-muted hover:text-rose-600 hover:bg-rose-600/10 transition-colors disabled:opacity-50"
+            >
+              <TrashIcon className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
       {entry.status === "RETURNED" && entry.reviewComment && (
         <p className="text-xs text-accent mt-1.5">Returned: {entry.reviewComment}</p>
       )}
+
+      {del.error && <p className="text-xs text-accent mt-1.5">{del.error}</p>}
 
       {isCorrectable && (
         <button
