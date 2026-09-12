@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getWeek, formatWeekRange } from "@/lib/week";
 import type { CorrectionValues } from "@/components/TimesheetTable";
 import StatusPill from "@/components/StatusPill";
 import PtoStatusPill from "@/components/PtoStatusPill";
@@ -27,25 +26,34 @@ const PTO_TYPE_OPTIONS: PtoType[] = ["VACATION", "SICK", "PERSONAL", "OTHER_APPR
  *  TimesheetCalendar; defined here now that this page no longer renders that component. */
 export type PtoQuickRequestValues = { type: PtoType; hours: number; reason?: string };
 
+/** How far back "recent" reaches for the logged-hours summary below — plenty of room for a
+ *  Returned entry to still be reachable for correction, without asking the server for a whole
+ *  employment history every time this page loads. */
+const RECENT_DAYS = 90;
+
+function dateKeyDaysAgo(daysAgo: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 export default function TimesheetView({ employeeId }: { employeeId: string }) {
-  // CB, Sept 2026: "I don't want to have, like, a calendar there" — My Time is now a plain
-  // week-at-a-time table, the same shape as the supervisor's own review view
-  // (ReviewTimesheetView, src/app/(portal)/team/[employeeId]/ReviewTimesheetView.tsx) just
-  // with `correction` controls in place of `review` ones, rather than the scrolling calendar
-  // grid (TimesheetCalendar) it used to be. offset 0 = this week, -1 = last week, etc — no
-  // future weeks, same cap ReviewTimesheetView already applies.
-  const [offset, setOffset] = useState(0);
+  // CB, Sept 2026: "it should only show the times that we selected... a summary of what we
+  // selected" — not a calendar grid (gone already) and not even a fixed week of rows with
+  // blank placeholders for days nothing happened. Just the entries that actually exist,
+  // most recent first, over a rolling recent window — same "just the real submissions, no
+  // empty slots" shape as MyAvailabilityPreview and the time-off list right below.
   const [entries, setEntries] = useState<TimeEntryDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [busyEntryId, setBusyEntryId] = useState<string | null>(null);
   const [correctionError, setCorrectionError] = useState<string | undefined>();
 
-  const week = getWeek(offset);
-
   async function load() {
     setLoadState("loading");
     try {
-      const res = await fetch(`/api/time/timesheet?start=${week.start}&end=${week.end}`);
+      const start = dateKeyDaysAgo(RECENT_DAYS);
+      const end = dateKeyDaysAgo(0);
+      const res = await fetch(`/api/time/timesheet?start=${start}&end=${end}`);
       if (!res.ok) throw new Error("Failed to load timesheet");
       const data = await res.json();
       setEntries(data.entries);
@@ -58,8 +66,7 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offset]);
+  }, []);
 
   // PTO requests aren't week-scoped on the server (GET /api/pto/requests returns the whole
   // history) — loaded once on mount and refreshed after any request/cancel/delete, independent
@@ -211,37 +218,8 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
       </div>
 
       {/* CB, Sept 2026: My Time is strictly about hours actually worked, corrections, and
-          time-off — no availability info here (that lives on the Availability page), and as of
-          this round, no calendar grid either. Week navigation instead of the old scroll/month
-          list. */}
-      <div className="flex items-center gap-2 mb-3">
-        <button
-          onClick={() => setOffset((o) => o - 1)}
-          className="btn-neutral h-8 w-8 text-sm"
-          aria-label="Previous week"
-        >
-          ←
-        </button>
-        <span className="text-sm text-muted min-w-[150px] text-center tabular-nums">
-          {formatWeekRange(week.start, week.end)}
-        </span>
-        <button
-          onClick={() => setOffset((o) => Math.min(0, o + 1))}
-          disabled={offset === 0}
-          className="btn-neutral h-8 w-8 text-sm"
-          aria-label="Next week"
-        >
-          →
-        </button>
-        {offset !== 0 && (
-          <button
-            onClick={() => setOffset(0)}
-            className="text-xs text-accent-ink font-medium hover:underline ml-1"
-          >
-            This week
-          </button>
-        )}
-      </div>
+          time-off — no availability info here (that lives on the Availability page). */}
+      <h2 className="text-sm font-medium text-muted mb-2">Logged hours</h2>
 
       {loadState === "loading" && (
         <div className="rounded-xl border border-border bg-surface p-6 animate-pulse h-64" />
@@ -253,23 +231,30 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
         </div>
       )}
 
-      {/* CB, Sept 2026: "this needs to be like the widget aesthetic" — same clean card/list
+      {loadState === "empty" && (
+        <div className="rounded-xl border border-border bg-surface p-6 text-sm text-muted">
+          No hours logged in the last {RECENT_DAYS} days.
+        </div>
+      )}
+
+      {/* CB, Sept 2026: "it should only show the times that we selected... a summary of what
+          we selected" — just the entries that exist, most recent first, same clean card/list
           look as the time-off list right below (and MyAvailabilityPreview on the Availability
-          page): a rounded card, divide-y rows, a status pill on the right — not a bordered
-          spreadsheet-style table. TimesheetTable (the plain table) stays as-is for the
-          supervisor's own review view; this is its own rendering so that page is unaffected. */}
-      {(loadState === "ready" || loadState === "empty") && (
+          page): a rounded card, divide-y rows, a status pill on the right. No placeholder rows
+          for days nothing happened, and no bordered spreadsheet-style table. TimesheetTable
+          (the plain table) stays as-is for the supervisor's own review view; this is its own
+          rendering so that page is unaffected. */}
+      {loadState === "ready" && (
         <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
-          {week.days.map((day) => (
-            <TimesheetDayRow
-              key={day}
-              day={day}
-              entry={entries.find((e) => e.workDate.slice(0, 10) === day)}
+          {[...entries].reverse().map((entry) => (
+            <TimesheetEntryRow
+              key={entry.id}
+              entry={entry}
               correction={{ onSubmit: submitCorrection, busyEntryId, error: correctionError }}
             />
           ))}
           <div className="px-4 py-3 flex items-center justify-between bg-black/[0.02] text-sm font-medium">
-            <span>Weekly total</span>
+            <span>Total, last {RECENT_DAYS} days</span>
             <span className="tabular-nums">
               {formatMinutes(entries.reduce((sum, e) => sum + (e.totalMinutes ?? 0), 0))}
             </span>
@@ -474,32 +459,33 @@ interface SessionRow {
   clockOut: string;
 }
 
-/** One day, styled to match the widget/card list look used elsewhere on this page (and on
- *  Availability's own submissions preview) rather than a bordered table row. Only a Returned
- *  day gets an "Edit & resubmit" control — same rule TimesheetTable enforces. */
-function TimesheetDayRow({
-  day,
+/** One logged day, styled to match the widget/card list look used elsewhere on this page (and
+ *  on Availability's own submissions preview) rather than a bordered table row. Only rendered
+ *  for a day that actually has an entry — see the "no placeholder rows" comment above this
+ *  component's call site. Only a Returned day gets an "Edit & resubmit" control — same rule
+ *  TimesheetTable enforces. */
+function TimesheetEntryRow({
   entry,
   correction,
 }: {
-  day: string;
-  entry: TimeEntryDTO | undefined;
+  entry: TimeEntryDTO;
   correction: { onSubmit: (entryId: string, sessions: CorrectionValues) => void; busyEntryId: string | null; error?: string };
 }) {
   const [editing, setEditing] = useState(false);
   const [rows, setRows] = useState<SessionRow[]>([]);
 
+  const day = entry.workDate.slice(0, 10);
   const label = new Date(`${day}T00:00:00`).toLocaleDateString(undefined, {
     weekday: "short",
     month: "short",
     day: "numeric",
   });
-  const isCorrectionBusy = correction.busyEntryId === entry?.id;
-  const isCorrectable = entry?.status === "RETURNED";
+  const isCorrectionBusy = correction.busyEntryId === entry.id;
+  const isCorrectable = entry.status === "RETURNED";
 
   function startEditing() {
     setRows(
-      entry && entry.sessions.length > 0
+      entry.sessions.length > 0
         ? entry.sessions.map((s) => ({ clockIn: toTimeInputValue(s.clockIn), clockOut: toTimeInputValue(s.clockOut) }))
         : [{ clockIn: "", clockOut: "" }]
     );
@@ -511,7 +497,6 @@ function TimesheetDayRow({
   }
 
   function submitCorrection() {
-    if (!entry) return;
     const sessions = rows
       .map((r) => ({ clockIn: combineDateAndTime(day, r.clockIn), clockOut: combineDateAndTime(day, r.clockOut) }))
       .filter((s): s is { clockIn: Date; clockOut: Date } => s.clockIn !== null && s.clockOut !== null);
@@ -523,7 +508,7 @@ function TimesheetDayRow({
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-sm font-medium">{label}</p>
-          {entry && entry.sessions.length > 0 ? (
+          {entry.sessions.length > 0 ? (
             <div className="mt-0.5 space-y-0.5">
               {entry.sessions.map((s) => (
                 <p key={s.id} className="text-xs text-muted tabular-nums">
@@ -532,16 +517,16 @@ function TimesheetDayRow({
               ))}
             </div>
           ) : (
-            <p className="text-xs text-muted mt-0.5">No hours logged</p>
+            <p className="text-xs text-muted mt-0.5">No sessions recorded</p>
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <span className="text-sm font-medium tabular-nums">{formatMinutes(entry?.totalMinutes ?? null)}</span>
-          <StatusPill status={entry?.status ?? "MISSING_ENTRY"} />
+          <span className="text-sm font-medium tabular-nums">{formatMinutes(entry.totalMinutes)}</span>
+          <StatusPill status={entry.status} />
         </div>
       </div>
 
-      {entry?.status === "RETURNED" && entry.reviewComment && (
+      {entry.status === "RETURNED" && entry.reviewComment && (
         <p className="text-xs text-accent mt-1.5">Returned: {entry.reviewComment}</p>
       )}
 
@@ -555,7 +540,7 @@ function TimesheetDayRow({
         </button>
       )}
 
-      {editing && entry && (
+      {editing && (
         <div className="mt-2 bg-black/[0.03] rounded-lg p-3 space-y-3">
           <div className="space-y-2">
             {rows.map((row, i) => (
