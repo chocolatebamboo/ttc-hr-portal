@@ -3,28 +3,13 @@
 import { useEffect, useState } from "react";
 import type { CorrectionValues } from "@/components/TimesheetTable";
 import StatusPill from "@/components/StatusPill";
-import PtoStatusPill from "@/components/PtoStatusPill";
-import TeamNotesThread from "@/components/TeamNotesThread";
 import SwipeReveal from "@/components/SwipeReveal";
-import { ChatIcon, TrashIcon } from "@/components/icons";
-import {
-  PTO_TYPE_LABEL,
-  combineDateAndTime,
-  formatClockTime,
-  formatDateRange,
-  formatMinutes,
-  toTimeInputValue,
-} from "@/lib/time";
-import type { PtoRequestDTO, PtoType, TeamNoteTopicCountDTO, TimeEntryDTO } from "@/types";
+import TimeOffRequests from "@/components/TimeOffRequests";
+import { TrashIcon } from "@/components/icons";
+import { combineDateAndTime, formatClockTime, formatMinutes, toTimeInputValue } from "@/lib/time";
+import type { TimeEntryDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error" | "empty";
-
-const PTO_TYPE_OPTIONS: PtoType[] = ["VACATION", "SICK", "PERSONAL", "OTHER_APPROVED_LEAVE"];
-
-/** Values a PTO request is submitted with (type/hours/optional reason) — the date range comes
- *  separately from wherever the request originated. Previously re-exported from
- *  TimesheetCalendar; defined here now that this page no longer renders that component. */
-export type PtoQuickRequestValues = { type: PtoType; hours: number; reason?: string };
 
 /** How far back "recent" reaches for the logged-hours summary below — plenty of room for a
  *  Returned entry to still be reachable for correction, without asking the server for a whole
@@ -42,11 +27,14 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
   // selected" — not a calendar grid (gone already) and not even a fixed week of rows with
   // blank placeholders for days nothing happened. Just the entries that actually exist,
   // most recent first, over a rolling recent window — same "just the real submissions, no
-  // empty slots" shape as MyAvailabilityPreview and the time-off list right below.
+  // empty slots" shape as MyAvailabilityPreview and the time-off list below (now its own
+  // TimeOffRequests component, shared with the Availability page).
   const [entries, setEntries] = useState<TimeEntryDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [busyEntryId, setBusyEntryId] = useState<string | null>(null);
   const [correctionError, setCorrectionError] = useState<string | undefined>();
+  // Which entry (if any) a delete swipe is currently in flight for — see deleteEntry below.
+  const [deletingEntryId, setDeletingEntryId] = useState<string | null>(null);
 
   async function load() {
     setLoadState("loading");
@@ -66,70 +54,6 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
-  }, []);
-
-  // PTO requests aren't week-scoped on the server (GET /api/pto/requests returns the whole
-  // history) — loaded once on mount and refreshed after any request/cancel/delete, independent
-  // of which week the table above is currently showing. Submitting one now only happens through
-  // the "Request for another date" form below, since there's no calendar day to click anymore.
-  const [ptoRequests, setPtoRequests] = useState<PtoRequestDTO[]>([]);
-  const [ptoLoadState, setPtoLoadState] = useState<LoadState>("loading");
-  const [ptoSubmitting, setPtoSubmitting] = useState(false);
-  const [ptoCancellingId, setPtoCancellingId] = useState<string | null>(null);
-  // CB, round five, on the dashboard's own Time off list first, now asking for the same thing
-  // here: "I should be able to delete these as well" — a Cancelled request can be removed for
-  // good (see deletePtoRequest's doc comment in src/lib/pto-actions.ts for why only Cancelled
-  // qualifies), same underlying DELETE route TimeOffSection already uses on the dashboard.
-  const [ptoDeletingId, setPtoDeletingId] = useState<string | null>(null);
-  const [ptoError, setPtoError] = useState<string | undefined>();
-  const [standaloneFormOpen, setStandaloneFormOpen] = useState(false);
-  // Set while adjusting a denied request — CB, round four: "if they got denied... we should be
-  // able to adjust it... to select a different time or date," same parity Availability already
-  // has via AvailabilityCalendar's startResubmit. Seeds the standalone form with the denied
-  // request's values; submitting always creates a brand-new PENDING request rather than editing
-  // the denied one in place, same "never edit history" shape as Availability's resubmit.
-  const [resubmitFrom, setResubmitFrom] = useState<PtoRequestDTO | null>(null);
-  // Which request's conversation (if any) is expanded below the list — CB, Sept 2026: "I don't
-  // see where Sean could see those messages," same per-request conversation admin cards
-  // already open (TeamPtoCards' topicType="PTO_REQUEST"), now reachable from the employee's
-  // own side too.
-  const [openPtoId, setOpenPtoId] = useState<string | null>(null);
-  const [ptoMessageCounts, setPtoMessageCounts] = useState<Map<string, number>>(new Map());
-
-  async function loadPtoCounts() {
-    try {
-      const res = await fetch(`/api/team-notes/${employeeId}/topic-counts`);
-      if (!res.ok) return;
-      const data: { counts: TeamNoteTopicCountDTO[] } = await res.json();
-      const map = new Map<string, number>();
-      for (const c of data.counts) {
-        if (c.topicType !== "PTO_REQUEST") continue;
-        map.set(c.topicId, c.total);
-      }
-      setPtoMessageCounts(map);
-    } catch {
-      // best-effort — a missing badge isn't worth failing the list over
-    }
-  }
-
-  async function loadPto() {
-    setPtoLoadState("loading");
-    try {
-      const res = await fetch("/api/pto/requests");
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      setPtoRequests(data.requests);
-      setPtoLoadState(data.requests.length === 0 ? "empty" : "ready");
-    } catch {
-      setPtoLoadState("error");
-    }
-  }
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadPto();
-    loadPtoCounts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function submitCorrection(entryId: string, sessions: CorrectionValues) {
@@ -156,54 +80,19 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
     }
   }
 
-  // Used only by the standalone "Request for another date" form now — see its own comment.
-  async function submitPtoRequest(range: { startDate: string; endDate: string }, values: PtoQuickRequestValues) {
-    setPtoSubmitting(true);
-    setPtoError(undefined);
+  // CB, Sept 2026: "I should be able to delete those times... if I swipe... on the respective
+  // date block." Only ever reachable for an entry with zero recorded time (see
+  // deleteEmployeeTimeEntry's doc comment on the server) — those accidental double clock-in/
+  // clock-out taps, not real logged hours. Removed from `entries` on success so it disappears
+  // immediately; since it's a real delete against the one shared TimeEntry table, it's gone from
+  // any other view reading the same data too (a supervisor's review page, most notably).
+  async function deleteEntry(entryId: string) {
+    setDeletingEntryId(entryId);
     try {
-      const res = await fetch("/api/pto/requests", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: values.type,
-          startDate: range.startDate,
-          endDate: range.endDate,
-          hours: values.hours,
-          reason: values.reason,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setPtoError(data.error ?? "Unable to submit your request. Please try again.");
-        return;
-      }
-      setStandaloneFormOpen(false);
-      setResubmitFrom(null);
-      await loadPto();
-    } catch {
-      setPtoError("Unable to reach the server. Check your connection and try again.");
+      const res = await fetch(`/api/time/entries/${entryId}`, { method: "DELETE" });
+      if (res.ok) setEntries((prev) => prev.filter((e) => e.id !== entryId));
     } finally {
-      setPtoSubmitting(false);
-    }
-  }
-
-  async function cancelPtoRequest(requestId: string) {
-    setPtoCancellingId(requestId);
-    try {
-      await fetch(`/api/pto/requests/${requestId}/cancel`, { method: "POST" });
-      await loadPto();
-    } finally {
-      setPtoCancellingId(null);
-    }
-  }
-
-  async function deletePtoRequestRow(requestId: string) {
-    setPtoDeletingId(requestId);
-    try {
-      const res = await fetch(`/api/pto/requests/${requestId}`, { method: "DELETE" });
-      if (res.ok) setPtoRequests((prev) => prev.filter((r) => r.id !== requestId));
-    } finally {
-      setPtoDeletingId(null);
+      setDeletingEntryId(null);
     }
   }
 
@@ -239,20 +128,39 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
 
       {/* CB, Sept 2026: "it should only show the times that we selected... a summary of what
           we selected" — just the entries that exist, most recent first, same clean card/list
-          look as the time-off list right below (and MyAvailabilityPreview on the Availability
-          page): a rounded card, divide-y rows, a status pill on the right. No placeholder rows
-          for days nothing happened, and no bordered spreadsheet-style table. TimesheetTable
-          (the plain table) stays as-is for the supervisor's own review view; this is its own
+          look as the time-off list below (and MyAvailabilityPreview on the Availability page):
+          a rounded card, divide-y rows, a status pill on the right. No placeholder rows for
+          days nothing happened, and no bordered spreadsheet-style table. TimesheetTable (the
+          plain table) stays as-is for the supervisor's own review view; this is its own
           rendering so that page is unaffected. */}
       {loadState === "ready" && (
         <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
-          {[...entries].reverse().map((entry) => (
-            <TimesheetEntryRow
-              key={entry.id}
-              entry={entry}
-              correction={{ onSubmit: submitCorrection, busyEntryId, error: correctionError }}
-            />
-          ))}
+          {[...entries].reverse().map((entry) => {
+            const deletable = (entry.totalMinutes ?? 0) === 0;
+            const row = (
+              <TimesheetEntryRow
+                entry={entry}
+                correction={{ onSubmit: submitCorrection, busyEntryId, error: correctionError }}
+              />
+            );
+            // Only a zero-minute entry (an accidental double clock-tap, not real hours) can be
+            // swiped away — see deleteEntry's own comment above.
+            return deletable ? (
+              <SwipeReveal
+                key={entry.id}
+                actionSide="right"
+                actionLabel="Delete"
+                actionIcon={<TrashIcon className="h-4 w-4" />}
+                actionClassName="bg-rose-600 text-white"
+                busy={deletingEntryId === entry.id}
+                onAction={() => deleteEntry(entry.id)}
+              >
+                {row}
+              </SwipeReveal>
+            ) : (
+              <div key={entry.id}>{row}</div>
+            );
+          })}
           <div className="px-4 py-3 flex items-center justify-between bg-black/[0.02] text-sm font-medium">
             <span>Total, last {RECENT_DAYS} days</span>
             <span className="tabular-nums">
@@ -262,191 +170,11 @@ export default function TimesheetView({ employeeId }: { employeeId: string }) {
         </div>
       )}
 
-      {/* Time Off, folded in here rather than living on its own page. PTO is now requested only
-          through the form below (no calendar day to click), so it's the one way in, not a
-          fallback for dates the calendar wasn't currently showing. */}
+      {/* Time Off, folded in here rather than living on its own page — and now the exact same
+          component Availability renders too (CB, Sept 2026: "it needs to be multifunctional"),
+          so time off is fully manageable from either page. */}
       <div className="mt-8">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-medium text-muted">Your time-off requests</h2>
-          <button
-            onClick={() => {
-              setResubmitFrom(null);
-              setStandaloneFormOpen((o) => !o);
-            }}
-            className={standaloneFormOpen ? "btn-neutral text-xs px-3 py-1.5" : "text-xs text-accent-ink font-medium hover:underline"}
-          >
-            {standaloneFormOpen ? "Cancel" : "Request time off"}
-          </button>
-        </div>
-
-        {standaloneFormOpen && (
-          <StandalonePtoForm
-            key={resubmitFrom?.id ?? "new"}
-            onSubmit={submitPtoRequest}
-            submitting={ptoSubmitting}
-            error={ptoError}
-            initial={
-              resubmitFrom
-                ? {
-                    type: resubmitFrom.type,
-                    startDate: resubmitFrom.startDate,
-                    endDate: resubmitFrom.endDate,
-                    hours: String(resubmitFrom.hours),
-                    reason: resubmitFrom.reason ?? "",
-                  }
-                : undefined
-            }
-          />
-        )}
-
-        {ptoLoadState === "loading" && (
-          <div className="space-y-2">
-            {[0, 1].map((i) => (
-              <div key={i} className="h-16 rounded-xl border border-border bg-surface animate-pulse" />
-            ))}
-          </div>
-        )}
-
-        {ptoLoadState === "error" && (
-          <div className="rounded-xl border border-border bg-surface p-6 text-sm text-accent">
-            Unable to load your time-off requests. Please try again or contact HR.
-          </div>
-        )}
-
-        {ptoLoadState === "empty" && !standaloneFormOpen && (
-          <div className="rounded-xl border border-border bg-surface p-6 text-sm text-muted">
-            You haven&apos;t requested any time off yet.
-          </div>
-        )}
-
-        {ptoLoadState === "ready" && (
-          <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
-            {ptoRequests.map((r) => {
-              const msgCount = ptoMessageCounts.get(r.id) ?? 0;
-              const open = openPtoId === r.id;
-              const rowContent = (
-                <div className="px-4 py-3.5 bg-surface">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium">
-                        {PTO_TYPE_LABEL[r.type]} · {formatDateRange(r.startDate, r.endDate)}
-                      </p>
-                      <p className="text-xs text-muted">
-                        {r.hours} hours{r.reason ? ` — ${r.reason}` : ""}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <PtoStatusPill status={r.status} />
-                      {r.status === "PENDING" && (
-                        <button
-                          onClick={() => cancelPtoRequest(r.id)}
-                          disabled={ptoCancellingId === r.id}
-                          className="text-xs text-muted hover:text-accent underline disabled:opacity-50"
-                        >
-                          {ptoCancellingId === r.id ? "Cancelling…" : "Cancel"}
-                        </button>
-                      )}
-                      {/* CB, round five: "I should be able to delete these as well" — same
-                          Cancelled-only rule as the dashboard's TimeOffSection. Text link here
-                          (not just the swipe action below) for anyone on a non-touch device. */}
-                      {r.status === "CANCELLED" && (
-                        <button
-                          onClick={() => deletePtoRequestRow(r.id)}
-                          disabled={ptoDeletingId === r.id}
-                          className="text-xs text-muted hover:text-accent underline disabled:opacity-50"
-                        >
-                          {ptoDeletingId === r.id ? "Deleting…" : "Delete"}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  {r.status === "DENIED" && r.reviewComment && (
-                    <p className="text-xs text-accent mt-1.5">Denied: {r.reviewComment}</p>
-                  )}
-                  {r.status === "DENIED" && (
-                    <button
-                      onClick={() => {
-                        setResubmitFrom(r);
-                        setStandaloneFormOpen(true);
-                      }}
-                      className="mt-1.5 text-xs font-medium text-accent-ink hover:underline"
-                    >
-                      Adjust &amp; resubmit
-                    </button>
-                  )}
-
-                  {/* CB, Sept 2026: "I send it to Sean, I don't see where Sean could see those
-                      messages" — the employee-side half of the same per-request conversation
-                      TeamPtoCards opens from the admin side (topicType="PTO_REQUEST"). */}
-                  <button
-                    type="button"
-                    onClick={() => setOpenPtoId(open ? null : r.id)}
-                    className={`mt-2 flex items-center gap-1.5 text-xs font-medium rounded-full px-2.5 py-1 transition-colors ${
-                      msgCount > 0
-                        ? "bg-accent/10 text-accent-ink hover:bg-accent/20"
-                        : "text-muted hover:text-accent-ink hover:bg-black/[0.03]"
-                    }`}
-                  >
-                    <ChatIcon className="h-3.5 w-3.5" />
-                    {msgCount > 0 ? `${msgCount} message${msgCount === 1 ? "" : "s"}` : "Message about this request"}
-                  </button>
-
-                  {open && (
-                    <div className="mt-2">
-                      <TeamNotesThread
-                        employeeId={employeeId}
-                        viewerId={employeeId}
-                        topicType="PTO_REQUEST"
-                        topicId={r.id}
-                        placeholder="Message your supervisor or HR about this request…"
-                        onMessagePosted={loadPtoCounts}
-                      />
-                    </div>
-                  )}
-                </div>
-              );
-
-              // CB, round four: "I should be able to slide to the left... and delete it" — a
-              // PENDING request swipes to Cancel (cancelPtoRequest itself enforces that only
-              // PENDING can be cancelled). CB, round five, the same swipe now also covers
-              // Cancelled rows — "I should be able to delete these as well" — swiping there
-              // calls the real DELETE (deletePtoRequestRow) instead, since a Cancelled request
-              // has nothing left to "cancel" into. The inline text link above (Cancel/Delete)
-              // stays either way, for anyone on a non-touch device.
-              if (r.status === "PENDING") {
-                return (
-                  <SwipeReveal
-                    key={r.id}
-                    actionSide="right"
-                    actionLabel="Cancel"
-                    actionIcon={<TrashIcon className="h-4 w-4" />}
-                    actionClassName="bg-rose-600 text-white"
-                    busy={ptoCancellingId === r.id}
-                    onAction={() => cancelPtoRequest(r.id)}
-                  >
-                    {rowContent}
-                  </SwipeReveal>
-                );
-              }
-              if (r.status === "CANCELLED") {
-                return (
-                  <SwipeReveal
-                    key={r.id}
-                    actionSide="right"
-                    actionLabel="Delete"
-                    actionIcon={<TrashIcon className="h-4 w-4" />}
-                    actionClassName="bg-rose-600 text-white"
-                    busy={ptoDeletingId === r.id}
-                    onAction={() => deletePtoRequestRow(r.id)}
-                  >
-                    {rowContent}
-                  </SwipeReveal>
-                );
-              }
-              return <div key={r.id}>{rowContent}</div>;
-            })}
-          </div>
-        )}
+        <TimeOffRequests employeeId={employeeId} />
       </div>
     </div>
   );
@@ -593,111 +321,5 @@ function TimeField({ label, value, onChange }: { label: string; value: string; o
         className="rounded-md border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
       />
     </label>
-  );
-}
-
-function StandalonePtoForm({
-  onSubmit,
-  submitting,
-  error,
-  initial,
-}: {
-  onSubmit: (range: { startDate: string; endDate: string }, values: PtoQuickRequestValues) => void;
-  submitting: boolean;
-  error?: string;
-  /** Pre-fills the form from a denied request being adjusted & resubmitted — omitted for a
-   *  plain "Request time off." */
-  initial?: { type: PtoType; startDate: string; endDate: string; hours: string; reason: string };
-}) {
-  const [type, setType] = useState<PtoType>(initial?.type ?? "VACATION");
-  const [startDate, setStartDate] = useState(initial?.startDate ?? "");
-  const [endDate, setEndDate] = useState(initial?.endDate ?? "");
-  const [hours, setHours] = useState(initial?.hours ?? "");
-  const [reason, setReason] = useState(initial?.reason ?? "");
-
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    onSubmit({ startDate, endDate }, { type, hours: Number(hours), reason: reason.trim() || undefined });
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="bg-surface border border-border rounded-xl p-5 space-y-4 mb-3">
-      {initial && (
-        <p className="text-xs font-medium text-accent-ink -mb-1">
-          Adjusting your denied request — submitting sends this as a brand-new request.
-        </p>
-      )}
-      <div>
-        <label className="block text-sm font-medium mb-1.5">Type of leave</label>
-        <select
-          value={type}
-          onChange={(e) => setType(e.target.value as PtoType)}
-          className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-accent"
-        >
-          {PTO_TYPE_OPTIONS.map((t) => (
-            <option key={t} value={t}>
-              {PTO_TYPE_LABEL[t]}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="block text-sm font-medium mb-1.5">Start date</label>
-          <input
-            type="date"
-            required
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-accent"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium mb-1.5">End date</label>
-          <input
-            type="date"
-            required
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-accent"
-          />
-        </div>
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-1.5">Number of hours</label>
-        <input
-          type="number"
-          required
-          min="0.5"
-          step="0.5"
-          value={hours}
-          onChange={(e) => setHours(e.target.value)}
-          placeholder="e.g. 8"
-          className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-accent"
-        />
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-1.5">Reason / comment (optional)</label>
-        <textarea
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          rows={2}
-          className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-accent"
-        />
-      </div>
-
-      {error && (
-        <p role="alert" className="text-sm text-accent">
-          {error}
-        </p>
-      )}
-
-      <button type="submit" disabled={submitting} className="btn-primary px-5 py-2.5 text-sm">
-        {submitting ? "Submitting…" : "Submit Request"}
-      </button>
-    </form>
   );
 }
