@@ -1,6 +1,7 @@
 import { withRlsContext } from "@/lib/db";
 import { sendEmail } from "@/lib/email";
 import { formatTime12h } from "@/lib/availability-format";
+import { orgNow, timeToMinutes } from "@/lib/time";
 import type { AvailabilitySlot } from "@/types";
 
 /** CB, Sept 2026: "once they pick out their availability and it's confirmed [approved]...
@@ -8,14 +9,6 @@ import type { AvailabilitySlot } from "@/types";
  *  within this many minutes of the slot's own start time (see sendPendingShiftReminders below)
  *  — not a repeating nudge, same one-shot-per-thing philosophy as clockout-reminders.ts. */
 const REMINDER_LEAD_MINUTES = 30;
-
-/** Nothing else in this app has needed an organization timezone before this — every existing
- *  date/time comparison either runs in the browser (each person's own local clock) or is a
- *  pure duration check (clockout-reminders.ts's 3-hour threshold, which never needs to know
- *  what time of day it actually is). This is the first comparison that has to know "is it
- *  actually 9:00 AM right now" on the server, where there's no browser timezone to fall back
- *  on — CB confirmed Eastern for where TTC's shifts are. */
-const ORG_TIMEZONE = "America/New_York";
 
 /** Background actor for this job — same reasoning as clockout-reminders.ts's SYSTEM_ACTOR:
  *  there's no signed-in employee behind a scheduled run, and RLS's is_admin() only cares about
@@ -26,32 +19,6 @@ export interface ShiftReminderResult {
   checked: number;
   sent: number;
   failed: { submissionId: string; date: string; error: string }[];
-}
-
-/** Today's date key and minutes-since-midnight, both in ORG_TIMEZONE rather than whatever
- *  timezone this process happens to be running in (Render's servers run in UTC) — Intl's
- *  timeZone option resolves the actual local wall-clock time for that zone, DST included,
- *  without needing a date library. */
-function orgNow(): { dateKey: string; minutesSinceMidnight: number } {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: ORG_TIMEZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(new Date());
-  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
-  const dateKey = `${get("year")}-${get("month")}-${get("day")}`;
-  // hour12: false can render midnight as "24" in some engines rather than "00" — normalize.
-  const minutesSinceMidnight = (Number(get("hour")) % 24) * 60 + Number(get("minute"));
-  return { dateKey, minutesSinceMidnight };
-}
-
-function toMinutes(time: string): number {
-  const [h, m] = time.split(":").map(Number);
-  return h * 60 + m;
 }
 
 /**
@@ -93,7 +60,7 @@ export async function sendPendingShiftReminders(): Promise<ShiftReminderResult> 
       if (!todaysSlot) continue;
 
       checked++;
-      const minutesUntilStart = toMinutes(todaysSlot.startTime) - nowMinutes;
+      const minutesUntilStart = timeToMinutes(todaysSlot.startTime) - nowMinutes;
       // Only the window from "now" up to REMINDER_LEAD_MINUTES ahead — a negative value means
       // the shift already started (the cron missed its window; better to stay quiet than send
       // a reminder claiming the shift starts in the past) and this cron is expected to run
