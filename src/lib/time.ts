@@ -95,3 +95,43 @@ export function combineDateAndTime(dateKey: string, timeValue: string): Date | n
   const [hours, minutes] = timeValue.split(":").map(Number);
   return new Date(year, month - 1, day, hours, minutes);
 }
+
+/** TTC's own timezone, for the handful of SERVER-side comparisons that genuinely need to know
+ *  what time it is right now for a real person at TTC, not just today's date. Originally lived
+ *  only in src/lib/shift-reminders.ts ("Nothing else in this app has needed an organization
+ *  timezone before this") — moved here once src/lib/shifts.ts (deriveShiftDisplayStatus) needed
+ *  the exact same "what's today/right-now in Eastern, on a server that runs in UTC" logic a
+ *  second time, rather than a second copy. CB confirmed Eastern for where TTC's shifts are. */
+export const ORG_TIMEZONE = "America/New_York";
+
+/** Today's date key AND minutes-since-midnight, both resolved in ORG_TIMEZONE rather than
+ *  whatever timezone this process happens to be running in (Render's servers run in UTC).
+ *  Different from todayDateKey() above in exactly that way: todayDateKey() reflects wherever
+ *  it's CALLED FROM (a real local date when called from the browser; the server's own UTC date
+ *  when called from an API route) and is date-only, which is what date-boundary validation like
+ *  submitAvailability's "today or later" check wants. This is for the opposite case — a
+ *  server-side comparison against a specific wall-clock TIME, where "whatever timezone this
+ *  process happens to run in" is the wrong answer. */
+export function orgNow(): { dateKey: string; minutesSinceMidnight: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: ORG_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  const dateKey = `${get("year")}-${get("month")}-${get("day")}`;
+  // hour12: false can render midnight as "24" in some engines rather than "00" — normalize.
+  const minutesSinceMidnight = (Number(get("hour")) % 24) * 60 + Number(get("minute"));
+  return { dateKey, minutesSinceMidnight };
+}
+
+/** "HH:MM" -> minutes since midnight — the same conversion orgNow()'s minutesSinceMidnight is
+ *  already in, so a stored startTime/endTime can be compared against it directly. */
+export function timeToMinutes(time: string): number {
+  const [h, m] = time.split(":").map(Number);
+  return h * 60 + m;
+}
