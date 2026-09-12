@@ -29,7 +29,19 @@ export type PtoQuickRequestValues = { type: PtoType; hours: number; reason?: str
  * the dashboard's own read-only "recent time off" summary (server-supplied `recentPto`, no
  * fetching of its own). Similar name, different job; kept as two files on purpose.
  */
-export default function TimeOffRequests({ employeeId }: { employeeId: string }) {
+export default function TimeOffRequests({
+  employeeId,
+  prefillRequest,
+}: {
+  employeeId: string;
+  /** CB, Sept 2026: "options to see and make time off if needed" right from the Availability
+   *  calendar's own date-tap popup — AvailabilityCalendar hands the tapped dates up to
+   *  AvailabilityView, which turns them into this. `nonce` (a fresh value every time, e.g.
+   *  Date.now()) is what actually triggers the form opening — passing the same {startDate,
+   *  endDate} twice in a row without a new nonce is a no-op, so re-tapping the same dates still
+   *  reopens the form instead of silently doing nothing on an unchanged object. */
+  prefillRequest?: { startDate: string; endDate: string; nonce: number } | null;
+}) {
   const [ptoRequests, setPtoRequests] = useState<PtoRequestDTO[]>([]);
   const [ptoLoadState, setPtoLoadState] = useState<LoadState>("loading");
   const [ptoSubmitting, setPtoSubmitting] = useState(false);
@@ -47,6 +59,18 @@ export default function TimeOffRequests({ employeeId }: { employeeId: string }) 
   // request's values; submitting always creates a brand-new PENDING request rather than editing
   // the denied one in place, same "never edit history" shape as Availability's resubmit.
   const [resubmitFrom, setResubmitFrom] = useState<PtoRequestDTO | null>(null);
+  // Same idea as resubmitFrom, but seeded from the Availability calendar's own dates rather
+  // than a denied request — see prefillRequest's doc comment above.
+  const [datesFromCalendar, setDatesFromCalendar] = useState<{ startDate: string; endDate: string } | null>(null);
+
+  useEffect(() => {
+    if (!prefillRequest) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setResubmitFrom(null);
+    setDatesFromCalendar({ startDate: prefillRequest.startDate, endDate: prefillRequest.endDate });
+    setStandaloneFormOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillRequest?.nonce]);
   // Which request's conversation (if any) is expanded below the list — CB, Sept 2026: "I don't
   // see where Sean could see those messages," same per-request conversation admin cards
   // already open (TeamPtoCards' topicType="PTO_REQUEST"), now reachable from the employee's
@@ -112,6 +136,7 @@ export default function TimeOffRequests({ employeeId }: { employeeId: string }) 
       }
       setStandaloneFormOpen(false);
       setResubmitFrom(null);
+      setDatesFromCalendar(null);
       await loadPto();
     } catch {
       setPtoError("Unable to reach the server. Check your connection and try again.");
@@ -147,6 +172,7 @@ export default function TimeOffRequests({ employeeId }: { employeeId: string }) 
         <button
           onClick={() => {
             setResubmitFrom(null);
+            setDatesFromCalendar(null);
             setStandaloneFormOpen((o) => !o);
           }}
           className={standaloneFormOpen ? "btn-neutral text-xs px-3 py-1.5" : "text-xs text-accent-ink font-medium hover:underline"}
@@ -157,7 +183,7 @@ export default function TimeOffRequests({ employeeId }: { employeeId: string }) 
 
       {standaloneFormOpen && (
         <StandalonePtoForm
-          key={resubmitFrom?.id ?? "new"}
+          key={resubmitFrom?.id ?? (datesFromCalendar ? `${datesFromCalendar.startDate}-${datesFromCalendar.endDate}` : "new")}
           onSubmit={submitPtoRequest}
           submitting={ptoSubmitting}
           error={ptoError}
@@ -170,7 +196,9 @@ export default function TimeOffRequests({ employeeId }: { employeeId: string }) 
                   hours: String(resubmitFrom.hours),
                   reason: resubmitFrom.reason ?? "",
                 }
-              : undefined
+              : datesFromCalendar
+                ? { startDate: datesFromCalendar.startDate, endDate: datesFromCalendar.endDate }
+                : undefined
           }
         />
       )}
@@ -336,9 +364,11 @@ function StandalonePtoForm({
   onSubmit: (range: { startDate: string; endDate: string }, values: PtoQuickRequestValues) => void;
   submitting: boolean;
   error?: string;
-  /** Pre-fills the form from a denied request being adjusted & resubmitted — omitted for a
+  /** Pre-fills the form — from a denied request being adjusted & resubmitted (every field), or
+   *  from dates tapped on the Availability calendar (just the date range, via prefillRequest —
+   *  type/hours/reason are left for the person to fill in themselves). Omitted entirely for a
    *  plain "Request time off." */
-  initial?: { type: PtoType; startDate: string; endDate: string; hours: string; reason: string };
+  initial?: { type?: PtoType; startDate: string; endDate: string; hours?: string; reason?: string };
 }) {
   const [type, setType] = useState<PtoType>(initial?.type ?? "VACATION");
   const [startDate, setStartDate] = useState(initial?.startDate ?? "");
