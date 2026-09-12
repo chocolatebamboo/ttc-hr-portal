@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import AvailabilityCalendar from "@/components/AvailabilityCalendar";
 import MyAvailabilityPreview from "@/components/MyAvailabilityPreview";
 import TimeOffRequests from "@/components/TimeOffRequests";
@@ -34,6 +34,24 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
   // Keyed "submissionId:date" since a submission alone doesn't uniquely identify which of its
   // dates is being removed.
   const [removingDateKey, setRemovingDateKey] = useState<string | null>(null);
+  // CB, Sept 2026: "options to see and make time off if needed" right from the calendar's own
+  // date-tap popup — set when "Request time off instead" is used there, and handed down into
+  // TimeOffRequests so its form opens pre-filled with those dates. See TimeOffRequests'
+  // prefillRequest prop for why `nonce` (not just the dates) is what actually triggers it.
+  const [ptoPrefillRequest, setPtoPrefillRequest] = useState<{ startDate: string; endDate: string; nonce: number } | null>(
+    null
+  );
+  // So requesting time off from the calendar can scroll the section into view even though it's
+  // already above the calendar on the page — useful on a small phone screen where it may have
+  // scrolled out of view while using the calendar below it.
+  const timeOffSectionRef = useRef<HTMLDivElement | null>(null);
+
+  function handleRequestTimeOffForDates(dates: string[]) {
+    if (dates.length === 0) return;
+    const sorted = [...dates].sort();
+    setPtoPrefillRequest({ startDate: sorted[0], endDate: sorted[sorted.length - 1], nonce: Date.now() });
+    timeOffSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   async function load() {
     setLoadState("loading");
@@ -106,12 +124,6 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
   }
 
   return (
-    // md:h-full md:flex md:flex-col md:min-h-0 (CB, Sept 2026, restructuring this page's
-    // layout): gives AvailabilityCalendar's own row a real, bounded height to stretch into —
-    // exactly `main`'s own available height under the portal shell's fixed header — instead
-    // of the calendar sizing itself to its content and letting `main` scroll the whole page
-    // as one piece. Mobile is untouched (no md: prefix means none of this applies below the
-    // breakpoint): the page still scrolls normally there, same as before.
     <div className="md:h-full md:flex md:flex-col md:min-h-0">
       <h1 className="page-title text-2xl mb-1 md:shrink-0">Availability</h1>
       <p className="text-sm text-muted mb-4 md:shrink-0">
@@ -119,32 +131,14 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
         supervisor or HR to approve — so they don&apos;t have to ask you individually.
       </p>
 
-      {/* CB, Sept 2026: wanted "a preview of the dates and times... selected," "cleanly," next
-          to the calendar itself — this was briefly on My Time, then moved here per her follow-up
-          so Availability is the one place for everything about when you're free to work. Capped
-          height + its own scroll on desktop (md:max-h-56 md:overflow-y-auto) so a long submission
-          history doesn't eat into the calendar row's own space below; unconstrained on mobile,
-          where the whole page already scrolls as one piece. showLink={false}: a "submit or
-          edit" link back to this same page would be circular. */}
       {loadState === "ready" && submissions.length > 0 && (
         <div className="mb-4 md:shrink-0 md:max-h-56 md:overflow-y-auto">
           <MyAvailabilityPreview title="Your submissions" showLink={false} />
         </div>
       )}
 
-      {/* CB, Sept 2026: "I don't see [time off] on the availability calendar to make those
-          adjustments... it needs to be multifunctional" — same Time Off widget My Time renders.
-          Deliberately placed ABOVE the calendar, not below it: the calendar can span up to 6
-          months of dates to scroll through, and on mobile its own date-picker panel is a fixed,
-          always-on-top overlay while a date is selected — CB kept not finding this section when
-          it lived below all of that ("I'm still not seeing it"). Up here it's visible the
-          moment the page loads, with no scrolling past the calendar required. Capped height +
-          its own scroll on desktop (md:shrink-0 md:max-h-80 md:overflow-y-auto), same treatment
-          as the submissions preview above, so it doesn't eat into the calendar row's own space;
-          unconstrained on mobile, where the page just scrolls a little further if the list is
-          long. */}
-      <div className="mb-4 md:shrink-0 md:max-h-80 md:overflow-y-auto">
-        <TimeOffRequests employeeId={employeeId} />
+      <div ref={timeOffSectionRef} className="mb-4 md:shrink-0 md:max-h-80 md:overflow-y-auto">
+        <TimeOffRequests employeeId={employeeId} prefillRequest={ptoPrefillRequest} />
       </div>
 
       {loadState === "loading" && <div className="h-64 rounded-xl border border-border bg-surface animate-pulse" />}
@@ -167,6 +161,7 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
             cancellingId,
             onRemoveDate: handleRemoveDate,
             removingDateKey,
+            onRequestTimeOff: handleRequestTimeOffForDates,
           }}
         />
       )}
