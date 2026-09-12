@@ -34,6 +34,11 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
   // Keyed "submissionId:date" since a submission alone doesn't uniquely identify which of its
   // dates is being removed.
   const [removingDateKey, setRemovingDateKey] = useState<string | null>(null);
+  // CB, Sept 2026: "we should be able to remove the whole thing entirely if we wanted to" — the
+  // real, permanent delete, only ever legal once a submission is already Cancelled (see
+  // deleteAvailabilitySubmission's doc comment in src/lib/availability.ts). Tracked the same
+  // shape as cancellingId, just for this separate action.
+  const [deletingSubmissionId, setDeletingSubmissionId] = useState<string | null>(null);
   // CB, Sept 2026, after the first version handed the tapped dates off to the Time Off section
   // below the calendar: "it needs to live within that pop up" — a time-off request submitted
   // right from the calendar's own date-tap popup, in flight or failed. Distinct from
@@ -159,7 +164,27 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
     }
   }
 
+  // CB, Sept 2026: "we should be able to remove the whole thing entirely" — permanently, once
+  // it's already Cancelled (see deleteAvailabilitySubmission's doc comment). Removes the row
+  // from `submissions` outright on success, same as MyAvailabilityPreview's own delete.
+  async function handleDeleteSubmission(submissionId: string) {
+    setDeletingSubmissionId(submissionId);
+    try {
+      const res = await fetch(`/api/availability/${submissionId}`, { method: "DELETE" });
+      if (!res.ok) return;
+      setSubmissions((prev) => prev.filter((s) => s.id !== submissionId));
+    } finally {
+      setDeletingSubmissionId(null);
+    }
+  }
+
   return (
+    // md:h-full md:flex md:flex-col md:min-h-0 (CB, Sept 2026, restructuring this page's
+    // layout): gives AvailabilityCalendar's own row a real, bounded height to stretch into —
+    // exactly `main`'s own available height under the portal shell's fixed header — instead
+    // of the calendar sizing itself to its content and letting `main` scroll the whole page
+    // as one piece. Mobile is untouched (no md: prefix means none of this applies below the
+    // breakpoint): the page still scrolls normally there, same as before.
     <div className="md:h-full md:flex md:flex-col md:min-h-0">
       <h1 className="page-title text-2xl mb-1 md:shrink-0">Availability</h1>
       <p className="text-sm text-muted mb-4 md:shrink-0">
@@ -167,12 +192,30 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
         supervisor or HR to approve — so they don&apos;t have to ask you individually.
       </p>
 
+      {/* CB, Sept 2026: wanted "a preview of the dates and times... selected," "cleanly," next
+          to the calendar itself — this was briefly on My Time, then moved here per her follow-up
+          so Availability is the one place for everything about when you're free to work. Capped
+          height + its own scroll on desktop (md:max-h-56 md:overflow-y-auto) so a long submission
+          history doesn't eat into the calendar row's own space below; unconstrained on mobile,
+          where the whole page already scrolls as one piece. showLink={false}: a "submit or
+          edit" link back to this same page would be circular. */}
       {loadState === "ready" && submissions.length > 0 && (
         <div className="mb-4 md:shrink-0 md:max-h-56 md:overflow-y-auto">
           <MyAvailabilityPreview title="Your submissions" showLink={false} />
         </div>
       )}
 
+      {/* CB, Sept 2026: "I don't see [time off] on the availability calendar to make those
+          adjustments... it needs to be multifunctional" — same Time Off widget My Time renders.
+          Deliberately placed ABOVE the calendar, not below it: the calendar can span up to 6
+          months of dates to scroll through, and on mobile its own date-picker panel is a fixed,
+          always-on-top overlay while a date is selected — CB kept not finding this section when
+          it lived below all of that ("I'm still not seeing it"). Up here it's visible the
+          moment the page loads, with no scrolling past the calendar required. Capped height +
+          its own scroll on desktop (md:shrink-0 md:max-h-80 md:overflow-y-auto), same treatment
+          as the submissions preview above, so it doesn't eat into the calendar row's own space;
+          unconstrained on mobile, where the page just scrolls a little further if the list is
+          long. */}
       <div className="mb-4 md:shrink-0 md:max-h-80 md:overflow-y-auto">
         <TimeOffRequests employeeId={employeeId} refreshSignal={ptoRefreshSignal} />
       </div>
@@ -197,6 +240,8 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
             cancellingId,
             onRemoveDate: handleRemoveDate,
             removingDateKey,
+            onDeleteSubmission: handleDeleteSubmission,
+            deletingSubmissionId,
             onSubmitTimeOff: handleSubmitTimeOff,
             submittingTimeOff,
             timeOffError,
