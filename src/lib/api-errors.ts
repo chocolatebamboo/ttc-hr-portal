@@ -5,6 +5,7 @@ import {
   InvalidClockActionError,
   InvalidReviewActionError,
   InvalidCorrectionError,
+  InvalidTimeEntryDeleteError,
   MissingReturnCommentError,
 } from "@/lib/time-actions";
 import { InvalidPtoRequestError } from "@/lib/pto-actions";
@@ -48,6 +49,7 @@ export function toErrorResponse(err: unknown) {
     err instanceof MissingReturnCommentError ||
     err instanceof MissingReturnReasonError ||
     err instanceof InvalidCorrectionError ||
+    err instanceof InvalidTimeEntryDeleteError ||
     err instanceof InvalidPtoRequestError ||
     err instanceof InvalidAvailabilityError ||
     err instanceof InvalidEmployeeError ||
