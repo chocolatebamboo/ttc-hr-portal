@@ -1,5 +1,7 @@
 import { withRlsContext } from "@/lib/db";
 import { isAdmin, ForbiddenError } from "@/lib/authorization";
+import { writeAuditLog } from "@/lib/audit-log";
+import { writeNotification } from "@/lib/notifications";
 import type { AdminPtoRequestDTO, AdminPtoSummaryDTO, CurrentEmployee } from "@/types";
 
 export class InvalidPtoRequestError extends Error {
@@ -88,7 +90,7 @@ export async function decidePtoRequest(
       throw new InvalidPtoRequestError('Only a "Pending" request can be decided.');
     }
 
-    return tx.ptoRequest.update({
+    const row = await tx.ptoRequest.update({
       where: { id: requestId },
       data: {
         status: decision,
@@ -97,6 +99,24 @@ export async function decidePtoRequest(
         reviewComment: comment?.trim() || null,
       },
     });
+    await writeAuditLog(tx, {
+      actorId: reviewer.id,
+      action: decision === "APPROVED" ? "PTO_APPROVED" : "PTO_DENIED",
+      targetType: "PtoRequest",
+      targetId: row.id,
+      oldValue: "PENDING",
+      newValue: decision,
+      comment: comment?.trim() || undefined,
+    });
+    await writeNotification(tx, {
+      recipientId: existing.employeeId,
+      type: decision === "APPROVED" ? "PTO_APPROVED" : "PTO_DENIED",
+      title: decision === "APPROVED" ? "Your PTO request was approved" : "Your PTO request was denied",
+      body: comment?.trim() || undefined,
+      targetType: "PtoRequest",
+      targetId: row.id,
+    });
+    return row;
   });
 }
 
