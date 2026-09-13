@@ -1,5 +1,6 @@
+import type { PrismaClient } from "@prisma/client";
 import { withRlsContext } from "@/lib/db";
-import { computeTotalMinutes, todayDateKey } from "@/lib/time";
+import { CLOCK_IN_WINDOW_MINUTES, computeTotalMinutes, orgNow, timeToMinutes, todayDateKey } from "@/lib/time";
 import type { CurrentEmployee, TimeClockState } from "@/types";
 
 export class InvalidClockActionError extends Error {
@@ -12,7 +13,66 @@ export class InvalidClockActionError extends Error {
   }
 }
 
+/** Phase 3 (client spec, Sept 2026): thrown when a clock-in falls outside the window (or has
+ *  no scheduled shift at all) and no reason was given for it — see resolveClockInShift below.
+ *  Never thrown for clock-out (gating is clock-in only). */
+export class MissingExceptionReasonError extends Error {
+  constructor(reasonPromptKind: "no_shift" | "outside_window") {
+    super(
+      reasonPromptKind === "no_shift"
+        ? "You don't have a shift scheduled today — add a quick reason for clocking in."
+        : "This is outside your scheduled shift's start time — add a quick reason for clocking in."
+    );
+    this.name = "MissingExceptionReasonError";
+  }
+}
+
 type ClockAction = "CLOCK_IN" | "CLOCK_OUT";
+
+/** What CLOCK_IN would match against right now, if anything — shared by getClockInStatus (the
+ *  UI's before-the-click preview) and applyClockAction itself (the real, authoritative check),
+ *  so the two can never disagree about what counts as on-time. Picks whichever of today's live
+ *  shifts (UPCOMING, or already mid-request — CHANGE_REQUESTED/CANCELLATION_REQUESTED, still
+ *  actually happening until a supervisor decides otherwise) has a startTime closest to right
+ *  now, in case there's ever more than one in a day; CANCELLED/REASSIGNED shifts never match —
+ *  there's nothing left for this employee to actually show up for. */
+async function resolveClockInShift(
+  tx: PrismaClient,
+  employeeId: string
+): Promise<{ shiftId: string; date: string; startTime: string; endTime: string; withinWindow: boolean } | null> {
+  const { dateKey: today, minutesSinceMidnight: nowMinutes } = orgNow();
+  const candidates = await tx.shift.findMany({
+    where: { employeeId, date: today, status: { in: ["UPCOMING", "CHANGE_REQUESTED", "CANCELLATION_REQUESTED"] } },
+    select: { id: true, date: true, startTime: true, endTime: true },
+  });
+  if (candidates.length === 0) return null;
+
+  const nearest = candidates.reduce((best, s) =>
+    Math.abs(timeToMinutes(s.startTime) - nowMinutes) < Math.abs(timeToMinutes(best.startTime) - nowMinutes) ? s : best
+  );
+  const withinWindow = Math.abs(timeToMinutes(nearest.startTime) - nowMinutes) <= CLOCK_IN_WINDOW_MINUTES;
+  return { shiftId: nearest.id, date: nearest.date, startTime: nearest.startTime, endTime: nearest.endTime, withinWindow };
+}
+
+/** The employee's own before-the-click preview of what clocking in right now would do — lets
+ *  TimeClockCard show a reason field proactively instead of only finding out after a rejected
+ *  POST. Read-only; never used to actually decide anything on its own (applyClockAction below
+ *  re-resolves the same thing at the moment of the real action, since "right now" can move
+ *  between the two calls). */
+export async function getClockInStatus(actor: CurrentEmployee): Promise<{
+  requiresReason: boolean;
+  reasonPromptKind: "no_shift" | "outside_window" | null;
+  shift: { date: string; startTime: string; endTime: string } | null;
+}> {
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const match = await resolveClockInShift(tx, actor.id);
+    if (!match) return { requiresReason: true, reasonPromptKind: "no_shift", shift: null };
+    const shift = { date: match.date, startTime: match.startTime, endTime: match.endTime };
+    return match.withinWindow
+      ? { requiresReason: false, reasonPromptKind: null, shift }
+      : { requiresReason: true, reasonPromptKind: "outside_window", shift };
+  });
+}
 
 /**
  * The one function every time-clock API route calls. Re-derives the current state from the
@@ -20,8 +80,13 @@ type ClockAction = "CLOCK_IN" | "CLOCK_OUT";
  * single legal next action: Clock In only while there's no open session, Clock Out only while
  * there is one. Any number of clock-in/clock-out pairs are allowed per day now — no lunch step,
  * no cap — so this is deliberately just two states rather than the old four-stage flow.
+ *
+ * `reason` is only ever read for CLOCK_IN, and only matters when it turns out to be an
+ * exception (see resolveClockInShift above) — required in that case (MissingExceptionReasonError
+ * otherwise), ignored entirely for an on-time clock-in so an extra typed note never gets treated
+ * as anything other than what it is.
  */
-export async function applyClockAction(actor: CurrentEmployee, action: ClockAction) {
+export async function applyClockAction(actor: CurrentEmployee, action: ClockAction, reason?: string) {
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const workDate = new Date(`${todayDateKey()}T00:00:00.000Z`);
     const now = new Date();
@@ -49,8 +114,30 @@ export async function applyClockAction(actor: CurrentEmployee, action: ClockActi
       createdNew = true;
     }
 
+    // Phase 3 (client spec, Sept 2026): "clock-in gated to scheduled shifts with a 15-minute
+    // window and exception-reason flagging" — resolved fresh here (not trusted from
+    // getClockInStatus's earlier preview) since "right now" can move between the two calls.
+    // CB confirmed: never blocks the clock-in outright, and never applies to CLOCK_OUT at all —
+    // an exception still gets recorded and paid, just flagged with its own reason for whoever
+    // reviews the timesheet.
+    let exceptionComment: string | undefined;
     if (action === "CLOCK_IN") {
-      await tx.timeSession.create({ data: { timeEntryId: entry.id, clockIn: now } });
+      const match = await resolveClockInShift(tx, actor.id);
+      const isException = !match || !match.withinWindow;
+      const trimmedReason = reason?.trim();
+      if (isException && !trimmedReason) {
+        throw new MissingExceptionReasonError(match ? "outside_window" : "no_shift");
+      }
+      exceptionComment = isException ? trimmedReason : undefined;
+      await tx.timeSession.create({
+        data: {
+          timeEntryId: entry.id,
+          clockIn: now,
+          shiftId: match?.shiftId ?? null,
+          isException,
+          exceptionReason: isException ? trimmedReason! : null,
+        },
+      });
     } else {
       await tx.timeSession.update({ where: { id: openSession!.id }, data: { clockOut: now } });
     }
@@ -67,6 +154,7 @@ export async function applyClockAction(actor: CurrentEmployee, action: ClockActi
         actorId: actor.id,
         fieldName: action === "CLOCK_IN" ? "clockIn" : "clockOut",
         newValue: now.toISOString(),
+        comment: exceptionComment,
       },
     });
 
@@ -299,10 +387,10 @@ export class InvalidTimeEntryDeleteError extends Error {
  * immutable log ("a TimeEntry is never silently overwritten" — see prisma/schema.prisma)
  * precisely so real worked hours are never quietly erased once someone has signed off on them —
  * a real wage/hour recordkeeping concern for actual hourly employees, not just a UI nicety. Below
- * Approved, the rule is unchanged from before: any Awaiting Approval day, or a zero-minute
- * mistake regardless of its (non-Approved) status. A Returned day with real time on it still
- * isn't deletable here — it already has a path back (Edit & resubmit), and that path is what
- * keeps the supervisor's return comment attached to something.
+ * Approved, the rule is unchanged from before this phase: any Awaiting Approval day, or a
+ * zero-minute mistake regardless of its (non-Approved) status. A Returned day with real time on
+ * it still isn't deletable here — it already has a path back (Edit & resubmit), and that path is
+ * what keeps the supervisor's return comment attached to something.
  *
  * Deletes the entry's own audit rows first since there's nothing worth preserving for a day
  * that's being fully withdrawn, then the entry itself (its sessions cascade per the schema).
