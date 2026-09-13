@@ -104,6 +104,14 @@ export function combineDateAndTime(dateKey: string, timeValue: string): Date | n
  *  second time, rather than a second copy. CB confirmed Eastern for where TTC's shifts are. */
 export const ORG_TIMEZONE = "America/New_York";
 
+/** Phase 3 of the scheduling/attendance/task workflow rebuild (client spec, Sept 2026):
+ *  "clock-in gated to scheduled shifts with a 15-minute window." How many minutes on either
+ *  side of a shift's own startTime still count as clocking in "on time" — see
+ *  resolveClockInShift in src/lib/time-actions.ts for where this is actually applied. Deliberately
+ *  NOT applied to clocking out at all (CB confirmed: only clock-in is gated) — someone running
+ *  over or leaving a little early is just recorded normally, same as before this phase. */
+export const CLOCK_IN_WINDOW_MINUTES = 15;
+
 /** Today's date key AND minutes-since-midnight, both resolved in ORG_TIMEZONE rather than
  *  whatever timezone this process happens to be running in (Render's servers run in UTC).
  *  Different from todayDateKey() above in exactly that way: todayDateKey() reflects wherever
