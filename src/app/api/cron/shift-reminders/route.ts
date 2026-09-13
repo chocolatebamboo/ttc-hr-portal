@@ -1,30 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireEmployee } from "@/lib/auth";
-import { assertCanAccessEmployeeRecords } from "@/lib/authorization";
-import { listMyShifts, listShiftsForEmployee } from "@/lib/shifts";
-import { toErrorResponse } from "@/lib/api-errors";
+import { sendPendingShiftReminders } from "@/lib/shift-reminders";
 
 /**
- * GET /api/shifts?employeeId=... — employeeId defaults to the caller. Same shape as
- * GET /api/availability: self, or a supervisor/admin of that employee — checked here, and
- * again by RLS (shift_select). Returns { shifts: ShiftDTO[] }, soonest first — this is "My
- * Schedule," the confirmed-and-scheduled counterpart to "My Availability."
+ * POST /api/cron/shift-reminders — hit on a schedule by a Render Cron Job, not by any
+ * user-facing UI. Same shape as /api/cron/clockout-reminders: no signed-in employee behind
+ * this call, so it's protected by the same shared secret (CRON_SECRET) instead of
+ * requireEmployee()/assertIsAdmin() — see README's "Shift reminders" section for how the Cron
+ * Job is configured to send it.
  */
-export async function GET(request: NextRequest) {
+export async function POST(request: NextRequest) {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) {
+    return NextResponse.json({ error: "CRON_SECRET is not configured." }, { status: 503 });
+  }
+  if (request.headers.get("authorization") !== `Bearer ${secret}`) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
-    const employee = await requireEmployee();
-    const { searchParams } = new URL(request.url);
-    const targetEmployeeId = searchParams.get("employeeId") ?? employee.id;
-
-    await assertCanAccessEmployeeRecords(employee, targetEmployeeId);
-
-    const shifts =
-      targetEmployeeId === employee.id
-        ? await listMyShifts(employee)
-        : await listShiftsForEmployee(employee, targetEmployeeId);
-
-    return NextResponse.json({ shifts });
+    const result = await sendPendingShiftReminders();
+    return NextResponse.json(result);
   } catch (err) {
-    return toErrorResponse(err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Unknown error" },
+      { status: 500 }
+    );
   }
 }
