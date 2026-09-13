@@ -2,6 +2,8 @@ import type { PrismaClient } from "@prisma/client";
 import { withRlsContext } from "@/lib/db";
 import { assertCanAccessEmployeeRecords, assertCanAssignTasks, assertIsAdmin } from "@/lib/authorization";
 import { getSignedDownloadUrl } from "@/lib/storage";
+import { writeAuditLog } from "@/lib/audit-log";
+import { writeNotification } from "@/lib/notifications";
 import type { CurrentEmployee, DateTaskDTO } from "@/types";
 
 export class InvalidDateTaskError extends Error {
@@ -138,6 +140,22 @@ export async function createDateTask(
       },
       include: TASK_INCLUDE,
     });
+    await writeAuditLog(tx, {
+      actorId: actor.id,
+      action: "DATE_TASK_ASSIGNED",
+      targetType: "DateTask",
+      targetId: row.id,
+      newValue: taskDate,
+      comment: trimmed,
+    });
+    await writeNotification(tx, {
+      recipientId: employeeId,
+      type: "DATE_TASK_ASSIGNED",
+      title: "You have a new task",
+      body: trimmed,
+      targetType: "DateTask",
+      targetId: row.id,
+    });
     return toDTO(row);
   });
 }
@@ -184,6 +202,14 @@ export async function completeDateTask(actor: CurrentEmployee, taskId: string): 
       data: { status: "COMPLETED", completedAt: new Date() },
       include: TASK_INCLUDE,
     });
+    await writeAuditLog(tx, {
+      actorId: actor.id,
+      action: "DATE_TASK_COMPLETED",
+      targetType: "DateTask",
+      targetId: updated.id,
+      oldValue: "PENDING",
+      newValue: "COMPLETED",
+    });
     return toDTO(updated);
   });
 }
@@ -202,6 +228,14 @@ export async function approveDateTask(actor: CurrentEmployee, taskId: string): P
       where: { id: taskId },
       data: { status: "APPROVED", approvedById: actor.id, approvedAt: new Date() },
       include: TASK_INCLUDE,
+    });
+    await writeAuditLog(tx, {
+      actorId: actor.id,
+      action: "DATE_TASK_APPROVED",
+      targetType: "DateTask",
+      targetId: updated.id,
+      oldValue: "COMPLETED",
+      newValue: "APPROVED",
     });
     return toDTO(updated);
   });
