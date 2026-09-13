@@ -754,11 +754,10 @@ create policy announcement_audience_write on "AnnouncementAudience" for all usin
 -- directly." Phase 1 has no team-member-initiated write path on this table at all, so unlike
 -- date_task_write above, "employeeId" = current_employee_id() is NOT included in the write
 -- policy below — only that employee's own supervisor, or an admin, may insert/update/delete a
--- Shift row. Phase 2 (Request Shift Change / Request Cancellation) will need to open a narrow
--- self-write path for exactly those two actions; when that lands, the new policy should still
--- only ever let the OWNER set changeReason/requestedDate/requestedStartTime/requestedEndTime/
--- status (to CHANGE_REQUESTED/CANCELLATION_REQUESTED only) — enforced at the app layer the same
--- way availability_write leaves "which fields" to src/lib/availability.ts, not to RLS.
+-- Shift row. Phase 2 (Request Shift Change / Request Cancellation) opens a narrow self-write
+-- path for exactly those two actions — see shift_self_request below, which lets the OWNER set
+-- changeReason/requestedDate/requestedStartTime/requestedEndTime/status (to
+-- CHANGE_REQUESTED/CANCELLATION_REQUESTED only), enforced at the trigger level, not just here.
 alter table "Shift" enable row level security;
 alter table "Shift" force row level security;
 
@@ -776,4 +775,68 @@ create policy shift_write on "Shift" for all using (
 ) with check (
   is_admin()
   or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+);
+
+-- Phase 2 (client spec, Sept 2026): the narrow self-write path shift_write's own comment above
+-- already flagged as coming — "Request Shift Change" / "Request Cancellation." A second,
+-- PERMISSIVE update-only policy (Postgres combines multiple permissive policies for the same
+-- command with OR, so this adds a self path alongside — not instead of — shift_write, which
+-- still covers supervisor/admin actions on someone else's shift). The policy alone only gets an
+-- employee onto their OWN row; enforce_shift_self_request() below is what actually keeps this
+-- narrow, since RLS is row-level, not column/value-level: without it, this policy would let an
+-- employee set literally anything on their own shift, including employeeId/date/status to
+-- something with no relation to a "request" at all.
+create or replace function enforce_shift_self_request() returns trigger as $$
+begin
+  if is_admin() then
+    return new;
+  end if;
+
+  -- Only constrains a genuine self-service update (the row's own employee acting on it) — a
+  -- supervisor/admin's update to a DIFFERENT employee's shift goes through shift_write's own
+  -- policy instead, and every check below short-circuits false for them (old."employeeId" can
+  -- never equal current_employee_id() there, since a person can't supervise themselves).
+  if old."employeeId" = current_employee_id() then
+    if old.status != 'UPCOMING' then
+      raise exception 'You can only request a change or cancellation on an upcoming shift.';
+    end if;
+    if new.status not in ('CHANGE_REQUESTED', 'CANCELLATION_REQUESTED') then
+      raise exception 'Invalid status for a self-service shift request.';
+    end if;
+    if new."date" is distinct from old."date"
+      or new."startTime" is distinct from old."startTime"
+      or new."endTime" is distinct from old."endTime"
+      or new."note" is distinct from old."note"
+      or new."employeeId" is distinct from old."employeeId"
+      or new."sourceAvailabilitySubmissionId" is distinct from old."sourceAvailabilitySubmissionId"
+      or new."createdById" is distinct from old."createdById"
+      or new."cancelledAt" is distinct from old."cancelledAt"
+      or new."cancelReason" is distinct from old."cancelReason"
+      or new."reassignedFromShiftId" is distinct from old."reassignedFromShiftId"
+      or new."reviewedById" is distinct from old."reviewedById"
+      or new."reviewedAt" is distinct from old."reviewedAt"
+      or new."reviewComment" is distinct from old."reviewComment"
+      or new."createdAt" is distinct from old."createdAt"
+    then
+      raise exception 'You may only submit a change or cancellation request, not edit the shift directly.';
+    end if;
+  end if;
+
+  return new;
+end;
+$$ language plpgsql;
+
+alter function enforce_shift_self_request() set search_path = 'public';
+
+drop trigger if exists shift_self_request_guard on "Shift";
+create trigger shift_self_request_guard
+  before update on "Shift"
+  for each row
+  execute function enforce_shift_self_request();
+
+drop policy if exists shift_self_request on "Shift";
+create policy shift_self_request on "Shift" for update using (
+  "employeeId" = current_employee_id()
+) with check (
+  "employeeId" = current_employee_id()
 );
