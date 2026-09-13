@@ -2,12 +2,27 @@
 
 import { useEffect, useState } from "react";
 import ShiftStatusPill from "@/components/ShiftStatusPill";
+import MyDateTasksPanel from "@/components/MyDateTasksPanel";
+import TeamNotesThread from "@/components/TeamNotesThread";
+import { ChatIcon, ChecklistIcon } from "@/components/icons";
 import { formatSlotDate, formatTime12h } from "@/lib/availability-format";
-import type { ShiftDTO } from "@/types";
+import type { ShiftDTO, TeamNoteTopicCountDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
 
 const UPCOMING_STATUSES = new Set(["UPCOMING", "IN_PROGRESS", "CHANGE_REQUESTED", "CANCELLATION_REQUESTED"]);
+
+/** shiftId -> total message count, built from GET /api/team-notes/[employeeId]/topic-counts —
+ *  same shape TeamAvailabilityCards' own countsByDate builds, just keyed on SHIFT topics
+ *  instead of AVAILABILITY_DATE ones. */
+function countsByShift(counts: TeamNoteTopicCountDTO[]): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const c of counts) {
+    if (c.topicType !== "SHIFT") continue;
+    map.set(c.topicId, c.total);
+  }
+  return map;
+}
 
 /**
  * "My Schedule" — phase 1 of the scheduling workflow rebuild (client spec, Sept 2026): the
@@ -16,11 +31,17 @@ const UPCOMING_STATUSES = new Set(["UPCOMING", "IN_PROGRESS", "CHANGE_REQUESTED"
  * submitted or approved as availability — see Shift's own doc comment in prisma/schema.prisma.
  * A team member can't edit or delete anything here directly (client spec: "the Team Member must
  * not be able to edit or delete it directly") — phase 2 adds the one path around that: Request
- * Shift Change / Request Cancellation, below.
+ * Shift Change / Request Cancellation, below. Phase 3 (client spec, Sept 2026): "re-point tasks
+ * and messages onto shifts instead of the original availability submission" — each shift now
+ * has its own expandable tasks/conversation section, same components AvailabilityCalendar
+ * already uses for an availability date, just scoped to topicType="SHIFT" / the shift's own id
+ * instead of an availability submission's date.
  */
-export default function ScheduleView() {
+export default function ScheduleView({ employeeId }: { employeeId: string }) {
   const [shifts, setShifts] = useState<ShiftDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [messageCounts, setMessageCounts] = useState<Map<string, number>>(new Map());
+  const [openShiftId, setOpenShiftId] = useState<string | null>(null);
 
   async function load() {
     setLoadState("loading");
@@ -35,9 +56,24 @@ export default function ScheduleView() {
     }
   }
 
+  // Best-effort, same reasoning as every other chip-badge fetch in this app — a shift missing
+  // its message count isn't worth failing the whole schedule over.
+  async function loadCounts() {
+    try {
+      const res = await fetch(`/api/team-notes/${employeeId}/topic-counts`);
+      if (!res.ok) return;
+      const data: { counts: TeamNoteTopicCountDTO[] } = await res.json();
+      setMessageCounts(countsByShift(data.counts));
+    } catch {
+      // ignored — see comment above
+    }
+  }
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
+    loadCounts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (loadState === "loading") {
@@ -81,7 +117,16 @@ export default function ScheduleView() {
         ) : (
           <div className="space-y-2.5">
             {upcoming.map((s) => (
-              <ShiftCard key={s.id} shift={s} onChanged={load} />
+              <ShiftCard
+                key={s.id}
+                shift={s}
+                employeeId={employeeId}
+                messageCount={messageCounts.get(s.id) ?? 0}
+                expanded={openShiftId === s.id}
+                onToggleExpand={() => setOpenShiftId(openShiftId === s.id ? null : s.id)}
+                onMessagePosted={loadCounts}
+                onChanged={load}
+              />
             ))}
           </div>
         )}
@@ -94,7 +139,15 @@ export default function ScheduleView() {
           </h2>
           <div className="space-y-2.5">
             {past.map((s) => (
-              <ShiftCard key={s.id} shift={s} />
+              <ShiftCard
+                key={s.id}
+                shift={s}
+                employeeId={employeeId}
+                messageCount={messageCounts.get(s.id) ?? 0}
+                expanded={openShiftId === s.id}
+                onToggleExpand={() => setOpenShiftId(openShiftId === s.id ? null : s.id)}
+                onMessagePosted={loadCounts}
+              />
             ))}
           </div>
         </section>
@@ -108,7 +161,23 @@ export default function ScheduleView() {
  *  a shift whose STORED status is UPCOMING (not the derived displayStatus — a shift already
  *  IN_PROGRESS or COMPLETED by the clock is still, underneath, an UPCOMING row eligible for a
  *  request right up until it's actually over; see deriveShiftDisplayStatus's own doc comment). */
-function ShiftCard({ shift, onChanged }: { shift: ShiftDTO; onChanged?: () => void }) {
+function ShiftCard({
+  shift,
+  employeeId,
+  messageCount,
+  expanded,
+  onToggleExpand,
+  onMessagePosted,
+  onChanged,
+}: {
+  shift: ShiftDTO;
+  employeeId: string;
+  messageCount: number;
+  expanded: boolean;
+  onToggleExpand: () => void;
+  onMessagePosted: () => void;
+  onChanged?: () => void;
+}) {
   const [mode, setMode] = useState<"none" | "change" | "cancel">("none");
   const [reason, setReason] = useState("");
   const [proposeNewTime, setProposeNewTime] = useState(false);
@@ -262,6 +331,44 @@ function ShiftCard({ shift, onChanged }: { shift: ShiftDTO; onChanged?: () => vo
               Cancel
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Phase 3 (client spec, Sept 2026): "re-point tasks and messages onto shifts instead of
+          the original availability submission" — same per-date tasks/conversation pairing
+          AvailabilityCalendar already shows for an availability date, now on the shift itself. */}
+      <button
+        type="button"
+        onClick={onToggleExpand}
+        className={`mt-3 flex items-center gap-1.5 text-xs font-medium transition-colors ${
+          expanded ? "text-accent-ink" : "text-muted hover:text-accent-ink"
+        }`}
+      >
+        <ChecklistIcon className="h-3.5 w-3.5" />
+        Tasks & messages
+        <span className="flex items-center gap-0.5">
+          <ChatIcon className="h-3 w-3" />
+          {messageCount > 0 ? messageCount : ""}
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="mt-2.5 space-y-2.5">
+          <div>
+            <p className="text-xs font-semibold text-muted mb-1 flex items-center gap-1.5">
+              <ChecklistIcon className="h-3.5 w-3.5" />
+              Tasks for this shift
+            </p>
+            <MyDateTasksPanel employeeId={employeeId} taskDate={shift.date} />
+          </div>
+          <TeamNotesThread
+            employeeId={employeeId}
+            viewerId={employeeId}
+            topicType="SHIFT"
+            topicId={shift.id}
+            placeholder="Message your supervisor or HR about this shift…"
+            onMessagePosted={onMessagePosted}
+          />
         </div>
       )}
     </div>
