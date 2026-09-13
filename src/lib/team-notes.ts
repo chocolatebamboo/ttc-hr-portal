@@ -22,7 +22,7 @@ export class TeamNoteNotFoundError extends Error {
 export interface TeamNoteTopic {
   type: TeamNoteTopicType;
   id: string;
-  /** AVAILABILITY_DATE only — "YYYY-MM-DD". Must be omitted for PTO_REQUEST. */
+  /** AVAILABILITY_DATE only — "YYYY-MM-DD". Must be omitted for PTO_REQUEST and SHIFT. */
   date?: string;
 }
 
@@ -31,8 +31,12 @@ function assertValidTopic(topic: TeamNoteTopic | undefined): void {
   if (topic.type === "AVAILABILITY_DATE" && !topic.date) {
     throw new InvalidTeamNoteError("A specific date is required for an availability conversation.");
   }
-  if (topic.type === "PTO_REQUEST" && topic.date) {
-    throw new InvalidTeamNoteError("A PTO conversation isn't scoped to a specific date.");
+  if ((topic.type === "PTO_REQUEST" || topic.type === "SHIFT") && topic.date) {
+    throw new InvalidTeamNoteError(
+      topic.type === "PTO_REQUEST"
+        ? "A PTO conversation isn't scoped to a specific date."
+        : "A shift conversation isn't scoped to a separate date — the shift is already one specific date."
+    );
   }
 }
 
