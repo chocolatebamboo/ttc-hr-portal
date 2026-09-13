@@ -198,7 +198,7 @@ export interface AdminPtoSummaryDTO {
   decided: AdminPtoRequestDTO[];
 }
 
-export type AvailabilityStatus = "PENDING" | "APPROVED" | "DENIED" | "CANCELLED";
+export type AvailabilityStatus = "PENDING" | "APPROVED" | "DENIED" | "CANCELLED" | "ADJUSTMENT_REQUESTED";
 
 /** One specific calendar date a team member marked themselves available, with a start/end
  *  time for that day — tapped directly on the Availability calendar, same "HH:MM" 24-hour
@@ -222,6 +222,11 @@ export interface AvailabilityDTO {
   submittedAt: string;
   reviewComment: string | null;
   reviewedAt: string | null;
+  /** Set only alongside status ADJUSTMENT_REQUESTED — the reviewer's counter-proposed times for
+   *  each date in `slots` above (client spec, phase 2: "Adjust the proposed time and send it to
+   *  the team member for confirmation"). See AvailabilitySubmission.adjustedSlots's own doc
+   *  comment in prisma/schema.prisma for why this is kept even after the employee responds. */
+  adjustedSlots: AvailabilitySlot[] | null;
 }
 
 /** Same shape as AvailabilityDTO plus who it belongs to — for the supervisor/HR-wide
@@ -270,6 +275,15 @@ export interface ShiftDTO {
   requestedDate: string | null;
   requestedStartTime: string | null;
   requestedEndTime: string | null;
+  /** When the still-active (or most recently active) change/cancellation request was submitted
+   *  — see Shift.requestedAt's own doc comment in prisma/schema.prisma. */
+  requestedAt: string | null;
+  /** When a supervisor/admin last resolved a request (or acted on the shift directly) — paired
+   *  with reviewComment below. Null until the first resolution. */
+  reviewedAt: string | null;
+  /** The reviewer's own note back to the team member — set on decline (why), and optionally on
+   *  approval too. Distinct from changeReason, which is always the team member's own reason. */
+  reviewComment: string | null;
   cancelReason: string | null;
   reassignedFromShiftId: string | null;
   createdAt: string;
@@ -286,6 +300,9 @@ export interface AdminShiftDTO extends ShiftDTO {
   departmentName: string | null;
   createdById: string;
   createdByName: string;
+  /** Who resolved the most recent request (or acted on the shift directly) — null to match
+   *  reviewedAt. */
+  reviewedByName: string | null;
 }
 
 /** One message in a team member's notes/messaging thread (src/lib/team-notes.ts) — see
