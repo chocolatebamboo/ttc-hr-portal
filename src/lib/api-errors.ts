@@ -7,6 +7,7 @@ import {
   InvalidCorrectionError,
   InvalidTimeEntryDeleteError,
   MissingReturnCommentError,
+  MissingExceptionReasonError,
 } from "@/lib/time-actions";
 import { InvalidPtoRequestError } from "@/lib/pto-actions";
 import { InvalidAvailabilityError } from "@/lib/availability";
@@ -57,8 +58,8 @@ export function toErrorResponse(err: unknown) {
     err instanceof InvalidEmployeeError ||
     err instanceof InvalidDepartmentError ||
     err instanceof InvalidDocumentError ||
-    err instanceof DocumentUploadError ||
     err instanceof AvatarUploadError ||
+    err instanceof DocumentUploadError ||
     err instanceof InvalidOnboardingError ||
     err instanceof InvalidAnnouncementError ||
     err instanceof InvalidPayrollRangeError ||
@@ -67,7 +68,8 @@ export function toErrorResponse(err: unknown) {
     err instanceof InvalidTeamNoteError ||
     err instanceof InvalidDateTaskError ||
     err instanceof InvalidDirectMessageError ||
-    err instanceof InvalidShiftError
+    err instanceof InvalidShiftError ||
+    err instanceof MissingExceptionReasonError
   ) {
     return NextResponse.json({ error: err.message }, { status: 400 });
   }
