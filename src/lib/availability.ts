@@ -1,6 +1,8 @@
 import { withRlsContext } from "@/lib/db";
 import { isAdmin, ForbiddenError } from "@/lib/authorization";
 import { todayDateKey } from "@/lib/time";
+import { writeAuditLog } from "@/lib/audit-log";
+import { writeNotification } from "@/lib/notifications";
 import { Prisma } from "@prisma/client";
 import type { AdminAvailabilityDTO, AvailabilityDTO, AvailabilityStatus, AvailabilitySlot, CurrentEmployee } from "@/types";
 
@@ -250,6 +252,23 @@ export async function decideAvailability(
         reviewComment: comment?.trim() || null,
       },
     });
+    await writeAuditLog(tx, {
+      actorId: reviewer.id,
+      action: decision === "APPROVED" ? "AVAILABILITY_APPROVED" : "AVAILABILITY_DENIED",
+      targetType: "AvailabilitySubmission",
+      targetId: row.id,
+      oldValue: "PENDING",
+      newValue: decision,
+      comment: comment?.trim() || undefined,
+    });
+    await writeNotification(tx, {
+      recipientId: existing.employeeId,
+      type: decision === "APPROVED" ? "AVAILABILITY_APPROVED" : "AVAILABILITY_DENIED",
+      title: decision === "APPROVED" ? "Your availability was approved" : "Your availability was denied",
+      body: comment?.trim() || undefined,
+      targetType: "AvailabilitySubmission",
+      targetId: row.id,
+    });
     return toDTO(row);
   });
 }
@@ -319,6 +338,23 @@ export async function requestAvailabilityAdjustment(
         reviewComment: comment?.trim() || null,
       },
     });
+    await writeAuditLog(tx, {
+      actorId: reviewer.id,
+      action: "AVAILABILITY_ADJUSTMENT_PROPOSED",
+      targetType: "AvailabilitySubmission",
+      targetId: row.id,
+      oldValue: "PENDING",
+      newValue: "ADJUSTMENT_REQUESTED",
+      comment: comment?.trim() || undefined,
+    });
+    await writeNotification(tx, {
+      recipientId: existing.employeeId,
+      type: "AVAILABILITY_ADJUSTMENT_PROPOSED",
+      title: "Your supervisor proposed different times",
+      body: comment?.trim() || undefined,
+      targetType: "AvailabilitySubmission",
+      targetId: row.id,
+    });
     return toDTO(row);
   });
 }
@@ -353,6 +389,18 @@ export async function respondToAvailabilityAdjustment(
       data: accept
         ? { status: "APPROVED", slots: existing.adjustedSlots as unknown as Prisma.InputJsonValue }
         : { status: "DENIED" },
+    });
+    // Audit-only, no Notification row — Activity History benefits from every reviewable
+    // decision being recorded, but this particular one (the team member's own response to a
+    // proposal about THEM) has no separate person left to notify: the reviewer who made the
+    // proposal can already see the outcome the next time they look at this submission.
+    await writeAuditLog(tx, {
+      actorId: actor.id,
+      action: accept ? "AVAILABILITY_ADJUSTMENT_ACCEPTED" : "AVAILABILITY_ADJUSTMENT_DECLINED",
+      targetType: "AvailabilitySubmission",
+      targetId: row.id,
+      oldValue: "ADJUSTMENT_REQUESTED",
+      newValue: row.status,
     });
     return toDTO(row);
   });
