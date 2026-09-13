@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import StatusPill from "@/components/StatusPill";
+import { WarningIcon } from "@/components/icons";
 import { combineDateAndTime, formatClockTime, formatMinutes, toTimeInputValue } from "@/lib/time";
 import type { TimeEntryDTO } from "@/types";
 
@@ -141,10 +142,22 @@ function TimesheetRow({
         <td className="px-4 py-2.5 whitespace-nowrap align-top">{label}</td>
         <td className="px-4 py-2.5 align-top">
           {entry && entry.sessions.length > 0 ? (
-            <div className="space-y-0.5">
+            <div className="space-y-1">
               {entry.sessions.map((s) => (
-                <div key={s.id} className="tabular-nums whitespace-nowrap text-xs">
-                  {formatClockTime(s.clockIn)} – {s.clockOut ? formatClockTime(s.clockOut) : "in progress"}
+                <div key={s.id}>
+                  <div className="tabular-nums whitespace-nowrap text-xs">
+                    {formatClockTime(s.clockIn)} – {s.clockOut ? formatClockTime(s.clockOut) : "in progress"}
+                  </div>
+                  {/* Phase 3 (client spec, Sept 2026): flags a clock-in that had no scheduled
+                      shift, or fell outside its 15-minute window — visible here on both the
+                      employee's own view and the supervisor/HR review view, since this table
+                      serves both. */}
+                  {s.isException && (
+                    <div className="flex items-start gap-1 text-xs text-amber-700 whitespace-normal">
+                      <WarningIcon className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                      <span>Flagged{s.exceptionReason ? `: ${s.exceptionReason}` : ""}</span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
