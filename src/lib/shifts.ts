@@ -43,6 +43,7 @@ const SHIFT_INCLUDE = {
     },
   },
   createdBy: { select: { firstName: true, lastName: true, preferredName: true } },
+  reviewedBy: { select: { firstName: true, lastName: true, preferredName: true } },
 } as const;
 
 type ShiftRow = {
@@ -59,6 +60,10 @@ type ShiftRow = {
   requestedDate: string | null;
   requestedStartTime: string | null;
   requestedEndTime: string | null;
+  requestedAt: Date | null;
+  reviewedById: string | null;
+  reviewedAt: Date | null;
+  reviewComment: string | null;
   cancelReason: string | null;
   reassignedFromShiftId: string | null;
   createdAt: Date;
@@ -70,6 +75,7 @@ type ShiftRow = {
     department: { name: string } | null;
   };
   createdBy: { firstName: string; lastName: string; preferredName: string | null };
+  reviewedBy: { firstName: string; lastName: string; preferredName: string | null } | null;
 };
 
 /**
@@ -142,6 +148,9 @@ function toDTO(row: ShiftRow, displayStatus: ShiftStatus): ShiftDTO {
     requestedDate: row.requestedDate,
     requestedStartTime: row.requestedStartTime,
     requestedEndTime: row.requestedEndTime,
+    requestedAt: row.requestedAt ? row.requestedAt.toISOString() : null,
+    reviewedAt: row.reviewedAt ? row.reviewedAt.toISOString() : null,
+    reviewComment: row.reviewComment,
     cancelReason: row.cancelReason,
     reassignedFromShiftId: row.reassignedFromShiftId,
     createdAt: row.createdAt.toISOString(),
@@ -157,6 +166,7 @@ function toAdminDTO(row: ShiftRow, displayStatus: ShiftStatus): AdminShiftDTO {
     departmentName: row.employee.department?.name ?? null,
     createdById: row.createdById,
     createdByName: nameOf(row.createdBy),
+    reviewedByName: row.reviewedBy ? nameOf(row.reviewedBy) : null,
   };
 }
 
@@ -355,14 +365,23 @@ async function loadShiftRow(tx: PrismaClient, shiftId: string): Promise<ShiftRow
   return row;
 }
 
+// Phase 2 (client spec, Sept 2026): "Once availability is approved and becomes a confirmed
+// shift, the Team Member must not be able to edit or delete it directly. Instead, provide:
+// Request Shift Change, Request Cancellation... The Supervisor or Admin can: Approve the
+// request. Decline the request. Change the shift time. Cancel the shift. Reassign the shift." —
+// so a reviewer's RESPONSE to a pending request isn't limited to approve/decline; cancelling or
+// reassigning outright are equally valid responses. That's why cancelShift/reassignShift below
+// accept these two *_REQUESTED statuses as a starting point too, not just UPCOMING — acting on
+// either one this way resolves the pending request as a side effect, same as an explicit
+// approve/decline would.
+const SHIFT_RESOLVABLE_STATUSES = new Set(["UPCOMING", "CHANGE_REQUESTED", "CANCELLATION_REQUESTED"]);
+
 /**
- * Supervisor/admin cancelling a shift OUTRIGHT — distinct from the phase-2 employee-initiated
- * Request Cancellation flow (CANCELLATION_REQUESTED), this is the direct "Cancel confirmed
- * shifts" capability the client spec lists for supervisors/admins on its own, with no employee
- * request behind it. A reason is always required — "don't delete, cancel with a reason" per the
- * client's own recordkeeping requirement, same standard MissingReturnCommentError already holds
- * timesheet returns to. Only reachable from UPCOMING (the STORED status, not the derived display
- * one) — a shift already Cancelled/Reassigned has nothing left to cancel again.
+ * Supervisor/admin cancelling a shift — either outright (the direct "Cancel confirmed shifts"
+ * capability, no employee request behind it) or as their chosen response to a pending
+ * CHANGE_REQUESTED/CANCELLATION_REQUESTED (see SHIFT_RESOLVABLE_STATUSES above). A reason is
+ * always required — "don't delete, cancel with a reason" per the client's own recordkeeping
+ * requirement, same standard MissingReturnCommentError already holds timesheet returns to.
  */
 export async function cancelShift(actor: CurrentEmployee, shiftId: string, reason: string): Promise<ShiftDTO> {
   const trimmedReason = reason.trim();
@@ -371,20 +390,26 @@ export async function cancelShift(actor: CurrentEmployee, shiftId: string, reaso
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const existing = await loadShiftRow(tx, shiftId);
     await assertCanManageShifts(actor, existing.employeeId);
-    if (existing.status !== "UPCOMING") {
-      throw new InvalidShiftError("Only an upcoming shift can be cancelled.");
+    if (!SHIFT_RESOLVABLE_STATUSES.has(existing.status)) {
+      throw new InvalidShiftError("Only an upcoming (or pending-request) shift can be cancelled.");
     }
 
     const row = await tx.shift.update({
       where: { id: shiftId },
-      data: { status: "CANCELLED", cancelledAt: new Date(), cancelReason: trimmedReason },
+      data: {
+        status: "CANCELLED",
+        cancelledAt: new Date(),
+        cancelReason: trimmedReason,
+        reviewedById: actor.id,
+        reviewedAt: new Date(),
+      },
       include: SHIFT_INCLUDE,
     });
     await writeShiftAuditLog(tx, {
       actorId: actor.id,
       action: "SHIFT_CANCELLED",
       targetId: row.id,
-      oldValue: "UPCOMING",
+      oldValue: existing.status,
       newValue: "CANCELLED",
       comment: trimmedReason,
     });
@@ -409,8 +434,8 @@ export async function reassignShift(
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const existing = await loadShiftRow(tx, shiftId);
     await assertCanManageShifts(actor, existing.employeeId);
-    if (existing.status !== "UPCOMING") {
-      throw new InvalidShiftError("Only an upcoming shift can be reassigned.");
+    if (!SHIFT_RESOLVABLE_STATUSES.has(existing.status)) {
+      throw new InvalidShiftError("Only an upcoming (or pending-request) shift can be reassigned.");
     }
     if (newEmployeeId === existing.employeeId) {
       throw new InvalidShiftError("Choose a different team member to reassign this shift to.");
@@ -424,7 +449,12 @@ export async function reassignShift(
 
     await tx.shift.update({
       where: { id: shiftId },
-      data: { status: "REASSIGNED", changeReason: trimmedReason ?? null },
+      data: {
+        status: "REASSIGNED",
+        changeReason: trimmedReason ?? null,
+        reviewedById: actor.id,
+        reviewedAt: new Date(),
+      },
     });
     const newShift = await tx.shift.create({
       data: {
@@ -449,5 +479,250 @@ export async function reassignShift(
     });
 
     return toDTO(newShift, deriveShiftDisplayStatus(newShift, false));
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 — Request Shift Change / Request Cancellation (client spec, Sept 2026)
+// ---------------------------------------------------------------------------
+//
+// "Once availability is approved and becomes a confirmed shift, the Team Member must not be
+// able to edit or delete it directly. Instead, provide: Request Shift Change, Request
+// Cancellation. The Team Member must include a reason and may propose a new date or time. The
+// original shift must remain visible with a 'Change Requested' or 'Cancellation Requested'
+// status until a Supervisor or Admin responds." The two functions below are the team member's
+// own half of that — both run under the ACTOR'S OWN identity via withRlsContext, so the new
+// shift_self_request RLS policy (prisma/rls.sql) is what actually stops this from being
+// exploitable even if the ownership check below were ever removed by mistake — the same
+// belt-and-suspenders shape every other mutation in this file already uses.
+
+export interface RequestShiftChangeInput {
+  reason: string;
+  requestedDate?: string;
+  requestedStartTime?: string;
+  requestedEndTime?: string;
+}
+
+/** Team member requesting a change to one of their OWN upcoming confirmed shifts. A proposed
+ *  date/time is optional (the spec says the team member "may propose a new date or time," not
+ *  must) — but if any one of the three is given, all three are required together, since a
+ *  half-specified proposal isn't something a supervisor could actually approve as-is. */
+export async function requestShiftChange(actor: CurrentEmployee, shiftId: string, input: RequestShiftChangeInput): Promise<ShiftDTO> {
+  const reason = input.reason.trim();
+  if (!reason) throw new InvalidShiftError("Tell your supervisor why you need this shift changed.");
+
+  const hasProposal = Boolean(input.requestedDate || input.requestedStartTime || input.requestedEndTime);
+  if (hasProposal) {
+    if (!input.requestedDate || !input.requestedStartTime || !input.requestedEndTime) {
+      throw new InvalidShiftError("Give a full proposed date, start time, and end time, or leave all three blank.");
+    }
+    assertValidDateTime(input.requestedDate, input.requestedStartTime, input.requestedEndTime);
+  }
+
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const existing = await loadShiftRow(tx, shiftId);
+    if (existing.employeeId !== actor.id) throw new ForbiddenError();
+    if (existing.status !== "UPCOMING") {
+      throw new InvalidShiftError("Only an upcoming shift can have a change requested.");
+    }
+
+    const row = await tx.shift.update({
+      where: { id: shiftId },
+      data: {
+        status: "CHANGE_REQUESTED",
+        changeReason: reason,
+        requestedDate: input.requestedDate ?? null,
+        requestedStartTime: input.requestedStartTime ?? null,
+        requestedEndTime: input.requestedEndTime ?? null,
+        requestedAt: new Date(),
+        reviewedById: null,
+        reviewedAt: null,
+        reviewComment: null,
+      },
+      include: SHIFT_INCLUDE,
+    });
+    await writeShiftAuditLog(tx, {
+      actorId: actor.id,
+      action: "SHIFT_CHANGE_REQUESTED",
+      targetId: row.id,
+      oldValue: `${existing.date} ${existing.startTime}-${existing.endTime}`,
+      newValue: hasProposal ? `${input.requestedDate} ${input.requestedStartTime}-${input.requestedEndTime}` : undefined,
+      comment: reason,
+    });
+    return toDTO(row, "CHANGE_REQUESTED");
+  });
+}
+
+/** Team member requesting their own upcoming shift be cancelled outright — same shape as
+ *  requestShiftChange, just no proposed date/time to carry. */
+export async function requestShiftCancellation(actor: CurrentEmployee, shiftId: string, reason: string): Promise<ShiftDTO> {
+  const trimmedReason = reason.trim();
+  if (!trimmedReason) throw new InvalidShiftError("Tell your supervisor why you need this shift cancelled.");
+
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const existing = await loadShiftRow(tx, shiftId);
+    if (existing.employeeId !== actor.id) throw new ForbiddenError();
+    if (existing.status !== "UPCOMING") {
+      throw new InvalidShiftError("Only an upcoming shift can have a cancellation requested.");
+    }
+
+    const row = await tx.shift.update({
+      where: { id: shiftId },
+      data: {
+        status: "CANCELLATION_REQUESTED",
+        changeReason: trimmedReason,
+        requestedDate: null,
+        requestedStartTime: null,
+        requestedEndTime: null,
+        requestedAt: new Date(),
+        reviewedById: null,
+        reviewedAt: null,
+        reviewComment: null,
+      },
+      include: SHIFT_INCLUDE,
+    });
+    await writeShiftAuditLog(tx, {
+      actorId: actor.id,
+      action: "SHIFT_CANCELLATION_REQUESTED",
+      targetId: row.id,
+      oldValue: `${existing.date} ${existing.startTime}-${existing.endTime}`,
+      comment: trimmedReason,
+    });
+    return toDTO(row, "CANCELLATION_REQUESTED");
+  });
+}
+
+/**
+ * Supervisor/admin declining a pending CHANGE_REQUESTED/CANCELLATION_REQUESTED — reverts the
+ * shift back to UPCOMING exactly as it was; nothing about date/time/note ever changed while the
+ * request was pending, so there's nothing to undo but the status itself. changeReason/
+ * requestedDate/etc. are deliberately left in place rather than cleared — a visible record of
+ * what was asked for and declined, same as AvailabilitySubmission/PtoRequest keep their own
+ * submitted content after a decision instead of erasing it.
+ */
+export async function denyShiftRequest(actor: CurrentEmployee, shiftId: string, comment?: string): Promise<ShiftDTO> {
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const existing = await loadShiftRow(tx, shiftId);
+    await assertCanManageShifts(actor, existing.employeeId);
+    if (existing.status !== "CHANGE_REQUESTED" && existing.status !== "CANCELLATION_REQUESTED") {
+      throw new InvalidShiftError("This shift has no pending request to decline.");
+    }
+
+    const trimmedComment = comment?.trim() || undefined;
+    const row = await tx.shift.update({
+      where: { id: shiftId },
+      data: {
+        status: "UPCOMING",
+        reviewedById: actor.id,
+        reviewedAt: new Date(),
+        reviewComment: trimmedComment ?? null,
+      },
+      include: SHIFT_INCLUDE,
+    });
+    await writeShiftAuditLog(tx, {
+      actorId: actor.id,
+      action: existing.status === "CHANGE_REQUESTED" ? "SHIFT_CHANGE_DECLINED" : "SHIFT_CANCELLATION_DECLINED",
+      targetId: row.id,
+      oldValue: existing.status,
+      newValue: "UPCOMING",
+      comment: trimmedComment,
+    });
+    return toDTO(row, deriveShiftDisplayStatus(row, false));
+  });
+}
+
+/**
+ * Supervisor/admin approving a pending CANCELLATION_REQUESTED — same terminal effect as
+ * cancelShift, just reached from the employee's own request instead of a supervisor acting
+ * unprompted. cancelReason falls back to the employee's own stated reason (changeReason) unless
+ * the supervisor gives a different one while approving.
+ */
+export async function approveShiftCancellation(actor: CurrentEmployee, shiftId: string, comment?: string): Promise<ShiftDTO> {
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const existing = await loadShiftRow(tx, shiftId);
+    await assertCanManageShifts(actor, existing.employeeId);
+    if (existing.status !== "CANCELLATION_REQUESTED") {
+      throw new InvalidShiftError("This shift has no pending cancellation request.");
+    }
+
+    const trimmedComment = comment?.trim() || undefined;
+    const row = await tx.shift.update({
+      where: { id: shiftId },
+      data: {
+        status: "CANCELLED",
+        cancelledAt: new Date(),
+        cancelReason: trimmedComment || existing.changeReason || "Cancellation requested by team member.",
+        reviewedById: actor.id,
+        reviewedAt: new Date(),
+        reviewComment: trimmedComment ?? null,
+      },
+      include: SHIFT_INCLUDE,
+    });
+    await writeShiftAuditLog(tx, {
+      actorId: actor.id,
+      action: "SHIFT_CANCELLATION_APPROVED",
+      targetId: row.id,
+      oldValue: "CANCELLATION_REQUESTED",
+      newValue: "CANCELLED",
+      comment: trimmedComment,
+    });
+    return toDTO(row, "CANCELLED");
+  });
+}
+
+export interface ApproveShiftChangeInput {
+  date?: string;
+  startTime?: string;
+  endTime?: string;
+  comment?: string;
+}
+
+/**
+ * Supervisor/admin approving a pending CHANGE_REQUESTED. Defaults to the employee's own
+ * proposed date/time when they gave one; a supervisor may also override with a different final
+ * date/time right here — covers both the "employee just asked for a change, didn't propose
+ * specifics" case (a bare request with no requestedDate/etc. — the supervisor must supply the
+ * final time then) and the spec's own "Change the shift time" as a response to a request,
+ * without a second round trip.
+ */
+export async function approveShiftChange(actor: CurrentEmployee, shiftId: string, input: ApproveShiftChangeInput): Promise<ShiftDTO> {
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const existing = await loadShiftRow(tx, shiftId);
+    await assertCanManageShifts(actor, existing.employeeId);
+    if (existing.status !== "CHANGE_REQUESTED") {
+      throw new InvalidShiftError("This shift has no pending change request.");
+    }
+
+    const finalDate = input.date ?? existing.requestedDate;
+    const finalStart = input.startTime ?? existing.requestedStartTime;
+    const finalEnd = input.endTime ?? existing.requestedEndTime;
+    if (!finalDate || !finalStart || !finalEnd) {
+      throw new InvalidShiftError("Choose a final date, start time, and end time to approve this change.");
+    }
+    assertValidDateTime(finalDate, finalStart, finalEnd);
+
+    const trimmedComment = input.comment?.trim() || undefined;
+    const row = await tx.shift.update({
+      where: { id: shiftId },
+      data: {
+        status: "UPCOMING",
+        date: finalDate,
+        startTime: finalStart,
+        endTime: finalEnd,
+        reviewedById: actor.id,
+        reviewedAt: new Date(),
+        reviewComment: trimmedComment ?? null,
+      },
+      include: SHIFT_INCLUDE,
+    });
+    await writeShiftAuditLog(tx, {
+      actorId: actor.id,
+      action: "SHIFT_CHANGE_APPROVED",
+      targetId: row.id,
+      oldValue: `${existing.date} ${existing.startTime}-${existing.endTime}`,
+      newValue: `${finalDate} ${finalStart}-${finalEnd}`,
+      comment: trimmedComment,
+    });
+    return toDTO(row, deriveShiftDisplayStatus(row, false));
   });
 }
