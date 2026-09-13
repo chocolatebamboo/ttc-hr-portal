@@ -296,3 +296,16 @@ export function GripIcon({ className = base }: IconProps) {
     </svg>
   );
 }
+
+// Phase 3 (client spec, Sept 2026): flags an exception clock-in (no shift scheduled, or outside
+// the 15-minute window) — used on TimeClockCard's own session list, TimesheetTable's review
+// view, and anywhere else an exception needs to read as a flag rather than plain text.
+export function WarningIcon({ className = base }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
+      <path d="M12 3.5 21.5 20h-19L12 3.5Z" strokeLinejoin="round" />
+      <path d="M12 10v4.2" strokeLinecap="round" />
+      <circle cx="12" cy="17.3" r="0.15" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
