@@ -43,6 +43,10 @@ export default function MyAvailabilityPreview({
   // sitting in this list with no way to get rid of them. Which one (if any) a delete is
   // currently in flight for, so only that row shows a busy state.
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Phase 2 (client spec, Sept 2026): which submission (if any) an accept/decline response to a
+  // pending ADJUSTMENT_REQUESTED is currently in flight for — same single-row-busy shape as
+  // deletingId above.
+  const [respondingId, setRespondingId] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -70,6 +74,26 @@ export default function MyAvailabilityPreview({
       if (res.ok) setSubmissions((prev) => prev.filter((s) => s.id !== id));
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  // Phase 2: accepting makes the reviewer's proposed times the real, official ones (this
+  // submission becomes Approved); declining leaves the original submitted times untouched and
+  // this submission becomes Denied — see respondToAvailabilityAdjustment's own doc comment in
+  // src/lib/availability.ts.
+  async function handleRespondAdjustment(id: string, accept: boolean) {
+    setRespondingId(id);
+    try {
+      const res = await fetch(`/api/availability/${id}/respond-adjustment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accept }),
+      });
+      if (!res.ok) return;
+      const updated: AvailabilityDTO = await res.json();
+      setSubmissions((prev) => prev.map((s) => (s.id === id ? updated : s)));
+    } finally {
+      setRespondingId(null);
     }
   }
 
@@ -154,6 +178,48 @@ export default function MyAvailabilityPreview({
                   </div>
                 ))}
               </div>
+
+              {/* Phase 2 (client spec, Sept 2026): "Adjust the proposed time and send it to the
+                  team member for confirmation" — the reviewer's counter-proposed times, shown
+                  next to (not instead of) the originally-submitted ones above so it's clear
+                  what's changing. */}
+              {s.status === "ADJUSTMENT_REQUESTED" && s.adjustedSlots && (
+                <div className="mt-2.5 rounded-lg border border-amber-200 bg-amber-50 p-2.5">
+                  <p className="text-xs font-semibold text-amber-800 mb-1.5">Your supervisor proposed:</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {slotChips(s.adjustedSlots).map((c) => (
+                      <div key={c.date} className="flex flex-col items-start rounded-lg bg-white px-2.5 py-1.5 leading-tight">
+                        <span className="text-xs font-semibold">{c.dateLabel}</span>
+                        <span className="text-[11px] text-muted">{c.timeLabel}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {s.reviewComment && (
+                    <p className="text-xs text-amber-800 italic mt-1.5">&ldquo;{s.reviewComment}&rdquo;</p>
+                  )}
+                  <div className="flex items-center gap-3 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => handleRespondAdjustment(s.id, true)}
+                      disabled={respondingId === s.id}
+                      className="btn-primary text-xs px-3 py-1.5"
+                    >
+                      Accept
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRespondAdjustment(s.id, false)}
+                      disabled={respondingId === s.id}
+                      className="text-xs font-medium text-accent hover:underline"
+                    >
+                      Decline
+                    </button>
+                  </div>
+                </div>
+              )}
+              {s.status !== "ADJUSTMENT_REQUESTED" && s.status !== "PENDING" && s.reviewComment && (
+                <p className="text-xs text-muted italic mt-2">Reviewer note: &ldquo;{s.reviewComment}&rdquo;</p>
+              )}
             </div>
           ))}
         </div>
