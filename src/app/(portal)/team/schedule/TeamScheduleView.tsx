@@ -56,6 +56,17 @@ export default function TeamScheduleView({ viewerIsAdmin }: { viewerIsAdmin: boo
   const [reassigningId, setReassigningId] = useState<string | null>(null);
   const [reassignTo, setReassignTo] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
+  // Phase 2 (client spec, Sept 2026): responding to a pending CHANGE_REQUESTED/
+  // CANCELLATION_REQUESTED — "Approve the request. Decline the request. Change the shift time.
+  // Cancel the shift. Reassign the shift." The last two are already covered by
+  // cancellingId/reassigningId above (extended to accept a pending-request shift, not just
+  // UPCOMING); these three are the request-specific responses.
+  const [approvingChangeId, setApprovingChangeId] = useState<string | null>(null);
+  const [approveDate, setApproveDate] = useState("");
+  const [approveStartTime, setApproveStartTime] = useState("");
+  const [approveEndTime, setApproveEndTime] = useState("");
+  const [decliningId, setDecliningId] = useState<string | null>(null);
+  const [declineComment, setDeclineComment] = useState("");
 
   async function loadShifts() {
     setLoadState("loading");
@@ -168,6 +179,69 @@ export default function TeamScheduleView({ viewerIsAdmin }: { viewerIsAdmin: boo
     }
   }
 
+  async function handleApproveCancellation(shiftId: string) {
+    setBusyId(shiftId);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/admin/shifts/${shiftId}/approve-cancellation`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Couldn't approve that cancellation.");
+      loadShifts();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Couldn't approve that cancellation.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleApproveChange(shiftId: string) {
+    setBusyId(shiftId);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/admin/shifts/${shiftId}/approve-change`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          date: approveDate || undefined,
+          startTime: approveStartTime || undefined,
+          endTime: approveEndTime || undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Couldn't approve that change.");
+      setApprovingChangeId(null);
+      setApproveDate("");
+      setApproveStartTime("");
+      setApproveEndTime("");
+      loadShifts();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Couldn't approve that change.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleDeclineRequest(shiftId: string) {
+    setBusyId(shiftId);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/admin/shifts/${shiftId}/deny-request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment: declineComment || undefined }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Couldn't decline that request.");
+      setDecliningId(null);
+      setDeclineComment("");
+      loadShifts();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Couldn't decline that request.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   return (
     <div className="max-w-4xl">
       <div className="flex items-start justify-between gap-3 mb-1">
@@ -262,7 +336,12 @@ export default function TeamScheduleView({ viewerIsAdmin }: { viewerIsAdmin: boo
       {loadState === "ready" && filtered.length > 0 && (
         <div className="space-y-2.5">
           {filtered.map((s) => {
-            const canManage = s.status === "UPCOMING";
+            // Phase 2: Cancel/Reassign stay available on a pending CHANGE_REQUESTED/
+            // CANCELLATION_REQUESTED shift too — the spec's own response options to a request
+            // include "Change the shift time," "Cancel the shift," and "Reassign the shift," not
+            // only a plain approve/decline (see SHIFT_RESOLVABLE_STATUSES in src/lib/shifts.ts).
+            const canManage = s.status === "UPCOMING" || s.status === "CHANGE_REQUESTED" || s.status === "CANCELLATION_REQUESTED";
+            const hasPendingRequest = s.status === "CHANGE_REQUESTED" || s.status === "CANCELLATION_REQUESTED";
             return (
               <div key={s.id} className="rounded-2xl border border-border bg-surface p-4">
                 <div className="flex items-start justify-between gap-3">
@@ -278,6 +357,125 @@ export default function TeamScheduleView({ viewerIsAdmin }: { viewerIsAdmin: boo
                 {s.note && <p className="text-sm text-muted italic mt-2">&ldquo;{s.note}&rdquo;</p>}
                 {s.status === "CANCELLED" && s.cancelReason && (
                   <p className="text-sm text-accent mt-2">Cancelled: {s.cancelReason}</p>
+                )}
+
+                {hasPendingRequest && (
+                  <div className="mt-2 rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-sm">
+                    <p className="text-amber-800">
+                      {s.status === "CHANGE_REQUESTED" ? "Requested a change" : "Requested cancellation"}
+                      {s.changeReason ? `: "${s.changeReason}"` : "."}
+                    </p>
+                    {s.requestedDate && s.requestedStartTime && s.requestedEndTime && (
+                      <p className="text-amber-800 mt-1">
+                        Proposed: {formatSlotDate(s.requestedDate)}, {formatTime12h(s.requestedStartTime)} –{" "}
+                        {formatTime12h(s.requestedEndTime)}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {s.status === "CANCELLATION_REQUESTED" && (
+                  <div className="flex items-center gap-3 mt-3">
+                    <button
+                      type="button"
+                      onClick={() => handleApproveCancellation(s.id)}
+                      disabled={busyId === s.id}
+                      className="text-xs font-medium text-accent-ink hover:underline"
+                    >
+                      Approve cancellation
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDecliningId(decliningId === s.id ? null : s.id);
+                        setDeclineComment("");
+                      }}
+                      className="text-xs font-medium text-accent hover:underline"
+                    >
+                      Decline request
+                    </button>
+                  </div>
+                )}
+
+                {s.status === "CHANGE_REQUESTED" && (
+                  <div className="flex items-center gap-3 mt-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setApprovingChangeId(approvingChangeId === s.id ? null : s.id);
+                        setApproveDate(s.requestedDate ?? "");
+                        setApproveStartTime(s.requestedStartTime ?? "");
+                        setApproveEndTime(s.requestedEndTime ?? "");
+                      }}
+                      className="text-xs font-medium text-accent-ink hover:underline"
+                    >
+                      Approve change
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDecliningId(decliningId === s.id ? null : s.id);
+                        setDeclineComment("");
+                      }}
+                      className="text-xs font-medium text-accent hover:underline"
+                    >
+                      Decline request
+                    </button>
+                  </div>
+                )}
+
+                {approvingChangeId === s.id && (
+                  <div className="mt-3 flex flex-col gap-2 bg-black/[0.03] rounded-xl p-3">
+                    <p className="text-xs text-muted">Confirm the final date and time for this shift:</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <input
+                        type="date"
+                        value={approveDate}
+                        onChange={(e) => setApproveDate(e.target.value)}
+                        className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm"
+                      />
+                      <input
+                        type="time"
+                        value={approveStartTime}
+                        onChange={(e) => setApproveStartTime(e.target.value)}
+                        className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm"
+                      />
+                      <input
+                        type="time"
+                        value={approveEndTime}
+                        onChange={(e) => setApproveEndTime(e.target.value)}
+                        className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleApproveChange(s.id)}
+                      disabled={busyId === s.id || !approveDate || !approveStartTime || !approveEndTime}
+                      className="btn-outline self-start"
+                    >
+                      Confirm approval
+                    </button>
+                  </div>
+                )}
+
+                {decliningId === s.id && (
+                  <div className="mt-3 flex flex-col sm:flex-row gap-2 bg-black/[0.03] rounded-xl p-3">
+                    <textarea
+                      value={declineComment}
+                      onChange={(e) => setDeclineComment(e.target.value)}
+                      placeholder="Optional note for the team member…"
+                      rows={2}
+                      className="flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent-ink"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleDeclineRequest(s.id)}
+                      disabled={busyId === s.id}
+                      className="btn-outline self-start"
+                    >
+                      Confirm decline
+                    </button>
+                  </div>
                 )}
 
                 {canManage && (
