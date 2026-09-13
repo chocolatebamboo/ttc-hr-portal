@@ -9,7 +9,7 @@ import SwipeReveal from "@/components/SwipeReveal";
 import { ChatIcon, ChecklistIcon, CheckCircleIcon, CalendarIcon } from "@/components/icons";
 import { slotChips } from "@/lib/availability-format";
 import { toneForStatus, YOU_TONE } from "@/lib/status-tone";
-import type { AdminAvailabilityDTO, AdminShiftDTO, TeamNoteTopicCountDTO } from "@/types";
+import type { AdminAvailabilityDTO, AdminShiftDTO, AvailabilitySlot, TeamNoteTopicCountDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -164,6 +164,22 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
     }
   }
 
+  // Phase 2 (client spec, Sept 2026): the reviewer's third option besides Approve/Deny —
+  // "Adjust the proposed time and send it to the team member for confirmation."
+  async function requestAdjustment(submissionId: string, adjustedSlots: AvailabilitySlot[], comment?: string) {
+    setBusyId(submissionId);
+    try {
+      await fetch(`/api/availability/${submissionId}/request-adjustment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adjustedSlots, comment }),
+      });
+    } finally {
+      setBusyId(null);
+      load();
+    }
+  }
+
   if (loadState === "loading") {
     return (
       <div className="space-y-2.5">
@@ -217,6 +233,7 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                 onUndo={undo}
                 onMessagePosted={loadCounts}
                 onConvertToShift={convertToShift}
+                onRequestAdjustment={requestAdjustment}
               />
             ))}
           </div>
@@ -265,6 +282,7 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                   onUndo={undo}
                   onMessagePosted={loadCounts}
                   onConvertToShift={convertToShift}
+                  onRequestAdjustment={() => {}}
                 />
               </SwipeReveal>
             ))}
@@ -292,6 +310,7 @@ function Card({
   onUndo,
   onMessagePosted,
   onConvertToShift,
+  onRequestAdjustment,
 }: {
   row: AdminAvailabilityDTO;
   viewerId: string;
@@ -309,8 +328,16 @@ function Card({
   onUndo: (submissionId: string) => void;
   onMessagePosted: () => void;
   onConvertToShift: (submissionId: string, date: string) => void;
+  onRequestAdjustment: (submissionId: string, adjustedSlots: AvailabilitySlot[], comment?: string) => void;
 }) {
   const chips = slotChips(r.slots);
+  // Phase 2 (client spec, Sept 2026): local-only state for the "Adjust the proposed time"
+  // editor — one editable start/end time per date, seeded from the original submission's own
+  // slots the moment the form opens, so the reviewer is tweaking real starting values rather
+  // than typing every field from scratch.
+  const [adjusting, setAdjusting] = useState(false);
+  const [adjustTimes, setAdjustTimes] = useState<Record<string, { startTime: string; endTime: string }>>({});
+  const [adjustComment, setAdjustComment] = useState("");
   // CB, Sept 2026, round three: "instead of the yellow background, I want the pink
   // background" (Approved) / "I think the pending color should be that yellow as well" —
   // confirmed this replaces the old per-employee tone entirely: color now signals the
@@ -405,7 +432,7 @@ function Card({
       )}
 
       {isPending && (
-        <div className="flex items-center gap-2 mt-3.5">
+        <div className="flex items-center gap-2 mt-3.5 flex-wrap">
           <button
             onClick={() => onDecide(r.id, "APPROVED")}
             disabled={busy}
@@ -420,6 +447,22 @@ function Card({
             className="rounded-full bg-white/15 border border-white/35 px-4 py-2 text-sm font-semibold text-white hover:bg-white/25 disabled:opacity-60"
           >
             Deny
+          </button>
+          {/* Phase 2 (client spec, Sept 2026): "Adjust the proposed time and send it to the team
+              member for confirmation" — a third decision besides Approve/Deny. */}
+          <button
+            onClick={() => {
+              if (!adjusting) {
+                const seeded: Record<string, { startTime: string; endTime: string }> = {};
+                for (const slot of r.slots) seeded[slot.date] = { startTime: slot.startTime, endTime: slot.endTime };
+                setAdjustTimes(seeded);
+              }
+              setAdjusting((v) => !v);
+            }}
+            disabled={busy}
+            className="rounded-full bg-white/15 border border-white/35 px-4 py-2 text-sm font-semibold text-white hover:bg-white/25 disabled:opacity-60"
+          >
+            Adjust time
           </button>
         </div>
       )}
@@ -440,6 +483,57 @@ function Card({
             style={{ color: tone.to }}
           >
             Confirm deny
+          </button>
+        </div>
+      )}
+
+      {adjusting && (
+        <div className="mt-3 flex flex-col gap-2.5 bg-white/15 rounded-xl p-3">
+          {slotChips(r.slots).map((c) => (
+            <div key={c.date} className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-semibold text-white min-w-[6.5rem]">{c.dateLabel}</span>
+              <input
+                type="time"
+                value={adjustTimes[c.date]?.startTime ?? ""}
+                onChange={(e) =>
+                  setAdjustTimes((prev) => ({ ...prev, [c.date]: { ...prev[c.date], startTime: e.target.value } }))
+                }
+                className="rounded-md border border-white/30 bg-white/90 px-2 py-1 text-sm text-foreground outline-none focus:ring-2 focus:ring-white"
+              />
+              <span className="text-xs text-white/80">to</span>
+              <input
+                type="time"
+                value={adjustTimes[c.date]?.endTime ?? ""}
+                onChange={(e) =>
+                  setAdjustTimes((prev) => ({ ...prev, [c.date]: { ...prev[c.date], endTime: e.target.value } }))
+                }
+                className="rounded-md border border-white/30 bg-white/90 px-2 py-1 text-sm text-foreground outline-none focus:ring-2 focus:ring-white"
+              />
+            </div>
+          ))}
+          <textarea
+            value={adjustComment}
+            onChange={(e) => setAdjustComment(e.target.value)}
+            placeholder="Optional note explaining the change…"
+            rows={2}
+            className="rounded-md border border-white/30 bg-white/90 px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-white placeholder:text-muted"
+          />
+          <button
+            onClick={() => {
+              const adjustedSlots: AvailabilitySlot[] = r.slots.map((slot) => ({
+                date: slot.date,
+                startTime: adjustTimes[slot.date]?.startTime ?? slot.startTime,
+                endTime: adjustTimes[slot.date]?.endTime ?? slot.endTime,
+              }));
+              onRequestAdjustment(r.id, adjustedSlots, adjustComment.trim() || undefined);
+              setAdjusting(false);
+              setAdjustComment("");
+            }}
+            disabled={busy}
+            className="rounded-full bg-white px-4 py-2 text-sm font-semibold self-start shadow-sm"
+            style={{ color: tone.to }}
+          >
+            Send to team member
           </button>
         </div>
       )}
