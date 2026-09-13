@@ -40,6 +40,17 @@ export interface TimeSessionDTO {
   id: string;
   clockIn: string; // ISO datetime
   clockOut: string | null;
+  /** Phase 3 (client spec, Sept 2026): which scheduled Shift this clock-in matched at the
+   *  moment it happened, if any — null when there was nothing scheduled that day at all. Set
+   *  once, at clock-in, and never revised afterward — see TimeSession.shiftId's own doc
+   *  comment in prisma/schema.prisma. */
+  shiftId: string | null;
+  /** True when this clock-in fell outside CLOCK_IN_WINDOW_MINUTES of a scheduled shift's start
+   *  time, or there was no scheduled shift to match at all. */
+  isException: boolean;
+  /** The team member's own stated reason for an exception clock-in — required whenever
+   *  isException is true, null otherwise. */
+  exceptionReason: string | null;
 }
 
 export interface TimeEntryDTO {
@@ -310,7 +321,11 @@ export interface AdminShiftDTO extends ShiftDTO {
  *  attachmentName is shown to the client; the underlying storage key never is — downloading
  *  goes through /api/team-notes/[employeeId]/[noteId]/download, which re-checks access and
  *  mints a short-lived signed URL rather than exposing the key itself. */
-export type TeamNoteTopicType = "AVAILABILITY_DATE" | "PTO_REQUEST";
+// SHIFT (Phase 3, client spec, Sept 2026): "tasks/messages re-pointed onto shifts" — topicId is
+// a Shift id, topicDate stays null (same shape as PTO_REQUEST) since a Shift is already exactly
+// one date. Additive, not a replacement: AVAILABILITY_DATE keeps working for conversations about
+// a submission that hasn't (or hasn't yet) become a confirmed shift.
+export type TeamNoteTopicType = "AVAILABILITY_DATE" | "PTO_REQUEST" | "SHIFT";
 
 export interface TeamNoteDTO {
   id: string;
