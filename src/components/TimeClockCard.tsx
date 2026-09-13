@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { deriveClockState, formatClockTime, formatMinutes } from "@/lib/time";
 import type { TimeClockState, TimeEntryDTO } from "@/types";
+import { WarningIcon } from "@/components/icons";
 
 type LoadState = "loading" | "ready" | "error";
 type ActionState = "idle" | "submitting";
@@ -42,11 +43,25 @@ function useLiveClock() {
   return now;
 }
 
+/** Phase 3 (client spec, Sept 2026): "clock-in gated to scheduled shifts with a 15-minute
+ *  window and exception-reason flagging" — the caller's own before-the-click preview of what
+ *  clocking in right now would do (GET /api/time/clock-in-status). Never blocks the button;
+ *  when it says a reason is required, the reason gets typed here and sent along with the
+ *  clock-in itself, which re-checks everything fresh at that moment. */
+type ClockInStatus = { requiresReason: boolean; reasonPromptKind: "no_shift" | "outside_window" | null };
+
+const REASON_PROMPT: Record<"no_shift" | "outside_window", string> = {
+  no_shift: "You don't have a shift scheduled today — why are you clocking in?",
+  outside_window: "This is outside your scheduled shift's start time — why are you clocking in early or late?",
+};
+
 export default function TimeClockCard({ variant = "default" }: { variant?: "default" | "hero" }) {
   const [entry, setEntry] = useState<TimeEntryDTO | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [actionState, setActionState] = useState<ActionState>("idle");
   const [errorMessage, setErrorMessage] = useState("");
+  const [clockInStatus, setClockInStatus] = useState<ClockInStatus | null>(null);
+  const [exceptionReason, setExceptionReason] = useState("");
   const now = useLiveClock();
   const liveDate = now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
   // CB, Sept 2026: wants this "bigger... like one of the widgets Apple has... reading
@@ -64,6 +79,17 @@ export default function TimeClockCard({ variant = "default" }: { variant?: "defa
       setLoadState("ready");
     } catch {
       setLoadState("error");
+      return;
+    }
+    // Best-effort: a failure here just means the reason prompt won't show proactively — the
+    // real check still happens inside the clock-in POST itself, so this never blocks the card.
+    try {
+      const statusRes = await fetch("/api/time/clock-in-status");
+      if (statusRes.ok) {
+        setClockInStatus(await statusRes.json());
+      }
+    } catch {
+      // ignore — see comment above
     }
   }
 
@@ -85,11 +111,14 @@ export default function TimeClockCard({ variant = "default" }: { variant?: "defa
     return () => clearInterval(id);
   }, []);
 
-  async function performAction(endpoint: string) {
+  async function performAction(endpoint: string, body?: { reason?: string }) {
     setActionState("submitting");
     setErrorMessage("");
     try {
-      const res = await fetch(endpoint, { method: "POST" });
+      const res = await fetch(endpoint, {
+        method: "POST",
+        ...(body ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}),
+      });
       const data = await res.json();
       if (!res.ok) {
         setErrorMessage(data.error ?? "Unable to update your time clock. Please try again or contact HR.");
@@ -97,6 +126,8 @@ export default function TimeClockCard({ variant = "default" }: { variant?: "defa
         return;
       }
       setEntry(data.entry);
+      setExceptionReason(""); // clear on success so the next clock-in starts fresh
+      await refresh(); // re-fetch clock-in-status too — the shift/window match can shift by the minute
     } catch {
       setErrorMessage("Unable to reach the server. Check your connection and try again.");
     } finally {
@@ -131,6 +162,21 @@ export default function TimeClockCard({ variant = "default" }: { variant?: "defa
   const state = deriveClockState(entry);
   const action = ACTION_BY_STATE[state];
 
+  // Phase 3: only a clock-in (never clock-out, per CB's confirmed policy) can require a reason,
+  // and only when the before-the-click preview says so.
+  const isClockInAction = action.endpoint === "/api/time/clock-in";
+  const needsReason = isClockInAction && clockInStatus?.requiresReason === true;
+  const reasonPrompt = clockInStatus?.reasonPromptKind ? REASON_PROMPT[clockInStatus.reasonPromptKind] : null;
+  const reasonTrimmed = exceptionReason.trim().length > 0;
+
+  function handleClockAction() {
+    if (needsReason) {
+      performAction(action.endpoint, { reason: exceptionReason });
+    } else {
+      performAction(action.endpoint);
+    }
+  }
+
   const openSession = entry?.sessions.find((s) => s.clockOut === null);
   const openMinutes = openSession
     ? Math.floor((new Date().getTime() - new Date(openSession.clockIn).getTime()) / 60000)
@@ -143,14 +189,24 @@ export default function TimeClockCard({ variant = "default" }: { variant?: "defa
   const sessionsList = entry && entry.sessions.length > 0 && (
     <div className={`mt-4 space-y-1.5 ${variant === "hero" ? "text-white/80" : "text-muted"}`}>
       {entry.sessions.map((s) => (
-        <div key={s.id} className="flex items-center justify-between text-xs">
-          <span>
-            {formatClockTime(s.clockIn)} – {s.clockOut ? formatClockTime(s.clockOut) : "now"}
-          </span>
-          {!s.clockOut && (
-            <span className={`font-medium ${variant === "hero" ? "text-white" : "text-accent-ink"}`}>
-              In progress
+        <div key={s.id} className="text-xs">
+          <div className="flex items-center justify-between">
+            <span>
+              {formatClockTime(s.clockIn)} – {s.clockOut ? formatClockTime(s.clockOut) : "now"}
             </span>
+            {!s.clockOut && (
+              <span className={`font-medium ${variant === "hero" ? "text-white" : "text-accent-ink"}`}>
+                In progress
+              </span>
+            )}
+          </div>
+          {/* Phase 3: flag on a session's own clock-in, visible to the employee whose session
+              this is — the same flag a supervisor sees on the timesheet review side. */}
+          {s.isException && (
+            <p className={`mt-0.5 flex items-start gap-1 ${variant === "hero" ? "text-white/70" : "text-amber-700"}`}>
+              <WarningIcon className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+              <span>Flagged{s.exceptionReason ? `: ${s.exceptionReason}` : ""}</span>
+            </p>
           )}
         </div>
       ))}
@@ -197,9 +253,27 @@ export default function TimeClockCard({ variant = "default" }: { variant?: "defa
           </div>
         )}
 
+        {/* Phase 3: shown proactively (before the click) whenever clocking in right now would
+            be an exception — never blocks the button itself, just requires a reason first. */}
+        {needsReason && (
+          <div className="mb-4">
+            <p className="flex items-start gap-1.5 text-sm text-white/90 mb-2">
+              <WarningIcon className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>{reasonPrompt}</span>
+            </p>
+            <textarea
+              value={exceptionReason}
+              onChange={(e) => setExceptionReason(e.target.value)}
+              placeholder="Reason for clocking in…"
+              rows={2}
+              className="w-full rounded-xl border border-white/30 bg-white/10 px-3 py-2 text-sm text-white placeholder-white/60 focus:outline-none focus:border-white/60"
+            />
+          </div>
+        )}
+
         <button
-          onClick={() => performAction(action.endpoint)}
-          disabled={actionState === "submitting"}
+          onClick={handleClockAction}
+          disabled={actionState === "submitting" || (needsReason && !reasonTrimmed)}
           className="inline-flex items-center justify-center w-full min-h-[56px] rounded-full bg-white text-accent-ink font-semibold text-base transition-opacity disabled:opacity-70"
         >
           {actionState === "submitting" ? "Updating…" : action.label}
@@ -241,9 +315,27 @@ export default function TimeClockCard({ variant = "default" }: { variant?: "defa
         </div>
       )}
 
+      {/* Phase 3: shown proactively (before the click) whenever clocking in right now would be
+          an exception — never blocks the button itself, just requires a reason first. */}
+      {needsReason && (
+        <div className="mb-4">
+          <p className="flex items-start gap-1.5 text-sm text-amber-800 mb-2">
+            <WarningIcon className="h-4 w-4 mt-0.5 shrink-0" />
+            <span>{reasonPrompt}</span>
+          </p>
+          <textarea
+            value={exceptionReason}
+            onChange={(e) => setExceptionReason(e.target.value)}
+            placeholder="Reason for clocking in…"
+            rows={2}
+            className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm focus:outline-none focus:border-accent-ink"
+          />
+        </div>
+      )}
+
       <button
-        onClick={() => performAction(action.endpoint)}
-        disabled={actionState === "submitting"}
+        onClick={handleClockAction}
+        disabled={actionState === "submitting" || (needsReason && !reasonTrimmed)}
         className="btn-primary w-full min-h-[56px] text-base"
       >
         {actionState === "submitting" ? "Updating…" : action.label}
