@@ -2,12 +2,29 @@
 
 import { useEffect, useMemo, useState } from "react";
 import ShiftStatusPill from "@/components/ShiftStatusPill";
+import DateTasksPanel from "@/components/DateTasksPanel";
+import TeamNotesThread from "@/components/TeamNotesThread";
+import { ChatIcon, ChecklistIcon } from "@/components/icons";
 import { formatSlotDate, formatTime12h } from "@/lib/availability-format";
-import type { AdminShiftDTO, AssignmentOptionsDTO, DirectReportDTO, ShiftStatus } from "@/types";
+import type { AdminShiftDTO, AssignmentOptionsDTO, DirectReportDTO, ShiftStatus, TeamNoteTopicCountDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
 
 type EmployeeOption = { id: string; name: string };
+
+/** shiftId -> total message count, built from GET /api/admin/team-notes/topic-counts — same
+ *  shape TeamAvailabilityCards' own countsByDate builds, just keyed on SHIFT topics instead of
+ *  AVAILABILITY_DATE ones. Admin-only endpoint (see loadCounts below) — same accepted
+ *  limitation TeamAvailabilityCards already has: a supervisor viewing this page just sees no
+ *  badges rather than an error, since the badge is a nice-to-have, not the page's job. */
+function countsByShift(counts: TeamNoteTopicCountDTO[]): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const c of counts) {
+    if (c.topicType !== "SHIFT") continue;
+    map.set(c.topicId, c.total);
+  }
+  return map;
+}
 
 const STATUS_OPTIONS: ShiftStatus[] = [
   "UPCOMING",
@@ -37,11 +54,13 @@ function reportName(r: DirectReportDTO): string {
  * pure overhead; src/lib/shifts.ts's listAdminShifts still accepts real server-side filters for
  * whenever that stops being true.
  */
-export default function TeamScheduleView({ viewerIsAdmin }: { viewerIsAdmin: boolean }) {
+export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIsAdmin: boolean; viewerId: string }) {
   const [shifts, setShifts] = useState<AdminShiftDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [employeeOptions, setEmployeeOptions] = useState<EmployeeOption[]>([]);
   const [departmentOptions, setDepartmentOptions] = useState<{ id: string; name: string }[]>([]);
+  const [messageCounts, setMessageCounts] = useState<Map<string, number>>(new Map());
+  const [openShiftId, setOpenShiftId] = useState<string | null>(null);
 
   const [employeeFilter, setEmployeeFilter] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("");
@@ -100,10 +119,26 @@ export default function TeamScheduleView({ viewerIsAdmin }: { viewerIsAdmin: boo
     }
   }
 
+  // Best-effort, same reasoning as every other chip-badge fetch in this app — a shift missing
+  // its message count isn't worth failing the whole page over. Admin-only endpoint: a
+  // supervisor viewing this page just gets an empty map (same accepted limitation
+  // TeamAvailabilityCards already has for its own message-count badges).
+  async function loadCounts() {
+    try {
+      const res = await fetch("/api/admin/team-notes/topic-counts");
+      if (!res.ok) return;
+      const data: { counts: TeamNoteTopicCountDTO[] } = await res.json();
+      setMessageCounts(countsByShift(data.counts));
+    } catch {
+      // ignored — see comment above
+    }
+  }
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadShifts();
     loadOptions();
+    loadCounts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -549,6 +584,45 @@ export default function TeamScheduleView({ viewerIsAdmin }: { viewerIsAdmin: boo
                     >
                       Confirm reassign
                     </button>
+                  </div>
+                )}
+
+                {/* Phase 3 (client spec, Sept 2026): "re-point tasks and messages onto shifts
+                    instead of the original availability submission" — the same
+                    push-a-task/message-thread pairing TeamAvailabilityCards already shows for
+                    an availability date, now on the shift itself. */}
+                <button
+                  type="button"
+                  onClick={() => setOpenShiftId(openShiftId === s.id ? null : s.id)}
+                  className={`mt-3 flex items-center gap-1.5 text-xs font-medium transition-colors ${
+                    openShiftId === s.id ? "text-accent-ink" : "text-muted hover:text-accent-ink"
+                  }`}
+                >
+                  <ChecklistIcon className="h-3.5 w-3.5" />
+                  Tasks & messages
+                  <span className="flex items-center gap-0.5">
+                    <ChatIcon className="h-3 w-3" />
+                    {(messageCounts.get(s.id) ?? 0) > 0 ? messageCounts.get(s.id) : ""}
+                  </span>
+                </button>
+
+                {openShiftId === s.id && (
+                  <div className="mt-2.5 space-y-2.5">
+                    <div>
+                      <p className="text-xs font-semibold text-muted mb-1 flex items-center gap-1.5">
+                        <ChecklistIcon className="h-3.5 w-3.5" />
+                        Tasks for this shift
+                      </p>
+                      <DateTasksPanel employeeId={s.employeeId} taskDate={s.date} />
+                    </div>
+                    <TeamNotesThread
+                      employeeId={s.employeeId}
+                      viewerId={viewerId}
+                      topicType="SHIFT"
+                      topicId={s.id}
+                      placeholder={`Message ${s.employeeName} about this shift…`}
+                      onMessagePosted={loadCounts}
+                    />
                   </div>
                 )}
               </div>
