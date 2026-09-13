@@ -26,14 +26,15 @@ function topicQuery(topicType?: TeamNoteTopicType, topicId?: string, topicDate?:
  * CB, Sept 2026: "a texting feature to where we would be able to communicate back and forth...
  * add notes, add documents." One thread per team member — used on the employee's own /notes
  * page, on /team/[employeeId], and (with `topicType`/`topicId`/`topicDate` set) as a narrower
- * conversation scoped to one specific availability date or PTO request on the admin card
- * views. Access is enforced server-side by src/lib/team-notes.ts either way (self, that
- * employee's supervisor, or an admin; backed up independently by prisma/rls.sql's
- * team_note_select/team_note_write). `viewerId` decides which side of the chat a given message
- * renders on — it's never used for access control, only left/right alignment.
+ * conversation scoped to one specific availability date, PTO request, or (Phase 3, client spec,
+ * Sept 2026) confirmed shift on the admin card / schedule views. Access is enforced
+ * server-side by src/lib/team-notes.ts either way (self, that employee's supervisor, or an
+ * admin; backed up independently by prisma/rls.sql's team_note_select/team_note_write).
+ * `viewerId` decides which side of the chat a given message renders on — it's never used for
+ * access control, only left/right alignment.
  *
  * Omit the topic props entirely for the general thread. When set, they must describe exactly
- * one topic (an availability date needs topicDate too; a PTO request never does) — see
+ * one topic (an availability date needs topicDate too; a PTO request or shift never does) — see
  * TeamNoteTopic in src/lib/team-notes.ts.
  */
 export default function TeamNotesThread({
