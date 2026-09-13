@@ -2,6 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import { withRlsContext } from "@/lib/db";
 import { assertCanAccessEmployeeRecords, assertCanManageShifts, isAdmin, ForbiddenError } from "@/lib/authorization";
 import { orgNow, timeToMinutes } from "@/lib/time";
+import { writeNotification } from "@/lib/notifications";
 import type { CurrentEmployee, ShiftDTO, ShiftStatus, AdminShiftDTO } from "@/types";
 
 /**
@@ -319,6 +320,14 @@ export async function convertAvailabilityDateToShift(
       targetId: row.id,
       newValue: `${row.date} ${row.startTime}-${row.endTime} for ${submission.employeeId} (converted from availability ${submission.id})`,
     });
+    await writeNotification(tx, {
+      recipientId: submission.employeeId,
+      type: "SHIFT_CREATED",
+      title: "You've been scheduled for a new shift",
+      body: `${row.date}, ${row.startTime}–${row.endTime}`,
+      targetType: "Shift",
+      targetId: row.id,
+    });
     return toDTO(row, deriveShiftDisplayStatus(row, false));
   });
 }
@@ -354,6 +363,14 @@ export async function createShiftManually(actor: CurrentEmployee, input: CreateS
       action: "SHIFT_CREATED",
       targetId: row.id,
       newValue: `${row.date} ${row.startTime}-${row.endTime} for ${input.employeeId} (created manually)`,
+    });
+    await writeNotification(tx, {
+      recipientId: input.employeeId,
+      type: "SHIFT_CREATED",
+      title: "You've been scheduled for a new shift",
+      body: `${row.date}, ${row.startTime}–${row.endTime}`,
+      targetType: "Shift",
+      targetId: row.id,
     });
     return toDTO(row, deriveShiftDisplayStatus(row, false));
   });
@@ -412,6 +429,14 @@ export async function cancelShift(actor: CurrentEmployee, shiftId: string, reaso
       oldValue: existing.status,
       newValue: "CANCELLED",
       comment: trimmedReason,
+    });
+    await writeNotification(tx, {
+      recipientId: existing.employeeId,
+      type: "SHIFT_CANCELLED",
+      title: "Your shift was cancelled",
+      body: `${row.date}, ${row.startTime}–${row.endTime}: ${trimmedReason}`,
+      targetType: "Shift",
+      targetId: row.id,
     });
     return toDTO(row, "CANCELLED");
   });
@@ -476,6 +501,14 @@ export async function reassignShift(
       oldValue: existing.employeeId,
       newValue: newEmployeeId,
       comment: trimmedReason,
+    });
+    await writeNotification(tx, {
+      recipientId: newEmployeeId,
+      type: "SHIFT_REASSIGNED",
+      title: "A shift was reassigned to you",
+      body: `${existing.date}, ${existing.startTime}–${existing.endTime}`,
+      targetType: "Shift",
+      targetId: newShift.id,
     });
 
     return toDTO(newShift, deriveShiftDisplayStatus(newShift, false));
@@ -549,6 +582,14 @@ export async function requestShiftChange(actor: CurrentEmployee, shiftId: string
       newValue: hasProposal ? `${input.requestedDate} ${input.requestedStartTime}-${input.requestedEndTime}` : undefined,
       comment: reason,
     });
+    await writeNotification(tx, {
+      recipientId: existing.createdById,
+      type: "SHIFT_REQUEST_RECEIVED",
+      title: `${nameOf(row.employee)} requested a shift change`,
+      body: reason,
+      targetType: "Shift",
+      targetId: row.id,
+    });
     return toDTO(row, "CHANGE_REQUESTED");
   });
 }
@@ -587,6 +628,14 @@ export async function requestShiftCancellation(actor: CurrentEmployee, shiftId: 
       targetId: row.id,
       oldValue: `${existing.date} ${existing.startTime}-${existing.endTime}`,
       comment: trimmedReason,
+    });
+    await writeNotification(tx, {
+      recipientId: existing.createdById,
+      type: "SHIFT_REQUEST_RECEIVED",
+      title: `${nameOf(row.employee)} requested a shift cancellation`,
+      body: trimmedReason,
+      targetType: "Shift",
+      targetId: row.id,
     });
     return toDTO(row, "CANCELLATION_REQUESTED");
   });
@@ -627,6 +676,14 @@ export async function denyShiftRequest(actor: CurrentEmployee, shiftId: string, 
       newValue: "UPCOMING",
       comment: trimmedComment,
     });
+    await writeNotification(tx, {
+      recipientId: existing.employeeId,
+      type: "SHIFT_REQUEST_DECLINED",
+      title: existing.status === "CHANGE_REQUESTED" ? "Your shift change request was declined" : "Your cancellation request was declined",
+      body: trimmedComment,
+      targetType: "Shift",
+      targetId: row.id,
+    });
     return toDTO(row, deriveShiftDisplayStatus(row, false));
   });
 }
@@ -665,6 +722,14 @@ export async function approveShiftCancellation(actor: CurrentEmployee, shiftId: 
       oldValue: "CANCELLATION_REQUESTED",
       newValue: "CANCELLED",
       comment: trimmedComment,
+    });
+    await writeNotification(tx, {
+      recipientId: existing.employeeId,
+      type: "SHIFT_CANCELLED",
+      title: "Your shift was cancelled",
+      body: `${row.date}, ${row.startTime}–${row.endTime}`,
+      targetType: "Shift",
+      targetId: row.id,
     });
     return toDTO(row, "CANCELLED");
   });
@@ -722,6 +787,14 @@ export async function approveShiftChange(actor: CurrentEmployee, shiftId: string
       oldValue: `${existing.date} ${existing.startTime}-${existing.endTime}`,
       newValue: `${finalDate} ${finalStart}-${finalEnd}`,
       comment: trimmedComment,
+    });
+    await writeNotification(tx, {
+      recipientId: existing.employeeId,
+      type: "SHIFT_CHANGE_APPROVED",
+      title: "Your shift change was approved",
+      body: `${finalDate}, ${finalStart}–${finalEnd}`,
+      targetType: "Shift",
+      targetId: row.id,
     });
     return toDTO(row, deriveShiftDisplayStatus(row, false));
   });
