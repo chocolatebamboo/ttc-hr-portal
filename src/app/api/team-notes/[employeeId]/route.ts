@@ -7,7 +7,7 @@ import type { TeamNoteTopicType } from "@/types";
 
 function readTopic(topicType: string | null, topicId: string | null, topicDate: string | null): TeamNoteTopic | undefined {
   if (!topicType) return undefined;
-  if (topicType !== "AVAILABILITY_DATE" && topicType !== "PTO_REQUEST") {
+  if (topicType !== "AVAILABILITY_DATE" && topicType !== "PTO_REQUEST" && topicType !== "SHIFT") {
     throw new InvalidTeamNoteError("Unrecognized conversation type.");
   }
   if (!topicId) {
@@ -22,8 +22,9 @@ function readTopic(topicType: string | null, topicId: string | null, topicDate: 
 /** GET /api/team-notes/[employeeId] — a thread. Self, that employee's supervisor, or an admin
  *  only (listTeamNotes itself enforces this via assertCanAccessEmployeeRecords). With no
  *  ?topicType, this is the general thread; with ?topicType=AVAILABILITY_DATE&topicId=...
- *  &topicDate=... or ?topicType=PTO_REQUEST&topicId=..., it's the narrower conversation about
- *  just that one selected date or PTO request (TeamAvailabilityCards / TeamPtoCards). */
+ *  &topicDate=..., ?topicType=PTO_REQUEST&topicId=..., or ?topicType=SHIFT&topicId=..., it's the
+ *  narrower conversation about just that one selected date, PTO request, or shift
+ *  (TeamAvailabilityCards / TeamPtoCards / TeamScheduleView / ScheduleView). */
 export async function GET(request: Request, ctx: RouteContext<"/api/team-notes/[employeeId]">) {
   try {
     const employee = await requireEmployee();
