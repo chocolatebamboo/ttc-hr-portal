@@ -109,6 +109,7 @@ model Employee {
   availabilityReviewed    AvailabilitySubmission[] @relation("AvailabilityReviewer")
   shiftsAsEmployee        Shift[]                   @relation("ShiftEmployee")
   shiftsCreated           Shift[]                   @relation("ShiftCreatedBy")
+  shiftsReviewed          Shift[]                   @relation("ShiftReviewer")
   teamNotesAsSubject      TeamNote[]                @relation("TeamNoteSubject")
   teamNotesWritten        TeamNote[]                @relation("TeamNoteAuthor")
   directMessagesSent      DirectMessage[]           @relation("DirectMessageSender")
@@ -289,6 +290,13 @@ enum AvailabilityStatus {
   // member can withdraw their own Pending or Denied submission — same shape PtoStatus already
   // has for the identical reason on PTO requests.
   CANCELLED
+  // Phase 2 of the scheduling workflow rebuild (client spec, Sept 2026): "Adjust the proposed
+  // time and send it to the team member for confirmation" — a third reviewer decision besides
+  // outright Approve/Deny. See AvailabilitySubmission.adjustedSlots below for what's actually
+  // being proposed, and respondToAvailabilityAdjustment (src/lib/availability.ts) for how the
+  // employee accepts (→ APPROVED, adjustedSlots become the real slots) or declines (→ DENIED)
+  // the supervisor's counter-proposal.
+  ADJUSTMENT_REQUESTED
 }
 
 // A team member's submitted availability for specific calendar dates — modeled after
@@ -318,6 +326,15 @@ model AvailabilitySubmission {
   reviewedBy    Employee?          @relation("AvailabilityReviewer", fields: [reviewedById], references: [id])
   reviewedAt    DateTime?
   reviewComment String?
+
+  // Phase 2 (client spec, Sept 2026): the reviewer's counter-proposed times, set only alongside
+  // status ADJUSTMENT_REQUESTED (requestAvailabilityAdjustment, src/lib/availability.ts) — same
+  // shape as `slots` above (one entry per date; each date's own proposed startTime/endTime), not
+  // a proposed date change, matching the spec's own wording ("Adjust the proposed time"). Kept
+  // even after the employee responds, as the historical record of what was actually proposed —
+  // on accept, `slots` is overwritten to match this and status becomes APPROVED; on decline,
+  // status becomes DENIED and `slots` is untouched (this stays as a record of the rejected offer).
+  adjustedSlots Json?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -435,6 +452,23 @@ model Shift {
 
   cancelledAt  DateTime? // when this row itself was cancelled (CANCELLED) — not set for CANCELLATION_REQUESTED, which is still pending
   cancelReason String?   // required whenever a supervisor/admin cancels a shift outright
+
+  // When the employee submitted the still-active (or most recently active) CHANGE_REQUESTED/
+  // CANCELLATION_REQUESTED above — null until the first request, then left set even after a
+  // decision, same "keep it as history" reasoning changeReason/requestedDate/etc. already use.
+  requestedAt DateTime?
+
+  // The supervisor/admin's decision on that request — set by denyShiftRequest (reverts to
+  // UPCOMING), approveShiftChange, or approveShiftCancellation (src/lib/shifts.ts), or simply by
+  // acting directly via cancelShift/reassignShift while a request was pending (client spec: the
+  // reviewer's response to a request can also be "Change the shift time," "Cancel the shift," or
+  // "Reassign the shift," not only a plain approve/decline). Left in place after the decision as
+  // the record of who resolved it and when — reviewComment is that reviewer's own optional note
+  // back to the employee, distinct from changeReason (the employee's own stated reason) above.
+  reviewedById  String?
+  reviewedBy    Employee? @relation("ShiftReviewer", fields: [reviewedById], references: [id])
+  reviewedAt    DateTime?
+  reviewComment String?
 
   // Self-reference: reassigning a shift never edits employeeId in place (see ShiftStatus.REASSIGNED
   // above) — the original row is marked REASSIGNED and kept exactly as it was, and a brand-new Shift
