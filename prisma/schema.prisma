@@ -1,3 +1,458 @@
+// TTC HR Portal — data model
+// Design notes:
+// - `Employee.userId` is the Supabase Auth user id (uuid). Auth identity/session/password
+//   handling lives entirely in Supabase Auth — this schema never stores credentials.
+// - Every table an employee should NOT freely read/write also gets a Postgres row-level
+//   security (RLS) policy (see prisma/rls.sql) as a second enforcement layer behind the
+//   application's own server-side authorization checks in src/lib/authorization.ts.
+// - Nothing here stores SSNs, bank details, or payroll credentials — see Section 13 of the
+//   project brief. Payroll math itself is out of scope; this schema only holds APPROVED hours.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Core identity & org structure
+// ---------------------------------------------------------------------------
+
+enum Role {
+  SUPER_ADMIN
+  HR_ADMIN
+  SUPERVISOR
+  EMPLOYEE
+}
+
+enum EmploymentStatus {
+  ACTIVE
+  ON_LEAVE
+  INACTIVE
+  FORMER_EMPLOYEE
+}
+
+model Department {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  employees     Employee[]
+  documents     DocumentAssignment[]
+  announcements AnnouncementAudience[]
+}
+
+model Employee {
+  id               String            @id @default(uuid())
+  // Supabase Auth user id (auth.users.id). Unique — one portal account per employee.
+  userId           String            @unique
+  employeeCode     String            @unique // human-friendly ID, e.g. for payroll export
+  firstName        String
+  lastName         String
+  preferredName    String?
+  jobTitle         String
+  role             Role              @default(EMPLOYEE)
+  employmentStatus EmploymentStatus  @default(ACTIVE)
+  hireDate         DateTime
+
+  // Storage key (path within the "avatars" Supabase Storage bucket, NOT a URL) for this
+  // employee's profile photo — null until they have one. Kept as a bare key rather than a
+  // stored URL for the same reason storageKey is used on Document: the bucket is a Supabase
+  // implementation detail that can move, and src/lib/storage.ts's getAvatarPublicUrl() is the
+  // one place that turns a key into a real URL. Unlike Document's storageKey, this bucket is
+  // PUBLIC (see README "Profile photo bucket") — an admin-uploaded headshot isn't confidential
+  // the way HR documents are, and it needs to render as a plain <img src> in lists (Employees
+  // admin, Directory, Team) without minting a signed URL per row on every page load.
+  avatarStorageKey String?
+
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+
+  // Self-referencing: an employee's supervisor is another employee.
+  supervisorId String?
+  supervisor   Employee?  @relation("SupervisorToReports", fields: [supervisorId], references: [id])
+  reports      Employee[] @relation("SupervisorToReports")
+
+  ttcEmail       String  @unique
+  workPhone      String?
+  personalPhone  String?
+  personalEmail  String?
+
+  emergencyContactName  String?
+  emergencyContactPhone String?
+  emergencyContactRelation String?
+
+  deactivatedAt DateTime? // set the instant HR ends access; checked on every request
+
+  // Which Quick Actions tiles this person has chosen to keep on their own dashboard — CB,
+  // round five: "I should be able to customize what quick actions is there... based off of
+  // what's available in the more tab." Stable keys (see src/lib/quick-actions.ts), not
+  // hrefs/labels, so a route rename doesn't silently drop someone's saved picks. Empty means
+  // "never customized" — the dashboard falls back to the plain defaults (defaultQuickActionKeys)
+  // rather than showing nothing.
+  quickActionKeys String[] @default([])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  timeEntries          TimeEntry[]
+  timeEntryAuditEvents TimeEntryAuditEvent[] @relation("ActorOnTimeEntryAudit")
+  ptoRequestsMade      PtoRequest[]          @relation("PtoRequester")
+  ptoRequestsReviewed  PtoRequest[]          @relation("PtoReviewer")
+  documentAssignments  DocumentAssignment[]
+  acknowledgments      DocumentAcknowledgment[]
+  onboarding           EmployeeOnboarding?
+  availabilitySubmissions AvailabilitySubmission[] @relation("AvailabilitySubject")
+  availabilityReviewed    AvailabilitySubmission[] @relation("AvailabilityReviewer")
+  shiftsAsEmployee        Shift[]                   @relation("ShiftEmployee")
+  shiftsCreated           Shift[]                   @relation("ShiftCreatedBy")
+  teamNotesAsSubject      TeamNote[]                @relation("TeamNoteSubject")
+  teamNotesWritten        TeamNote[]                @relation("TeamNoteAuthor")
+  directMessagesSent      DirectMessage[]           @relation("DirectMessageSender")
+  directMessagesReceived  DirectMessage[]           @relation("DirectMessageRecipient")
+  dateTasksAsSubject      DateTask[]                @relation("DateTaskSubject")
+  dateTasksCreated        DateTask[]                @relation("DateTaskCreatedBy")
+  dateTasksApproved       DateTask[]                @relation("DateTaskApprovedBy")
+  onboardingReadinessItems OnboardingReadinessItem[]
+  onboardingCheckpoints    OnboardingCheckpoint[]
+  certificationAttempts    CertificationAttempt[]
+  announcementsWritten Announcement[]        @relation("AnnouncementAuthor")
+  announcementAudiences AnnouncementAudience[]
+  auditLogEntries      AuditLog[]            @relation("ActorOnAuditLog")
+
+  @@index([supervisorId])
+  @@index([departmentId])
+}
+
+// ---------------------------------------------------------------------------
+// Time & Attendance
+// ---------------------------------------------------------------------------
+
+enum TimeEntryStatus {
+  IN_PROGRESS
+  AWAITING_APPROVAL
+  APPROVED
+  RETURNED
+  MISSING_ENTRY
+}
+
+// A day is a TimeEntry (status, workDate, the review workflow) plus however many TimeSession
+// rows the employee logged that day — CB asked to be able to clock in and out multiple times
+// (no lunch step anymore, since a break is now just an ordinary clock-out/clock-in pair), so a
+// single fixed clockIn/lunchStart/lunchEnd/clockOut shape on TimeEntry itself no longer fits.
+// See the 2026-09-03 migration for how existing single-session/lunch-split rows were split into
+// TimeSession rows without losing any recorded time.
+model TimeEntry {
+  id         String   @id @default(uuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  workDate     DateTime // date only, stored at midnight UTC for the employee's work day
+
+  // Computed on write (see computeTotalMinutes in src/lib/time.ts): the sum of every closed
+  // session's (clockOut - clockIn) for this day. Never null once an entry exists — 0 while the
+  // day's only session(s) are still open, so "Hours today" always has a real number to show
+  // rather than looking broken mid-shift.
+  totalMinutes Int?
+
+  status TimeEntryStatus @default(IN_PROGRESS)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessions    TimeSession[]
+  auditEvents TimeEntryAuditEvent[]
+
+  @@unique([employeeId, workDate]) // one entry per employee per day
+  @@index([employeeId, workDate])
+}
+
+// One clock-in/clock-out pair. A day can have any number of these — clock in, clock out for a
+// break or the day, clock back in later, repeat. `clockOut` is null exactly while that session
+// is the currently open one (there is at most one open session per TimeEntry at a time, enforced
+// in src/lib/time-actions.ts, not by the schema).
+model TimeSession {
+  id          String    @id @default(uuid())
+  timeEntryId String
+  timeEntry   TimeEntry @relation(fields: [timeEntryId], references: [id], onDelete: Cascade)
+
+  clockIn  DateTime
+  clockOut DateTime?
+
+  // Set once a "you're still clocked in" reminder email has gone out for this session, so the
+  // reminder job (src/lib/clockout-reminders.ts) never sends a second one for the same open
+  // session — cleared implicitly by clocking out (a closed session is never eligible again).
+  reminderSentAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([timeEntryId])
+}
+
+enum TimeAuditAction {
+  ENTRY_CREATED
+  CLOCK_IN
+  // LUNCH_STARTED/LUNCH_ENDED are no longer produced (lunch was removed as its own step — see
+  // TimeSession above) but stay in this enum, unremoved, because past audit rows already
+  // reference them; dropping a value a stored row still uses breaks that row, not just the code.
+  LUNCH_STARTED
+  LUNCH_ENDED
+  CLOCK_OUT
+  EMPLOYEE_CORRECTION_REQUESTED
+  SUPERVISOR_CORRECTION
+  HR_CORRECTION
+  TIMESHEET_APPROVED
+  TIMESHEET_RETURNED
+  // A session the team member never closed themselves, force-closed by the auto-clockout job
+  // (src/lib/auto-clockout.ts) once it's been open past the 4-hour cap — CB, Sept 2026: "it
+  // went over twelve hours, and then it documented it to be twelve hours. I don't necessarily
+  // want that because that's not necessarily true." No actor behind this one (see actorId
+  // below) — it's the system closing the gap, not a person.
+  AUTO_CLOCK_OUT
+}
+
+// Immutable log — a TimeEntry is never silently overwritten. Every change appends a row here.
+model TimeEntryAuditEvent {
+  id          String           @id @default(uuid())
+  timeEntryId String
+  timeEntry   TimeEntry        @relation(fields: [timeEntryId], references: [id])
+
+  action      TimeAuditAction
+  // Nullable — same reasoning as AvailabilitySubmission.reviewedById: most audit rows have a
+  // real employee behind them (whoever clocked in/out or reviewed), but AUTO_CLOCK_OUT rows
+  // (src/lib/auto-clockout.ts) are the system acting on a stale open session with no signed-in
+  // employee to attribute it to. Null here means exactly that — not a missing/unknown actor.
+  actorId     String?
+  actor       Employee?        @relation("ActorOnTimeEntryAudit", fields: [actorId], references: [id])
+
+  fieldName   String?          // e.g. "clockOut" — which field changed, when applicable
+  oldValue    String?
+  newValue    String?
+  comment     String?
+
+  createdAt   DateTime         @default(now())
+
+  @@index([timeEntryId])
+}
+
+// ---------------------------------------------------------------------------
+// PTO
+// ---------------------------------------------------------------------------
+
+enum PtoType {
+  VACATION
+  SICK
+  PERSONAL
+  OTHER_APPROVED_LEAVE
+}
+
+enum PtoStatus {
+  PENDING
+  APPROVED
+  DENIED
+  CANCELLED
+}
+
+model PtoRequest {
+  id         String   @id @default(uuid())
+  employeeId String
+  employee   Employee @relation("PtoRequester", fields: [employeeId], references: [id])
+
+  type      PtoType
+  startDate DateTime
+  endDate   DateTime
+  hours     Float
+  reason    String?
+
+  status     PtoStatus @default(PENDING)
+  reviewedById String?
+  reviewedBy   Employee? @relation("PtoReviewer", fields: [reviewedById], references: [id])
+  reviewedAt   DateTime?
+  reviewComment String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId])
+  @@index([status])
+}
+
+enum AvailabilityStatus {
+  PENDING
+  APPROVED
+  DENIED
+  // Added after the fact (CB, Sept 2026: "they shouldn't just be set in stone") so a team
+  // member can withdraw their own Pending or Denied submission — same shape PtoStatus already
+  // has for the identical reason on PTO requests.
+  CANCELLED
+}
+
+// A team member's submitted availability for specific calendar dates — modeled after
+// PtoRequest, not as a standing weekly template: CB (Sept 2026, after seeing the first
+// version) wants the same tap-dates-on-a-calendar experience as My Time, "week to week...
+// members just let us know when they're available, and then we will approve it so that we
+// have a record on our side." Every submission is its own row (never upserted/overwritten),
+// so approving or denying one leaves a permanent record — the same reason PtoRequest never
+// edits a past request in place, just creates a new one.
+model AvailabilitySubmission {
+  id         String   @id @default(uuid())
+  employeeId String
+  employee   Employee @relation("AvailabilitySubject", fields: [employeeId], references: [id])
+
+  // One entry per date the team member tapped: {date: "2026-09-17", startTime: "09:00",
+  // endTime: "17:00"}. A single submission can cover several (not necessarily consecutive)
+  // dates at once — everything tapped before hitting Submit becomes one record reviewed
+  // together. JSON rather than a child table for the same reason PtoRequest doesn't have one
+  // either: always read/written as one whole unit, never queried slot by slot.
+  slots Json
+
+  note String? // optional note from the team member submitting
+
+  status        AvailabilityStatus @default(PENDING)
+  submittedAt   DateTime           @default(now())
+  reviewedById  String?
+  reviewedBy    Employee?          @relation("AvailabilityReviewer", fields: [reviewedById], references: [id])
+  reviewedAt    DateTime?
+  reviewComment String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  shiftReminders AvailabilityShiftReminder[]
+  // Confirmed Shift(s) created by converting THIS submission (src/lib/shifts.ts's
+  // convertAvailabilityToShift) — see Shift's own doc comment below for why "approved
+  // availability" and "a confirmed shift" are deliberately two different records rather than
+  // one status meaning both. Plural: one submission can cover several dates, and each date is
+  // converted into its own Shift, so this can point at more than one.
+  shifts Shift[]
+
+  @@index([employeeId])
+  @@index([status])
+}
+
+// One row per (submission, date) a "your shift starts soon" email has already gone out for —
+// CB, Sept 2026: "once they pick out their availability and it's confirmed [approved]... set a
+// reminder... thirty minutes before they clock in". Slots live as JSON on AvailabilitySubmission
+// (see its own comment above), so this is a separate table rather than a field on that JSON —
+// unlike TimeSession's single reminderSentAt column (one open session, one possible reminder),
+// one submission can cover several dates and each needs its own independent sent/not-sent
+// tracking. The (submissionId, date) unique constraint is what makes a second cron run within
+// the same reminder window a no-op instead of a duplicate email — see src/lib/shift-reminders.ts.
+model AvailabilityShiftReminder {
+  id           String                 @id @default(uuid())
+  submissionId String
+  submission   AvailabilitySubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  date         String // "YYYY-MM-DD" — matches one entry in the submission's own slots array
+  sentAt       DateTime               @default(now())
+
+  @@unique([submissionId, date])
+}
+
+// ---------------------------------------------------------------------------
+// Shifts (confirmed schedule) — CB, Sept 2026, the four-part workflow: "Availability: when a
+// team member says they are available. Scheduling: when a supervisor approves that availability
+// as an official shift... Availability must not automatically become a confirmed shift." Before
+// this table existed, an APPROVED AvailabilitySubmission WAS treated as the confirmed schedule
+// everywhere in the app — there was no separate record, no independent lifecycle, and clock-in
+// had no relationship to it at all. This table is that missing, deliberate second step: a
+// Shift is a distinct row, created by a supervisor/admin EITHER by converting one date out of an
+// approved submission (sourceAvailabilitySubmissionId set) OR by hand for a date nobody
+// necessarily submitted availability for (sourceAvailabilitySubmissionId null) — "Create a shift
+// manually when needed." Approving availability alone still only changes
+// AvailabilitySubmission.status; nothing about that action alone creates a row here.
+// ---------------------------------------------------------------------------
+
+enum ShiftStatus {
+  UPCOMING
+  IN_PROGRESS
+  COMPLETED
+  // Employee submitted "Request Shift Change" — the ORIGINAL shift stays visible with this
+  // status (per CB: "The original shift must remain visible... until a Supervisor or Admin
+  // responds") rather than being edited in place; see requestedDate/requestedStartTime/
+  // requestedEndTime/changeReason below for what they proposed. Phase 2 (not yet wired to any
+  // UI as of this migration) — the column is reserved now so the enum only needs to grow once.
+  CHANGE_REQUESTED
+  // Same shape as CHANGE_REQUESTED, for "Request Cancellation" — changeReason holds why; no
+  // proposed new date/time applies. Also phase 2.
+  CANCELLATION_REQUESTED
+  CANCELLED
+  // Terminal — this exact shift was handed to someone else. See reassignedToShift below: the
+  // original row is never mutated into a different employee's shift, a NEW row is created for
+  // the new employee and this one is marked REASSIGNED and kept, so the schedule's own history
+  // never silently rewrites who a past shift actually belonged to.
+  REASSIGNED
+  // Nobody clocked in for a shift whose end time has already passed — see
+  // deriveShiftDisplayStatus in src/lib/shifts.ts for why this is computed at read time rather
+  // than written here directly (nothing currently flips a row to this status on its own; a
+  // future scheduled job could, but doesn't yet).
+  MISSED
+}
+
+model Shift {
+  id         String   @id @default(uuid())
+  employeeId String
+  employee   Employee @relation("ShiftEmployee", fields: [employeeId], references: [id])
+
+  date      String // "YYYY-MM-DD" — one shift is one calendar date, same convention as
+                    // AvailabilitySlot/DateTask.taskDate; a multi-day booking is several Shift
+                    // rows, not a date range, so each date keeps its own independent status,
+                    // attendance, tasks, and change requests.
+  startTime String // "HH:MM", 24-hour
+  endTime   String // "HH:MM", 24-hour, after startTime
+
+  status ShiftStatus @default(UPCOMING)
+
+  note String? // carried over from the source availability submission's own note when
+               // converted, or set directly for a manually-created shift; editable by whoever
+               // can already write this row (supervisor/admin) as a plain scheduling note —
+               // distinct from changeReason/cancelReason below, which are about a specific
+               // requested/decided CHANGE, not a general note.
+
+  // Set when this shift was created by converting one date out of an approved availability
+  // submission — null for a shift created manually (see this model's own doc comment above).
+  // onDelete: SetNull rather than Cascade: a submission being removed later should never take
+  // an already-confirmed shift down with it — the shift is its own real record by then.
+  sourceAvailabilitySubmissionId String?
+  sourceAvailabilitySubmission   AvailabilitySubmission? @relation(fields: [sourceAvailabilitySubmissionId], references: [id], onDelete: SetNull)
+
+  createdById String // the supervisor/admin who converted or manually created this shift
+  createdBy   Employee @relation("ShiftCreatedBy", fields: [createdById], references: [id])
+
+  // CHANGE_REQUESTED / CANCELLATION_REQUESTED (phase 2): what the employee asked for. requestedDate/
+  // requestedStartTime/requestedEndTime are optional even for a change request — CB's spec allows
+  // "a reason and MAY propose a new date or time," so a request can be "I need this time changed,
+  // please suggest something" with no proposal attached. Null unless one of those two statuses is
+  // (or was) active; kept even after the supervisor decides so the record of what was asked for
+  // isn't lost.
+  changeReason      String?
+  requestedDate     String?
+  requestedStartTime String?
+  requestedEndTime   String?
+
+  cancelledAt  DateTime? // when this row itself was cancelled (CANCELLED) — not set for CANCELLATION_REQUESTED, which is still pending
+  cancelReason String?   // required whenever a supervisor/admin cancels a shift outright
+
+  // Self-reference: reassigning a shift never edits employeeId in place (see ShiftStatus.REASSIGNED
+  // above) — the original row is marked REASSIGNED and kept exactly as it was, and a brand-new Shift
+  // row is created for the new employee, linked back here. @unique because a given original shift is
+  // reassigned to at most one replacement.
+  reassignedFromShiftId String? @unique
+  reassignedFromShift   Shift?  @relation("ShiftReassignment", fields: [reassignedFromShiftId], references: [id])
+  reassignedToShift     Shift?  @relation("ShiftReassignment")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([employeeId, date])
+  @@index([employeeId, status])
+  @@index([status])
+  @@index([date])
+}
+
 // ---------------------------------------------------------------------------
 // Team notes (admin/supervisor <-> team member messaging)
 // ---------------------------------------------------------------------------
