@@ -9,6 +9,10 @@ const STYLE: Record<AvailabilityStatus, string> = {
   APPROVED: "bg-emerald-100 text-emerald-800",
   DENIED: "bg-rose-100 text-rose-800",
   CANCELLED: "bg-black/5 text-muted",
+  // Phase 2 (client spec, Sept 2026): same amber "needs a decision" tone as Pending — an
+  // Adjustment Requested submission needs a decision too, just from the team member instead of
+  // the reviewer this time.
+  ADJUSTMENT_REQUESTED: "bg-amber-100 text-amber-800",
 };
 
 const LABEL: Record<AvailabilityStatus, string> = {
@@ -16,6 +20,7 @@ const LABEL: Record<AvailabilityStatus, string> = {
   APPROVED: "Approved",
   DENIED: "Denied",
   CANCELLED: "Cancelled",
+  ADJUSTMENT_REQUESTED: "Adjustment requested",
 };
 
 export default function AvailabilityStatusPill({ status }: { status: AvailabilityStatus }) {
