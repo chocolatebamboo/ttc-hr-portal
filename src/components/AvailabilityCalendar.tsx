@@ -42,11 +42,14 @@ const DEFAULT_END = "17:00";
 // replaces the hours readout on My Time's calendar. CANCELLED is included only to keep this a
 // complete Record<AvailabilityDTO["status"], ...> — submissionsByDate below skips Cancelled
 // submissions entirely, so this entry is never actually looked up.
+// ADJUSTMENT_REQUESTED (Phase 2, client spec, Sept 2026): same amber "needs a decision" tone as
+// Pending — see AvailabilityStatusPill's own STYLE map, which this mirrors.
 const STATUS_CHIP: Record<AvailabilityDTO["status"], string> = {
   PENDING: "bg-amber-100 text-amber-800",
   APPROVED: "bg-emerald-100 text-emerald-800",
   DENIED: "bg-rose-100 text-rose-800",
   CANCELLED: "bg-black/5 text-muted",
+  ADJUSTMENT_REQUESTED: "bg-amber-100 text-amber-800",
 };
 
 /** Every calendar date covered by any of this person's submissions, newest-first so an
@@ -404,7 +407,7 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
           <ChevronDownIcon className="h-4 w-4 text-muted" />
         </button>
         <p className="text-center text-xs text-muted/60 py-2">
-          Tap the dates you&apos;re available — you can plan up to {MAX_FUTURE_OFFSET} months ahead.
+          Tap the dates you're available — you can plan up to {MAX_FUTURE_OFFSET} months ahead.
         </p>
         {months.map((month, i) => {
           const offset = PAST_OFFSET + i;
@@ -422,7 +425,7 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
             </div>
           );
         })}
-        <p className="text-center text-xs text-muted/60 py-2">That&apos;s as far as planning goes for now.</p>
+        <p className="text-center text-xs text-muted/60 py-2">That's as far as planning goes for now.</p>
       </div>
 
       {/* Same "don't get lost" affordance as My Time's calendar (CB, Sept 2026) — hidden while
@@ -858,6 +861,16 @@ function SubmissionDetail({
       </div>
 
       {submission.status === "PENDING" && <p className="text-sm text-white/60">Waiting on a supervisor or HR to approve.</p>}
+
+      {/* Phase 2 (client spec, Sept 2026): the actual Accept/Decline for a proposed new time
+          lives on MyAvailabilityPreview's own card, right below this calendar on the same
+          Availability page — this is just a pointer so someone landing here via a tapped date
+          isn't left wondering why there's nothing to do. */}
+      {submission.status === "ADJUSTMENT_REQUESTED" && (
+        <p className="text-sm text-white/60">
+          Your supervisor proposed a different time for this — see &ldquo;Your submissions&rdquo; above to accept or decline.
+        </p>
+      )}
 
       {/* Denied isn't final — this reopens the same dates as an editable draft, pre-filled
           with the denied times, so there's a clear next step instead of a dead end. */}
