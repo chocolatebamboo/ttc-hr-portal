@@ -188,10 +188,32 @@ model TimeSession {
   // session — cleared implicitly by clocking out (a closed session is never eligible again).
   reminderSentAt DateTime?
 
+  // Phase 3 of the scheduling/attendance/task workflow rebuild (client spec, Sept 2026):
+  // "clock-in gated to a scheduled shift." Set (or left null) at the moment of CLOCK_IN only —
+  // see resolveClockInShift/applyClockAction in src/lib/time-actions.ts — never touched again
+  // afterward, including by a later CLOCK_OUT on this same session or by anything that happens
+  // to this employee's shifts after the fact (a shift cancelled an hour into someone's actual
+  // shift doesn't retroactively unlink the session that already matched it). onDelete: SetNull
+  // rather than Cascade: a shift being deleted should never take real worked time down with it —
+  // this is provenance, not a hard dependency, same reasoning
+  // Shift.sourceAvailabilitySubmissionId already gives for its own onDelete: SetNull.
+  shiftId String?
+  shift   Shift?  @relation("ShiftTimeSessions", fields: [shiftId], references: [id], onDelete: SetNull)
+
+  // True when this clock-in didn't land within CLOCK_IN_WINDOW_MINUTES of a scheduled shift's
+  // start time — either because shiftId above is null (nothing scheduled today at all) or
+  // because it's set but the clock-in was early/late outside that window. Never set by a
+  // CLOCK_OUT (client spec scope: gating and flagging apply to clocking in only, not out).
+  // Surfaced to whoever reviews this day's timesheet (TimesheetTable) so an odd-looking time
+  // still comes with its own explanation attached, rather than silently blocked outright.
+  isException     Boolean @default(false)
+  exceptionReason String? // required (enforced in applyClockAction) whenever isException is true
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([timeEntryId])
+  @@index([shiftId])
 }
 
 enum TimeAuditAction {
@@ -477,6 +499,13 @@ model Shift {
   reassignedFromShiftId String? @unique
   reassignedFromShift   Shift?  @relation("ShiftReassignment", fields: [reassignedFromShiftId], references: [id])
   reassignedToShift     Shift?  @relation("ShiftReassignment")
+
+  // Phase 3 (client spec, Sept 2026): every TimeSession that clocked in against this shift —
+  // see TimeSession.shiftId's own doc comment above. Not used for the display-status
+  // COMPLETED/MISSED derivation in deriveShiftDisplayStatus (that stays date-based via
+  // loadLoggedTimeFlags, which also has to count time logged with NO shift match at all); this
+  // is for showing an attendance-exception, if any, right on the shift itself.
+  timeSessions TimeSession[] @relation("ShiftTimeSessions")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
