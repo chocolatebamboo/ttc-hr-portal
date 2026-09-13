@@ -13,5 +13,5 @@ export default async function TeamSchedulePage() {
   if (!employee) redirect("/login");
   if (!isAdmin(employee) && employee.role !== "SUPERVISOR") redirect("/dashboard");
 
-  return <TeamScheduleView viewerIsAdmin={isAdmin(employee)} />;
+  return <TeamScheduleView viewerIsAdmin={isAdmin(employee)} viewerId={employee.id} />;
 }
