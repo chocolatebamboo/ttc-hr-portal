@@ -1,7 +1,7 @@
 import { withRlsContext } from "@/lib/db";
 import { isAdmin, ForbiddenError } from "@/lib/authorization";
 import { todayDateKey } from "@/lib/time";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import type { AdminAvailabilityDTO, AvailabilityDTO, AvailabilityStatus, AvailabilitySlot, CurrentEmployee } from "@/types";
 
 /** Hand-declared rather than importing Prisma's generated AvailabilitySubmission type — same
@@ -15,6 +15,7 @@ type AvailabilityRow = {
   submittedAt: Date;
   reviewComment: string | null;
   reviewedAt: Date | null;
+  adjustedSlots: unknown;
 };
 
 export class InvalidAvailabilityError extends Error {
@@ -33,7 +34,7 @@ const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
  *  entry per date (a second entry for the same date is almost certainly a mistake, not an
  *  intentional split, same reasoning the old per-weekday version used). Throws with a message
  *  specific enough to show the team member directly, same as InvalidPtoRequestError elsewhere. */
-function assertValidSlots(slots: unknown): asserts slots is AvailabilitySlot[] {
+export function assertValidSlots(slots: unknown): asserts slots is AvailabilitySlot[] {
   if (!Array.isArray(slots) || slots.length === 0) {
     throw new InvalidAvailabilityError("Choose at least one date you're available.");
   }
@@ -72,6 +73,7 @@ function toDTO(row: AvailabilityRow): AvailabilityDTO {
     submittedAt: row.submittedAt.toISOString(),
     reviewComment: row.reviewComment,
     reviewedAt: row.reviewedAt ? row.reviewedAt.toISOString() : null,
+    adjustedSlots: row.adjustedSlots ? (row.adjustedSlots as unknown as AvailabilitySlot[]) : null,
   };
 }
 
@@ -265,13 +267,92 @@ export async function decideAvailability(
 export async function undecideAvailability(reviewer: CurrentEmployee, submissionId: string): Promise<AvailabilityDTO> {
   return withRlsContext({ employeeId: reviewer.id, role: reviewer.role }, async (tx) => {
     const existing = await tx.availabilitySubmission.findUnique({ where: { id: submissionId } });
-    if (!existing || (existing.status !== "APPROVED" && existing.status !== "DENIED")) {
-      throw new InvalidAvailabilityError('Only an "Approved" or "Denied" submission can be reopened.');
+    if (
+      !existing ||
+      (existing.status !== "APPROVED" && existing.status !== "DENIED" && existing.status !== "ADJUSTMENT_REQUESTED")
+    ) {
+      throw new InvalidAvailabilityError('Only an "Approved," "Denied," or "Adjustment Requested" submission can be reopened.');
     }
 
     const row = await tx.availabilitySubmission.update({
       where: { id: submissionId },
-      data: { status: "PENDING", reviewedById: null, reviewedAt: null, reviewComment: null },
+      data: { status: "PENDING", reviewedById: null, reviewedAt: null, reviewComment: null, adjustedSlots: Prisma.JsonNull },
+    });
+    return toDTO(row);
+  });
+}
+
+/**
+ * Phase 2 (client spec, Sept 2026): the reviewer's third option besides outright Approve/Deny —
+ * "Adjust the proposed time and send it to the team member for confirmation." adjustedSlots must
+ * cover the exact same dates as the submission's own `slots` (only the times may differ — the
+ * spec says "the proposed TIME," not a different date), same discipline assertValidSlots already
+ * enforces for a fresh submission.
+ */
+export async function requestAvailabilityAdjustment(
+  reviewer: CurrentEmployee,
+  submissionId: string,
+  adjustedSlots: AvailabilitySlot[],
+  comment?: string
+): Promise<AvailabilityDTO> {
+  assertValidSlots(adjustedSlots);
+
+  return withRlsContext({ employeeId: reviewer.id, role: reviewer.role }, async (tx) => {
+    const existing = await tx.availabilitySubmission.findUnique({ where: { id: submissionId } });
+    if (!existing || existing.status !== "PENDING") {
+      throw new InvalidAvailabilityError('Only a "Pending" submission can have an adjustment requested.');
+    }
+
+    const originalDates = new Set((existing.slots as unknown as AvailabilitySlot[]).map((s) => s.date));
+    const adjustedDates = new Set(adjustedSlots.map((s) => s.date));
+    if (originalDates.size !== adjustedDates.size || [...originalDates].some((d) => !adjustedDates.has(d))) {
+      throw new InvalidAvailabilityError("The adjusted times must cover the exact same dates that were submitted.");
+    }
+
+    const row = await tx.availabilitySubmission.update({
+      where: { id: submissionId },
+      data: {
+        status: "ADJUSTMENT_REQUESTED",
+        adjustedSlots: adjustedSlots as unknown as Prisma.InputJsonValue,
+        reviewedById: reviewer.id,
+        reviewedAt: new Date(),
+        reviewComment: comment?.trim() || null,
+      },
+    });
+    return toDTO(row);
+  });
+}
+
+/**
+ * Team member's response to a pending ADJUSTMENT_REQUESTED — "send it to the team member for
+ * confirmation." Accepting makes the adjusted times the real, official ones (status → APPROVED,
+ * same terminal state a plain Approve reaches, so everything downstream — converting to a
+ * confirmed Shift — works exactly the same way regardless of which path got here). Declining
+ * (status → DENIED) leaves the ORIGINAL slots untouched and adjustedSlots in place as the record
+ * of what was offered and turned down — matching decideAvailability's own "never erase the
+ * submitted content" convention. No separate authorization check beyond ownership (checked here,
+ * and again by RLS under the actor's own identity) — this is the submission's own employee
+ * responding to a proposal made about THEM, not a supervisor/HR action.
+ */
+export async function respondToAvailabilityAdjustment(
+  actor: CurrentEmployee,
+  submissionId: string,
+  accept: boolean
+): Promise<AvailabilityDTO> {
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const existing = await tx.availabilitySubmission.findUnique({ where: { id: submissionId } });
+    if (!existing || existing.employeeId !== actor.id) {
+      throw new InvalidAvailabilityError("Submission not found.");
+    }
+    if (existing.status !== "ADJUSTMENT_REQUESTED") {
+      throw new InvalidAvailabilityError("This submission has no pending adjustment to respond to.");
+    }
+
+    const row = await tx.availabilitySubmission.update({
+      where: { id: submissionId },
+      data: accept
+        ? { status: "APPROVED", slots: existing.adjustedSlots as unknown as Prisma.InputJsonValue }
+        : { status: "DENIED" },
     });
     return toDTO(row);
   });
