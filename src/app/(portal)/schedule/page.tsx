@@ -6,5 +6,5 @@ export default async function SchedulePage() {
   const employee = await getCurrentEmployee();
   if (!employee) redirect("/login");
 
-  return <ScheduleView />;
+  return <ScheduleView employeeId={employee.id} />;
 }
