@@ -840,3 +840,39 @@ create policy shift_self_request on "Shift" for update using (
 ) with check (
   "employeeId" = current_employee_id()
 );
+
+
+-- Phase 4 (client spec, Sept 2026): "a real in-app notification feed." One row per recipient —
+-- unlike AuditLog (admin-only reading, see audit_log_select above), a Notification's whole
+-- point is that it's addressed to one specific person, so visibility is narrower than
+-- date_task_select/team_note_select's three-way (self/supervisor/admin) shape: no supervisor or
+-- admin override here at all, since a notification meant for someone else is never any of
+-- their business, admin included — Reports > Activity History (reading AuditLog) is the
+-- admin-facing view of "what happened," this table is deliberately not that.
+alter table "Notification" enable row level security;
+alter table "Notification" force row level security;
+
+drop policy if exists notification_select on "Notification";
+create policy notification_select on "Notification" for select using (
+  "recipientId" = current_employee_id()
+);
+
+-- Same shape as audit_log_insert: the app always writes a Notification FOR someone else (the
+-- shift's employee, the availability submission's employee, etc.), never for the actor doing
+-- the writing, so a self-only check here would block every real write. App-layer code is what
+-- decides who a notification is addressed to (src/lib/notifications.ts's writeNotification,
+-- called only from inside an already-authorized mutation) — same division of labor as every
+-- other insert-only policy in this file.
+drop policy if exists notification_insert on "Notification";
+create policy notification_insert on "Notification" for insert with check (true);
+
+-- Marking your own notification(s) read/unread — recipientId can't change (the app never sets
+-- it on an update; nothing here forbids it directly, but nothing in src/lib/notifications.ts
+-- ever attempts to, same "enforced by only ever writing this shape" convention plain-columns
+-- like TeamNote.topicType already rely on rather than a trigger for every table).
+drop policy if exists notification_update on "Notification";
+create policy notification_update on "Notification" for update using (
+  "recipientId" = current_employee_id()
+) with check (
+  "recipientId" = current_employee_id()
+);
