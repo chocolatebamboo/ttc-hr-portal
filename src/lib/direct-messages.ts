@@ -1,5 +1,6 @@
 import { withRlsContext } from "@/lib/db";
 import { getSignedDownloadUrl } from "@/lib/storage";
+import { threadKeyForDirectMessage, markThreadRead, getLastReadMap, isUnread } from "@/lib/message-read-state";
 import type { CurrentEmployee, DirectConversationSummaryDTO, DirectMessageDTO } from "@/types";
 
 export class InvalidDirectMessageError extends Error {
@@ -59,42 +60,52 @@ function toDTO(row: MessageRow): DirectMessageDTO {
  * listTeamNoteTopicCounts already makes.
  */
 export async function listConversationSummaries(actor: CurrentEmployee): Promise<DirectConversationSummaryDTO[]> {
-  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
-    const rows = await tx.directMessage.findMany({
-      where: { OR: [{ senderId: actor.id }, { recipientId: actor.id }] },
-      orderBy: { createdAt: "asc" },
-      select: {
-        senderId: true,
-        recipientId: true,
-        body: true,
-        createdAt: true,
-        sender: { select: { firstName: true, lastName: true, preferredName: true } },
-        recipient: { select: { firstName: true, lastName: true, preferredName: true } },
-      },
-    });
+  const [rows, lastRead] = await Promise.all([
+    withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+      return tx.directMessage.findMany({
+        where: { OR: [{ senderId: actor.id }, { recipientId: actor.id }] },
+        orderBy: { createdAt: "asc" },
+        select: {
+          senderId: true,
+          recipientId: true,
+          body: true,
+          createdAt: true,
+          sender: { select: { firstName: true, lastName: true, preferredName: true } },
+          recipient: { select: { firstName: true, lastName: true, preferredName: true } },
+        },
+      });
+    }),
+    getLastReadMap(actor),
+  ]);
 
-    const byCounterpart = new Map<string, DirectConversationSummaryDTO>();
-    for (const row of rows) {
-      const mine = row.senderId === actor.id;
-      const otherId = mine ? row.recipientId : row.senderId;
-      const otherPerson = mine ? row.recipient : row.sender;
-      const entry = byCounterpart.get(otherId) ?? {
-        employeeId: otherId,
-        employeeName: nameOf(otherPerson),
-        lastMessage: "",
-        lastMessageAt: "",
-        total: 0,
-        fromOthers: 0,
-      };
-      entry.total += 1;
-      if (!mine) entry.fromOthers += 1;
-      // Rows arrive oldest-first, so the last one written here is always the most recent.
-      entry.lastMessage = row.body;
-      entry.lastMessageAt = row.createdAt.toISOString();
-      byCounterpart.set(otherId, entry);
+  const byCounterpart = new Map<string, DirectConversationSummaryDTO>();
+  for (const row of rows) {
+    const mine = row.senderId === actor.id;
+    const otherId = mine ? row.recipientId : row.senderId;
+    const otherPerson = mine ? row.recipient : row.sender;
+    const entry = byCounterpart.get(otherId) ?? {
+      employeeId: otherId,
+      employeeName: nameOf(otherPerson),
+      lastMessage: "",
+      lastMessageAt: "",
+      total: 0,
+      fromOthers: 0,
+      unread: 0,
+    };
+    entry.total += 1;
+    if (!mine) {
+      entry.fromOthers += 1;
+      // See TeamNoteTopicCountDTO's own comment in src/types/index.ts for why `unread` (this
+      // viewer's real last-read time for THIS conversation) is a separate number from
+      // `fromOthers` (every message anyone else ever sent here, read or not).
+      if (isUnread(lastRead, threadKeyForDirectMessage(actor.id, otherId), row.createdAt)) entry.unread += 1;
     }
-    return [...byCounterpart.values()];
-  });
+    // Rows arrive oldest-first, so the last one written here is always the most recent.
+    entry.lastMessage = row.body;
+    entry.lastMessageAt = row.createdAt.toISOString();
+    byCounterpart.set(otherId, entry);
+  }
+  return [...byCounterpart.values()];
 }
 
 /**
@@ -105,7 +116,7 @@ export async function listConversationSummaries(actor: CurrentEmployee): Promise
  * independently.
  */
 export async function listMessages(actor: CurrentEmployee, otherEmployeeId: string): Promise<DirectMessageDTO[]> {
-  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+  const messages = await withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const rows = await tx.directMessage.findMany({
       where: {
         OR: [
@@ -118,6 +129,12 @@ export async function listMessages(actor: CurrentEmployee, otherEmployeeId: stri
     });
     return rows.map(toDTO);
   });
+
+  // Correction brief #1 — see listTeamNotes' matching comment in src/lib/team-notes.ts for why
+  // this lives here rather than a separate "mark read" call the client has to remember to make.
+  await markThreadRead(actor, threadKeyForDirectMessage(actor.id, otherEmployeeId));
+
+  return messages;
 }
 
 /**
