@@ -1,6 +1,7 @@
 import { withRlsContext } from "@/lib/db";
 import { assertCanAccessEmployeeRecords, assertIsAdmin } from "@/lib/authorization";
 import { getSignedDownloadUrl } from "@/lib/storage";
+import { threadKeyForTeamNote, markThreadRead, getLastReadMap, isUnread } from "@/lib/message-read-state";
 import type { CurrentEmployee, TeamNoteDTO, TeamNoteTopicCountDTO, TeamNoteTopicType } from "@/types";
 
 export class InvalidTeamNoteError extends Error {
@@ -89,7 +90,7 @@ export async function listTeamNotes(
   assertValidTopic(topic);
   await assertCanAccessEmployeeRecords(actor, employeeId);
 
-  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+  const notes = await withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const rows = await tx.teamNote.findMany({
       where: topic
         ? { employeeId, topicType: topic.type, topicId: topic.id, topicDate: topic.date ?? null }
@@ -99,6 +100,18 @@ export async function listTeamNotes(
     });
     return rows.map(toDTO);
   });
+
+  // Correction brief #1: "opening/viewing a message must immediately mark that message as
+  // read... reading a message from another entry point must produce the same result." Every
+  // surface that opens this thread (My Messages inbox, TeamAvailabilityCards/TeamPtoCards'
+  // admin cards, AvailabilityCalendar, TimesheetView, TeamScheduleView/ScheduleView) calls
+  // listTeamNotes to fetch it, so marking read HERE — once — covers all of them without each
+  // caller needing its own "mark read" step. Fire-and-forget-safe to do even when `notes` is
+  // empty: an employee opening a brand new, empty thread has still "read" it (there's nothing
+  // unread left to show), same as Notification's own read-on-click convention.
+  await markThreadRead(actor, threadKeyForTeamNote(employeeId, topic));
+
+  return notes;
 }
 
 /**
@@ -178,14 +191,22 @@ type TopicRow = {
   topicId: string | null;
   topicDate: string | null;
   authorId: string;
+  createdAt: Date;
   employee: { firstName: string; lastName: string; preferredName: string | null };
 };
 
 /** Folds raw note rows down to one count per (employeeId, topicType, topicId, topicDate) —
  *  shared by both listTeamNoteTopicCounts (one employee) and listAllTeamNoteTopicCounts (every
  *  employee, admin only) so the two only differ in which rows they fetch. See
- *  TeamNoteTopicCountDTO in src/types/index.ts for what `total`/`fromOthers` mean. */
-function aggregateTopicCounts(rows: TopicRow[], viewerId: string): TeamNoteTopicCountDTO[] {
+ *  TeamNoteTopicCountDTO in src/types/index.ts for what `total`/`fromOthers`/`unread` mean.
+ *  `lastRead` is `viewerId`'s own MessageReadState map (src/lib/message-read-state.ts) — `unread`
+ *  counts messages from others posted after the viewer last opened THAT topic's own thread, not
+ *  after any single shared timestamp. */
+function aggregateTopicCounts(
+  rows: TopicRow[],
+  viewerId: string,
+  lastRead: Map<string, Date>
+): TeamNoteTopicCountDTO[] {
   const byKey = new Map<string, TeamNoteTopicCountDTO>();
   for (const row of rows) {
     if (!row.topicType || !row.topicId) continue;
@@ -198,9 +219,18 @@ function aggregateTopicCounts(rows: TopicRow[], viewerId: string): TeamNoteTopic
       topicDate: row.topicDate,
       total: 0,
       fromOthers: 0,
+      unread: 0,
     };
     entry.total += 1;
-    if (row.authorId !== viewerId) entry.fromOthers += 1;
+    if (row.authorId !== viewerId) {
+      entry.fromOthers += 1;
+      const threadKey = threadKeyForTeamNote(row.employeeId, {
+        type: row.topicType as TeamNoteTopicType,
+        id: row.topicId,
+        date: row.topicDate ?? undefined,
+      });
+      if (isUnread(lastRead, threadKey, row.createdAt)) entry.unread += 1;
+    }
     byKey.set(key, entry);
   }
   return [...byKey.values()];
@@ -216,20 +246,24 @@ export async function listTeamNoteTopicCounts(
 ): Promise<TeamNoteTopicCountDTO[]> {
   await assertCanAccessEmployeeRecords(actor, employeeId);
 
-  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
-    const rows = await tx.teamNote.findMany({
-      where: { employeeId, topicType: { not: null } },
-      select: {
-        employeeId: true,
-        topicType: true,
-        topicId: true,
-        topicDate: true,
-        authorId: true,
-        employee: { select: { firstName: true, lastName: true, preferredName: true } },
-      },
-    });
-    return aggregateTopicCounts(rows, actor.id);
-  });
+  const [rows, lastRead] = await Promise.all([
+    withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+      return tx.teamNote.findMany({
+        where: { employeeId, topicType: { not: null } },
+        select: {
+          employeeId: true,
+          topicType: true,
+          topicId: true,
+          topicDate: true,
+          authorId: true,
+          createdAt: true,
+          employee: { select: { firstName: true, lastName: true, preferredName: true } },
+        },
+      });
+    }),
+    getLastReadMap(actor),
+  ]);
+  return aggregateTopicCounts(rows, actor.id, lastRead);
 }
 
 /** The admin-wide version of listTeamNoteTopicCounts — every employee's topic counts in one
@@ -240,18 +274,22 @@ export async function listTeamNoteTopicCounts(
 export async function listAllTeamNoteTopicCounts(actor: CurrentEmployee): Promise<TeamNoteTopicCountDTO[]> {
   assertIsAdmin(actor);
 
-  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
-    const rows = await tx.teamNote.findMany({
-      where: { topicType: { not: null } },
-      select: {
-        employeeId: true,
-        topicType: true,
-        topicId: true,
-        topicDate: true,
-        authorId: true,
-        employee: { select: { firstName: true, lastName: true, preferredName: true } },
-      },
-    });
-    return aggregateTopicCounts(rows, actor.id);
-  });
+  const [rows, lastRead] = await Promise.all([
+    withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+      return tx.teamNote.findMany({
+        where: { topicType: { not: null } },
+        select: {
+          employeeId: true,
+          topicType: true,
+          topicId: true,
+          topicDate: true,
+          authorId: true,
+          createdAt: true,
+          employee: { select: { firstName: true, lastName: true, preferredName: true } },
+        },
+      });
+    }),
+    getLastReadMap(actor),
+  ]);
+  return aggregateTopicCounts(rows, actor.id, lastRead);
 }
