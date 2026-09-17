@@ -7,6 +7,7 @@ import RoleNav from "@/components/RoleNav";
 import BottomNav from "@/components/BottomNav";
 import ProfileMenu from "@/components/ProfileMenu";
 import PreviewBanner from "@/components/PreviewBanner";
+import NotificationBell from "@/components/NotificationBell";
 
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
   // Middleware already redirects signed-out visitors, but every server render re-checks —
@@ -69,12 +70,15 @@ export default async function PortalLayout({ children }: { children: React.React
             <Image src="/ttc-logo.png" alt="" width={32} height={32} className="h-8 w-8 rounded-full" priority />
             <span className="font-serif font-bold text-accent hidden sm:inline">HR Portal</span>
           </div>
-          <ProfileMenu
-            displayName={displayName}
-            jobTitle={employee.jobTitle}
-            initials={initials}
-            avatarUrl={employee.avatarUrl}
-          />
+          <div className="flex items-center gap-1.5">
+            <NotificationBell />
+            <ProfileMenu
+              displayName={displayName}
+              jobTitle={employee.jobTitle}
+              initials={initials}
+              avatarUrl={employee.avatarUrl}
+            />
+          </div>
         </header>
 
         <main className="flex-1 px-4 md:px-6 py-6 pb-24 md:pb-6 md:min-h-0 md:overflow-y-auto">{children}</main>
