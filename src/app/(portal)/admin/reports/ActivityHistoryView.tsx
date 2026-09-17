@@ -34,8 +34,13 @@ const ACTIVITY_ACTION_LABELS: Record<string, string> = {
   PTO_APPROVED: "PTO approved",
   PTO_DENIED: "PTO denied",
   DATE_TASK_ASSIGNED: "Task assigned",
-  DATE_TASK_COMPLETED: "Task completed",
+  DATE_TASK_STARTED: "Task started",
+  DATE_TASK_SUBMITTED: "Task submitted",
   DATE_TASK_APPROVED: "Task approved",
+  DATE_TASK_RETURNED: "Task returned",
+  // Pre-correction-brief-#2 action name, kept so older audit rows still read as something —
+  // see DateTask's own doc comment in prisma/schema.prisma for the rework this replaced.
+  DATE_TASK_COMPLETED: "Task completed",
 };
 
 function actionLabel(action: string): string {
