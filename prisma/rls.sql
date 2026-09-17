@@ -876,3 +876,49 @@ create policy notification_update on "Notification" for update using (
 ) with check (
   "recipientId" = current_employee_id()
 );
+
+-- Correction brief (Sept 2026, "Correction & Refinement Brief" #1/#9): real server-side
+-- read/unread tracking (MessageReadState) and persisted banner dismissal (DashboardDismissal) —
+-- see both models' own doc comments in prisma/schema.prisma. Unlike Notification just above,
+-- both of these are purely private per-employee state: every row an employee can see, they also
+-- own, and the app never writes one FOR someone else, so select/insert/update all key off the
+-- exact same predicate with no insert_with_check(true) escape hatch.
+alter table "MessageReadState" enable row level security;
+alter table "MessageReadState" force row level security;
+
+drop policy if exists message_read_state_select on "MessageReadState";
+create policy message_read_state_select on "MessageReadState" for select using (
+  "employeeId" = current_employee_id()
+);
+
+drop policy if exists message_read_state_insert on "MessageReadState";
+create policy message_read_state_insert on "MessageReadState" for insert with check (
+  "employeeId" = current_employee_id()
+);
+
+drop policy if exists message_read_state_update on "MessageReadState";
+create policy message_read_state_update on "MessageReadState" for update using (
+  "employeeId" = current_employee_id()
+) with check (
+  "employeeId" = current_employee_id()
+);
+
+alter table "DashboardDismissal" enable row level security;
+alter table "DashboardDismissal" force row level security;
+
+drop policy if exists dashboard_dismissal_select on "DashboardDismissal";
+create policy dashboard_dismissal_select on "DashboardDismissal" for select using (
+  "employeeId" = current_employee_id()
+);
+
+drop policy if exists dashboard_dismissal_insert on "DashboardDismissal";
+create policy dashboard_dismissal_insert on "DashboardDismissal" for insert with check (
+  "employeeId" = current_employee_id()
+);
+
+drop policy if exists dashboard_dismissal_update on "DashboardDismissal";
+create policy dashboard_dismissal_update on "DashboardDismissal" for update using (
+  "employeeId" = current_employee_id()
+) with check (
+  "employeeId" = current_employee_id()
+);
