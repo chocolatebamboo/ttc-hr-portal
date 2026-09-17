@@ -21,9 +21,12 @@ export async function GET(_request: Request, ctx: RouteContext<"/api/date-tasks/
 }
 
 /** POST /api/date-tasks/[id] — push a new task onto that employee's date. Admin or their
- *  supervisor only (createDateTask itself enforces this). Multipart: `taskDate`, `description`,
- *  and an optional `file` — same "body text + optional file" shape as team-notes' POST, CB,
- *  Sept 2026: "I should be able to choose file or add files into that as well." */
+ *  supervisor only (createDateTask itself enforces this). Multipart: `taskDate`, `title`,
+ *  `description`, and an optional `file` — same "body text + optional file" shape as
+ *  team-notes' POST, CB, Sept 2026: "I should be able to choose file or add files into that as
+ *  well." `title` is new with correction brief #2's per-task rework (DateTask now needs a short
+ *  name distinct from its longer instructions/description) — see prisma/schema.prisma's own
+ *  DateTask doc comment. */
 export async function POST(request: Request, ctx: RouteContext<"/api/date-tasks/[id]">) {
   try {
     const employee = await requireEmployee();
@@ -31,6 +34,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/date-tasks/
 
     const form = await request.formData();
     const taskDate = String(form.get("taskDate") ?? "");
+    const title = String(form.get("title") ?? "");
     const description = String(form.get("description") ?? "");
     const file = form.get("file");
 
@@ -43,7 +47,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/date-tasks/
         ? { key: await uploadDateTaskFile(file, employeeId), name: file.name }
         : undefined;
 
-    const task = await createDateTask(employee, employeeId, taskDate, description, attachment);
+    const task = await createDateTask(employee, employeeId, taskDate, title, description, attachment);
     return NextResponse.json({ task }, { status: 201 });
   } catch (err) {
     return toErrorResponse(err);
