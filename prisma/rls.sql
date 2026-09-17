@@ -386,6 +386,35 @@ create policy date_task_write on "DateTask" for all using (
   or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
 );
 
+-- Correction brief (Sept 2026, "Correction & Refinement Brief" #2): task-scoped comments,
+-- replacing the standalone per-date TeamNote conversation. Access is keyed off "can this caller
+-- already see the parent task" (a subquery on DateTask) rather than its own employeeId column —
+-- same shape as certification_response_select's subquery on CertificationAttempt just above,
+-- for the same reason: this table has no employeeId of its own, only a taskId.
+alter table "DateTaskComment" enable row level security;
+alter table "DateTaskComment" force row level security;
+
+drop policy if exists date_task_comment_select on "DateTaskComment";
+create policy date_task_comment_select on "DateTaskComment" for select using (
+  "taskId" in (
+    select id from "DateTask"
+    where "employeeId" = current_employee_id() or is_admin()
+       or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+  )
+);
+
+-- Insert-only, like TeamNote messages — no update/delete policy is granted at all, by anyone
+-- (a comment thread is a record of what was said, not an editable document).
+drop policy if exists date_task_comment_insert on "DateTaskComment";
+create policy date_task_comment_insert on "DateTaskComment" for insert with check (
+  "authorId" = current_employee_id()
+  and "taskId" in (
+    select id from "DateTask"
+    where "employeeId" = current_employee_id() or is_admin()
+       or "employeeId" in (select id from "Employee" where "supervisorId" = current_employee_id())
+  )
+);
+
 
 alter table "Document" enable row level security;
 alter table "Document" force row level security;
