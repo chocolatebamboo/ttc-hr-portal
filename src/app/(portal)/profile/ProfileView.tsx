@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import AvatarEditor from "@/components/AvatarEditor";
 import type { EmploymentStatus, MyProfileDTO, Role, UpdateMyProfileInput } from "@/types";
 
@@ -64,6 +65,7 @@ function toFormValues(p: MyProfileDTO): FormValues {
 }
 
 export default function ProfileView() {
+  const router = useRouter();
   const [profile, setProfile] = useState<MyProfileDTO | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [form, setForm] = useState<FormValues | null>(null);
@@ -236,7 +238,17 @@ export default function ProfileView() {
                 avatarUrl={profile.avatarUrl}
                 endpoint="/api/profile/photo"
                 responseKey="profile"
-                onChange={(avatarUrl) => setProfile((p) => (p ? { ...p, avatarUrl } : p))}
+                onChange={(avatarUrl) => {
+                  setProfile((p) => (p ? { ...p, avatarUrl } : p));
+                  // The header/nav avatar (ProfileMenu, in the server-rendered portal layout)
+                  // reads employee.avatarUrl from getCurrentEmployee() on the server, so a
+                  // client-only state update here never reaches it. Correction brief #3
+                  // requires the photo to update "everywhere (header/nav included)" the moment
+                  // it's uploaded, not just on this page and not only after a manual reload —
+                  // router.refresh() re-runs the server components (this layout included) with
+                  // the client-side state above already showing the new photo instantly.
+                  router.refresh();
+                }}
               />
 
               <div>
