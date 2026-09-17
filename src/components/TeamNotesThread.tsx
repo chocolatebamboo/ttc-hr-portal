@@ -45,6 +45,7 @@ export default function TeamNotesThread({
   topicDate,
   placeholder = "Write a message…",
   onMessagePosted,
+  onRead,
 }: {
   employeeId: string;
   viewerId: string;
@@ -57,6 +58,13 @@ export default function TeamNotesThread({
    *  AvailabilityCalendar, TimesheetView) refresh its count right away instead of waiting for
    *  the next full page load. */
   onMessagePosted?: () => void;
+  /** Fires after this thread's messages successfully load — which, server-side, is the exact
+   *  moment listTeamNotes marks it read for the viewer (see its own comment in
+   *  src/lib/team-notes.ts). Correction brief #1: "reading a message... must update the
+   *  homepage banner and floating chat badge automatically" — lets a parent showing its own
+   *  unread badge for this same thread (MessagesInboxView) refresh right away instead of
+   *  waiting for the next full page load. */
+  onRead?: () => void;
 }) {
   const [notes, setNotes] = useState<TeamNoteDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
@@ -76,6 +84,7 @@ export default function TeamNotesThread({
       const data: { notes: TeamNoteDTO[] } = await res.json();
       setNotes(data.notes);
       setLoadState("ready");
+      onRead?.();
     } catch {
       setLoadState("error");
     }
