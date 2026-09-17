@@ -6,16 +6,15 @@ import { withRlsContext } from "@/lib/db";
 import { listDocumentsForEmployee } from "@/lib/documents";
 import { listAnnouncementsForEmployee } from "@/lib/announcements";
 import { getOnboardingAttention } from "@/lib/onboarding";
-import { listMyAvailability, listAdminAvailability } from "@/lib/availability";
-import { listTeamNoteTopicCounts, listAllTeamNoteTopicCounts } from "@/lib/team-notes";
-import { listConversationSummaries } from "@/lib/direct-messages";
+import { listMyAvailability } from "@/lib/availability";
+import { getDashboardNotificationsSummary } from "@/lib/dashboard-notifications";
 import TimeClockCard from "@/components/TimeClockCard";
 import TimeOffSection from "@/components/TimeOffSection";
 import AvailabilityStatusSection from "@/components/AvailabilityStatusSection";
 import DateTasksSection from "@/components/DateTasksSection";
 import QuickActionsCard from "@/components/QuickActionsCard";
-import DashboardNotifications from "@/components/DashboardNotifications";
-import { MegaphoneIcon, ChartIcon, ChatIcon, type IconProps } from "@/components/icons";
+import DashboardNotifications, { MessagesBadgeLink } from "@/components/DashboardNotifications";
+import { MegaphoneIcon, ChartIcon, type IconProps } from "@/components/icons";
 import { formatHoursCompact } from "@/lib/time";
 import type { AnnouncementDTO, DocumentDTO } from "@/types";
 
@@ -29,34 +28,18 @@ export default async function DashboardPage() {
 
   // CB, Sept 2026: "on the administrator [side] that is approving, that should be a
   // notification... saying that this person wants to have that time approved. Once that
-  // person approves it, then they would be able to see that on their main dashboard." Two
-  // separate reads for two separate audiences — recentAvailability is every employee's own
-  // submission history (mirrors recentPto below), pendingAvailabilityCount is HR-wide and
-  // only ever fetched for an admin (listAdminAvailability itself throws ForbiddenError for
-  // anyone else, same guard admin/availability/page.tsx already relies on).
+  // person approves it, then they would be able to see that on their main dashboard." Every
+  // employee's own submission history (mirrors recentPto below) — unrelated to the admin-only
+  // pending-approvals banner, which now lives entirely behind notificationsSummary below.
   const recentAvailability = (await listMyAvailability(employee)).slice(0, 3);
-  const pendingAvailabilityCount = isAdmin(employee)
-    ? (await listAdminAvailability(employee)).pending.length
-    : 0;
 
-  // CB, Sept 2026: "on the receiving end... on the home page and on the availability page...
-  // I send it to Sean, I don't see where Sean could see those messages" — a home-page signal
-  // for BOTH directions that a per-date/per-request conversation has something waiting,
-  // mirroring pendingAvailabilityCount's admin-only banner just above. `fromOthers` (not
-  // `total`) is what a notification should count — messages the viewer didn't write
-  // themselves — see TeamNoteTopicCountDTO's doc comment in src/types/index.ts for why this
-  // isn't true unread tracking. Admins see it across every employee's conversations
-  // (listAllTeamNoteTopicCounts, same org-wide reach as listAdminAvailability); everyone else
-  // sees it for just their own. Extended this round for real peer-to-peer DMs (listConversationSummaries)
-  // — the badge on the dashboard's message icon, and this banner, now cover every kind of
-  // conversation the unified My Messages inbox lists, not just topic threads.
-  const [teamNoteCounts, directConversations] = await Promise.all([
-    isAdmin(employee) ? listAllTeamNoteTopicCounts(employee) : listTeamNoteTopicCounts(employee, employee.id),
-    listConversationSummaries(employee),
-  ]);
-  const messagesFromOthers =
-    teamNoteCounts.reduce((sum, c) => sum + c.fromOthers, 0) +
-    directConversations.reduce((sum, c) => sum + c.fromOthers, 0);
+  // Correction brief (Sept 2026, "Correction & Refinement Brief" #1): "genuinely unread
+  // messages," server-persisted dismissal, no manual refresh needed. One shared summary for
+  // both the header's Messages badge (MessagesBadgeLink) and the pending-approvals/messages
+  // banners (DashboardNotifications) below — see src/lib/dashboard-notifications.ts for the
+  // real unread-count math and getDashboardNotificationsSummary's own comment for why this is
+  // computed once, server-side, as the client polling components' starting point.
+  const notificationsSummary = await getDashboardNotificationsSummary(employee);
 
   const documents = await listDocumentsForEmployee(employee);
   const pendingAcknowledgments = documents.filter((d) => d.requiresAcknowledgment && !d.acknowledgedAt);
@@ -105,22 +88,9 @@ export default async function DashboardPage() {
             message... similar to where we could see all the different messages for its
             respective day" — a quick-glance shortcut into the new /messages inbox, kept
             alongside (not instead of) MessagesBanner below per her own confirmation both should
-            stay. */}
-        <Link
-          href="/messages"
-          className="relative shrink-0 h-10 w-10 rounded-full bg-surface border border-border flex items-center justify-center hover:bg-black/[0.03] transition-colors"
-          title="Messages"
-        >
-          <ChatIcon className="h-5 w-5 text-muted" />
-          {messagesFromOthers > 0 && (
-            <span
-              className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-white text-[10px] font-bold flex items-center justify-center"
-              style={{ background: "#8b5cf6" }}
-            >
-              {messagesFromOthers > 9 ? "9+" : messagesFromOthers}
-            </span>
-          )}
-        </Link>
+            stay. Now a live-polling client component (see DashboardNotifications.tsx) instead of
+            a static badge fixed to whatever the count was at the last full page load. */}
+        <MessagesBadgeLink initial={notificationsSummary} />
       </div>
 
       {/* Admin-only pending-approvals banner + everyone's messages banner — same one spot on
@@ -128,14 +98,9 @@ export default async function DashboardPage() {
           header so they're the first thing anyone sees on their home page, per CB's "on the
           administrator that is approving, that should be a notification... on their home page."
           Swipeable/dismissible (CB, Sept 2026: "the ability to exit... notifications") — see
-          DashboardNotifications' own doc comment for how clearing and recovering works. */}
-      <DashboardNotifications
-        className="animate-in animate-in-2 mt-4"
-        employeeId={employee.id}
-        showApprovals={isAdmin(employee)}
-        pendingApprovalsCount={pendingAvailabilityCount}
-        messagesCount={messagesFromOthers}
-      />
+          DashboardNotifications' own doc comment for how clearing and real server-side
+          dismissal now works. */}
+      <DashboardNotifications className="animate-in animate-in-2 mt-4" initial={notificationsSummary} />
 
       {/* Mobile: bold color-block layout (CB's Sept 2026 aesthetic ask, reference screenshots
           in chat). Desktop keeps the original layout below, completely untouched — this pass
