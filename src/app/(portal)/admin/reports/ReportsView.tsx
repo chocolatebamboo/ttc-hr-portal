@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getWeek } from "@/lib/week";
+import ActivityHistoryView from "./ActivityHistoryView";
 import type { PayrollHoursReportDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error" | "empty";
@@ -17,26 +18,17 @@ function todayDateKey(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-/** "This week"/"This month" presets — CB's own framing for this report ("at the end of the
- *  week... a full report", "at the end of the month... tallies") is calendar-week/calendar-
- *  month, not an arbitrary range, so those are one click instead of two manual date pickers. */
 function thisWeekRange(): { start: string; end: string } {
   const week = getWeek(0);
   return { start: week.start, end: todayDateKey() < week.end ? todayDateKey() : week.end };
 }
 
-/**
- * The one report this app produces: approved hours, ready to hand to TTC's payroll company.
- * Deliberately just hours — no pay rate, no overtime multiplier, no tax withholding — that
- * math belongs to the payroll company, per the brief's payroll-handoff boundary.
- */
+type Tab = "payroll" | "activity";
+
 export default function ReportsView() {
+  const [tab, setTab] = useState<Tab>("payroll");
   const [start, setStart] = useState(firstOfMonth());
   const [end, setEnd] = useState(todayDateKey());
-  // "" means every employee (the original full-company view) — CB: "I could imagine it would
-  // be nice to... look at somebody's specific hours [without having to] go through the whole
-  // list of people", but also still wants the full view available, so this is additive rather
-  // than a replacement for the no-filter report.
   const [employeeId, setEmployeeId] = useState("");
   const [employees, setEmployees] = useState<EmployeeOption[]>([]);
   const [report, setReport] = useState<PayrollHoursReportDTO | null>(null);
@@ -74,8 +66,6 @@ export default function ReportsView() {
     }
   }
 
-  // Initial load only — regenerating after this happens via the explicit "Generate" button
-  // below, not on every keystroke while someone is still picking dates, so deps stay empty.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     generate(start, end, employeeId);
@@ -112,8 +102,38 @@ export default function ReportsView() {
   const csvQuery = `?start=${start}&end=${end}${employeeId ? `&employeeId=${employeeId}` : ""}`;
 
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-4xl">
       <h1 className="page-title text-2xl mb-1">Reports</h1>
+
+      <div role="tablist" className="flex items-center gap-1 mb-5 border-b border-border">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "payroll"}
+          onClick={() => setTab("payroll")}
+          className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            tab === "payroll" ? "border-accent text-accent-ink" : "border-transparent text-muted hover:text-foreground"
+          }`}
+        >
+          Payroll Hours
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "activity"}
+          onClick={() => setTab("activity")}
+          className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            tab === "activity" ? "border-accent text-accent-ink" : "border-transparent text-muted hover:text-foreground"
+          }`}
+        >
+          Activity History
+        </button>
+      </div>
+
+      {tab === "activity" ? (
+        <ActivityHistoryView />
+      ) : (
+        <div className="max-w-3xl">
       <p className="text-sm text-muted mb-4">
         Approved hours for a pay period, ready to hand to your payroll company. This is hours only
         — no pay rate, overtime, or tax math happens here.
@@ -169,7 +189,7 @@ export default function ReportsView() {
         </button>
         {report && loadState !== "error" && (
           
-            <a
+            
               href={`/api/payroll/hours/csv${csvQuery}`}
             className="btn-neutral text-sm px-5 py-2"
           >
@@ -208,10 +228,6 @@ export default function ReportsView() {
             </div>
           )}
 
-          {/* CB, round four: "that bottom half where you see the different team members...
-              needs to read a little bit more cleanly in a widget format... I shouldn't have to
-              slide to the left or right." Below md, this card list replaces the table entirely
-              (no horizontal scroll); at md and up the original table takes over. */}
           <div className="md:hidden space-y-2.5">
             {report.rows.map((row) => (
               <div key={row.employeeId} className="bg-surface border border-border rounded-xl p-4">
@@ -287,6 +303,8 @@ export default function ReportsView() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
         </div>
       )}
     </div>
