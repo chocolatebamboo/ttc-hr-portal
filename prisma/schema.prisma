@@ -123,6 +123,7 @@ model Employee {
   announcementsWritten Announcement[]        @relation("AnnouncementAuthor")
   announcementAudiences AnnouncementAudience[]
   auditLogEntries      AuditLog[]            @relation("ActorOnAuditLog")
+  notifications        Notification[]        @relation("NotificationRecipient")
 
   @@index([supervisorId])
   @@index([departmentId])
@@ -1121,4 +1122,87 @@ model AuditLog {
 
   @@index([targetType, targetId])
   @@index([actorId])
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 of the scheduling/attendance/task workflow rebuild (client spec, Sept 2026): "a real
+// in-app notification feed" — AuditLog above already recorded THAT an action happened (an
+// admin-facing history, one row per event, visible to admins only via Reports > Activity
+// History); this table is the missing other half, ONE ROW PER RECIPIENT of an event actually
+// worth surfacing to them personally, with real server-tracked read/unread state. Deliberately
+// separate from AuditLog rather than widening it: AuditLog's audience is always "admins looking
+// back," this table's audience is always "one specific person, right now" — different access
+// rule (recipientId = current_employee_id(), see prisma/rls.sql's notification_select) and a
+// different shape (readAt, no oldValue/newValue diffing) than AuditLog needs.
+//
+// Replaces nothing that already existed: DashboardNotifications.tsx's two banners (pending-
+// approvals count, unread-messages count) are deliberately left as they are — aggregate "you
+// have N things to review" nudges, not a record of discrete past events, which is a genuinely
+// different job than this feed does. The header bell (src/components/NotificationBell.tsx) is
+// additive alongside those, not a replacement for them.
+// ---------------------------------------------------------------------------
+
+enum NotificationType {
+  // A supervisor/admin scheduled you (converted availability, or created one from scratch) —
+  // see convertAvailabilityToShift/createShiftManually in src/lib/shifts.ts.
+  SHIFT_CREATED
+  // Your shift was cancelled — either directly, or as the resolution of your own cancellation
+  // request. One type covers both (see cancelShift/approveShiftCancellation) since the message
+  // to YOU reads the same either way: "your shift was cancelled."
+  SHIFT_CANCELLED
+  // A shift was reassigned TO you (see reassignShift) — the employee it was reassigned AWAY
+  // FROM isn't separately notified; their own copy of the shift still shows REASSIGNED status
+  // right there on My Schedule, which reads clearly enough without a second notification row.
+  SHIFT_REASSIGNED
+  // Your requested shift change was approved, with the final date/time (see approveShiftChange).
+  SHIFT_CHANGE_APPROVED
+  // Your requested shift change OR cancellation was declined (see denyShiftRequest) — one type
+  // for both, same reasoning as SHIFT_CANCELLED above.
+  SHIFT_REQUEST_DECLINED
+  // Someone requested a change/cancellation on a shift YOU created — see requestShiftChange/
+  // requestShiftCancellation, notifying existing.createdById (whoever scheduled it originally,
+  // almost always the actual supervisor/admin who should review the request) rather than every
+  // admin org-wide.
+  SHIFT_REQUEST_RECEIVED
+  // Your availability submission was approved/denied (see decideAvailability).
+  AVAILABILITY_APPROVED
+  AVAILABILITY_DENIED
+  // A supervisor proposed different times for your submission instead of approving/denying
+  // outright, and it's waiting on your Accept/Decline (see requestAvailabilityAdjustment).
+  AVAILABILITY_ADJUSTMENT_PROPOSED
+  // Your PTO request was approved/denied (see decidePtoRequest in src/lib/pto-actions.ts).
+  PTO_APPROVED
+  PTO_DENIED
+  // A supervisor/admin pushed a new task onto one of your days (see createDateTask in
+  // src/lib/date-tasks.ts).
+  DATE_TASK_ASSIGNED
+}
+
+model Notification {
+  id          String   @id @default(uuid())
+  recipientId String
+  recipient   Employee @relation("NotificationRecipient", fields: [recipientId], references: [id])
+
+  type  NotificationType
+  title String
+  // Optional — most notifications are self-explanatory from title+type alone (the icon/label the
+  // UI picks from `type` already says "shift" vs "PTO" vs "task"); body is for the one extra
+  // line that's genuinely useful, e.g. a decline comment or the final approved date/time.
+  body  String?
+
+  // What this notification is ABOUT, so clicking it can deep-link straight there. Same plain-
+  // columns shape (no formal @relation) as TeamNote.topicType/topicId — spans several unrelated
+  // tables (Shift, AvailabilitySubmission, PtoRequest, DateTask) and a notification's own access
+  // rule never depends on the target table's own RLS, so a formal relation would add nothing.
+  targetType String // "Shift" | "AvailabilitySubmission" | "PtoRequest" | "DateTask"
+  targetId   String
+
+  // Null = unread. A real timestamp (not a boolean) so "unread" and "read 3 minutes ago" are
+  // both answerable from one column, same shape TimeSession.clockOut already uses for open/closed.
+  readAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([recipientId, createdAt])
+  @@index([recipientId, readAt])
 }
