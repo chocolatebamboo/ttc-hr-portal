@@ -117,6 +117,8 @@ model Employee {
   dateTasksAsSubject      DateTask[]                @relation("DateTaskSubject")
   dateTasksCreated        DateTask[]                @relation("DateTaskCreatedBy")
   dateTasksApproved       DateTask[]                @relation("DateTaskApprovedBy")
+  dateTasksReturned       DateTask[]                @relation("DateTaskReturnedBy")
+  dateTaskCommentsWritten DateTaskComment[]          @relation("DateTaskCommentAuthor")
   onboardingReadinessItems OnboardingReadinessItem[]
   onboardingCheckpoints    OnboardingCheckpoint[]
   certificationAttempts    CertificationAttempt[]
@@ -608,55 +610,117 @@ model DirectMessage {
   @@index([recipientId, senderId, createdAt])
 }
 
+// Correction brief (Sept 2026, "Correction & Refinement Brief" #2): "Redesign this area into an
+// actual task-management workflow... Use a clean checklist/list interface inspired by... Apple
+// Notes/Reminders and the contextual update functionality of Monday.com." Replaces the original
+// three-state PENDING/COMPLETED/APPROVED lifecycle with the brief's recommended one: "Assigned →
+// In Progress → Submitted/Completed → Awaiting Review → Approved." IN_PROGRESS is a purely
+// self-reported "I've started this" signal (startDateTask, src/lib/date-tasks.ts) — nothing
+// gates on it, an employee may submit directly from ASSIGNED too; it exists only because the
+// brief lists it as its own lifecycle stop, giving a reviewer visibility into "someone's on it"
+// before it's actually submitted. "Submitted" and "Awaiting Review" in the brief's own wording
+// are the same moment from two angles (the employee just submitted it; it is now awaiting
+// review) — collapsed into one AWAITING_REVIEW status rather than two, matching how this app's
+// other submit-then-decide workflows (AvailabilitySubmission, OnboardingItem) already use one
+// status for that moment, not two. RETURNED replaces the old bare "send back to PENDING" reopen
+// action — the brief specifically asks for "Return/Reopen with a note," so a returned task keeps
+// its own note (returnNote below) rather than silently resetting to look brand-new.
 enum DateTaskStatus {
-  PENDING
-  // Employee has marked their part done; not final until an admin/supervisor confirms it —
-  // CB, Sept 2026: "I like how we have a texting feature but I feel like we should be also
-  // able to push different tasks within that specific day," and wanted it to work as a
-  // two-way approval rather than a plain self-reported checklist, same shape as availability
-  // and PTO already use (submit → review → decide).
-  COMPLETED
+  ASSIGNED
+  IN_PROGRESS
+  AWAITING_REVIEW
   APPROVED
+  RETURNED
 }
 
-// A task an admin/supervisor pushes to a team member for one specific calendar date — sits
-// alongside TeamNote's per-date conversation (same "Fri, Oct 9" scope, same card) but is a
-// discrete, checkable item rather than free-form chat. Deliberately its own table rather than
-// piggybacking on TeamNote's topic columns: a task has real status/workflow (PENDING →
-// COMPLETED → APPROVED) a message never needs, and mixing the two would make both harder to
-// query and render correctly.
+// A task an admin/supervisor pushes to a team member for one specific calendar date. Previously
+// paired with a standalone TeamNote "Conversation" section on the same card (TeamAvailabilityCards,
+// AvailabilityCalendar, TeamScheduleView, ScheduleView) — the correction brief's "Merge
+// conversation into tasks" removed that pairing: DateTaskComment below is now where
+// task-specific discussion lives, scoped to one task rather than the whole date, so "which task
+// is this comment about" is never ambiguous the way a shared date-wide thread was. Deliberately
+// still its own table rather than piggybacking on TeamNote's topic columns — a task has a real
+// multi-step status workflow, an assignee distinct from "who wrote this," and its own comment
+// thread, none of which a plain message needs.
 model DateTask {
   id         String   @id @default(uuid())
-  employeeId String // whose day this task is on
+  employeeId String // the assignee — whose day this task is on
   employee   Employee @relation("DateTaskSubject", fields: [employeeId], references: [id])
 
-  createdById String // the admin/supervisor who pushed this task
+  createdById String // the admin/supervisor who created/assigned this task
   createdBy   Employee @relation("DateTaskCreatedBy", fields: [createdById], references: [id])
 
-  taskDate    String // "YYYY-MM-DD" — same format TeamNote.topicDate already uses
-  description String
+  taskDate String // "YYYY-MM-DD" — same format TeamNote.topicDate already uses
 
-  // Same "bare key, not a URL" shape as TeamNote.attachmentKey/attachmentName — CB, Sept 2026:
-  // "I should be able to choose file or add files into that as well," on the task feature
-  // specifically, matching what a message can already carry. Resolved to a short-lived signed
-  // URL server-side (src/lib/date-tasks.ts's getDateTaskAttachmentUrl), never stored or returned
-  // as a public link.
+  // Correction brief #2: "task title" and "instructions/details" as two distinct fields — title
+  // is the short list-row label (the "Apple Notes/Reminders" row text), description is the
+  // longer instructions shown once a task is expanded. The original build only had `description`
+  // (no separate title); existing rows are backfilled with a title derived from their old
+  // description at migration time (see the 20260917_date_task_workflow migration).
+  title       String
+  description String // instructions/details
+
+  // Same "bare key, not a URL" shape as TeamNote.attachmentKey/attachmentName, resolved to a
+  // short-lived signed URL server-side (src/lib/date-tasks.ts's getDateTaskAttachmentUrl). This
+  // is the attachment on the task ITSELF (added when it's created/edited); DateTaskComment below
+  // carries its own attachmentKey/attachmentName per comment, so "attachments" (plural, per the
+  // brief) are supported across the task's own file plus whatever each comment adds — same
+  // one-attachment-per-post convention TeamNote/DirectMessage/DateTaskComment all share, rather
+  // than a separate many-to-one attachments table nothing else in this app uses either.
   attachmentKey  String?
   attachmentName String?
 
-  status DateTaskStatus @default(PENDING)
+  status DateTaskStatus @default(ASSIGNED)
 
-  completedAt DateTime? // set when the employee marks it done
+  startedAt   DateTime? // set when the employee moves ASSIGNED/RETURNED -> IN_PROGRESS
+  submittedAt DateTime? // set when the employee moves -> AWAITING_REVIEW (was `completedAt`)
 
   approvedById String?
   approvedBy   Employee? @relation("DateTaskApprovedBy", fields: [approvedById], references: [id])
   approvedAt   DateTime? // set when an admin/supervisor confirms it
 
+  // Correction brief #2: "Return/Reopen with a note." Separate from reviewComment-style fields
+  // elsewhere (PtoRequest.reviewComment, AvailabilitySubmission.reviewComment) only in name —
+  // same idea, named for what this workflow specifically calls it. Cleared implicitly by the
+  // next submit (a fresh submission is judged on its own; the note stays on the DateTaskComment
+  // thread as history via the auto-posted return comment, not as a live "still returned" banner).
+  returnedById String?
+  returnedBy   Employee? @relation("DateTaskReturnedBy", fields: [returnedById], references: [id])
+  returnedAt   DateTime?
+  returnNote   String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  comments DateTaskComment[]
+
   @@index([employeeId, taskDate])
   @@index([employeeId, status])
+}
+
+// Correction brief #2: "Opening/expanding a task should reveal its... comments/updates... This
+// prevents users from having a generic conversation where it becomes unclear which task is being
+// discussed." One row per comment, scoped to exactly one task — deliberately not a widened
+// TeamNote (a fifth topicType): TeamNote's access rule is keyed off "whose employee record is
+// this" (employeeId), while a DateTaskComment's natural access rule is "can this caller already
+// see the parent task" (see date_task_comment_select in prisma/rls.sql, a subquery on DateTask
+// rather than its own employeeId column) — the same relationship CertificationResponse already
+// has to CertificationAttempt, reused here for the same reason.
+model DateTaskComment {
+  id     String   @id @default(uuid())
+  taskId String
+  task   DateTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  authorId String
+  author   Employee @relation("DateTaskCommentAuthor", fields: [authorId], references: [id])
+
+  body           String
+  attachmentKey  String?
+  attachmentName String?
+
+  createdAt DateTime @default(now())
+
+  @@index([taskId, createdAt])
 }
 
 // ---------------------------------------------------------------------------
@@ -1178,6 +1242,13 @@ enum NotificationType {
   // A supervisor/admin pushed a new task onto one of your days (see createDateTask in
   // src/lib/date-tasks.ts).
   DATE_TASK_ASSIGNED
+  // A task you submitted was confirmed (see approveDateTask) — added alongside the correction
+  // brief's #2 rework so a review decision is actually communicated, the same way every other
+  // submit-then-decide workflow here (PTO, availability) already notifies both outcomes.
+  DATE_TASK_APPROVED
+  // A task you submitted was sent back with a note instead (see returnDateTask) — the note
+  // itself lives on the task's own comment thread, not in this notification's body.
+  DATE_TASK_RETURNED
 }
 
 model Notification {
