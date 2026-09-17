@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import TeamNotesThread from "@/components/TeamNotesThread";
 import DirectMessageThread from "@/components/DirectMessageThread";
 import NewMessagePicker from "@/components/NewMessagePicker";
@@ -26,11 +27,14 @@ function dmRowKey(employeeId: string): string {
   return `dm:${employeeId}`;
 }
 
-/** The badged conversation kinds — both carry total/fromOthers, so they can share one sort
- *  without TypeScript needing to prove the general row (which has neither) never sneaks in. */
+/** The badged conversation kinds — both carry total/unread, so they can share one sort without
+ *  TypeScript needing to prove the general row (which has neither) never sneaks in. Sorts and
+ *  badges on `unread` (Correction brief #1: "genuinely unread messages"), not the older
+ *  `fromOthers` — see TeamNoteTopicCountDTO's own comment in src/types/index.ts for the
+ *  difference. */
 type CountedRow =
-  | { kind: "topic"; key: string; name: string; subtitle: string; total: number; fromOthers: number; c: TeamNoteTopicCountDTO }
-  | { kind: "dm"; key: string; name: string; total: number; fromOthers: number; employeeId: string };
+  | { kind: "topic"; key: string; name: string; subtitle: string; total: number; unread: number; c: TeamNoteTopicCountDTO }
+  | { kind: "dm"; key: string; name: string; total: number; unread: number; employeeId: string };
 
 /** The three kinds of conversation this inbox lists, folded into one shape so they can share a
  *  single row layout — CB, Sept 2026: "so its no longer notes its 'My Messages,'" one place for
@@ -64,6 +68,7 @@ export default function MessagesInboxView({
   topicCounts: TeamNoteTopicCountDTO[];
   directConversations: DirectConversationSummaryDTO[];
 }) {
+  const router = useRouter();
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -74,14 +79,14 @@ export default function MessagesInboxView({
 
   const dmRows: CountedRow[] = [...new Map([...pendingDms].map(([id, name]) => [id, name])).entries()]
     .filter(([id]) => !directConversations.some((c) => c.employeeId === id))
-    .map(([id, name]) => ({ kind: "dm" as const, key: dmRowKey(id), name, total: 0, fromOthers: 0, employeeId: id }))
+    .map(([id, name]) => ({ kind: "dm" as const, key: dmRowKey(id), name, total: 0, unread: 0, employeeId: id }))
     .concat(
       directConversations.map((c) => ({
         kind: "dm" as const,
         key: dmRowKey(c.employeeId),
         name: c.employeeName,
         total: c.total,
-        fromOthers: c.fromOthers,
+        unread: c.unread,
         employeeId: c.employeeId,
       }))
     );
@@ -93,14 +98,14 @@ export default function MessagesInboxView({
       name: c.employeeName,
       subtitle: topicLabel(c),
       total: c.total,
-      fromOthers: c.fromOthers,
+      unread: c.unread,
       c,
     })),
     ...dmRows,
   ]
     .filter((r) => !dismissed.has(r.key))
     .sort((a, b) => {
-      if (a.fromOthers !== b.fromOthers) return b.fromOthers - a.fromOthers;
+      if (a.unread !== b.unread) return b.unread - a.unread;
       return b.total - a.total;
     });
 
@@ -140,10 +145,10 @@ export default function MessagesInboxView({
             </div>
             {row.kind !== "general" && (
               <div className="flex items-center gap-2 shrink-0">
-                {row.fromOthers > 0 && (
+                {row.unread > 0 && (
                   <span className="flex items-center gap-1 rounded-full bg-accent/10 text-accent-ink text-xs font-semibold px-2 py-0.5">
                     <ChatIcon className="h-3 w-3" />
-                    {row.fromOthers}
+                    {row.unread}
                   </span>
                 )}
                 <span className="text-xs text-muted">
@@ -154,7 +159,9 @@ export default function MessagesInboxView({
           </button>
           {open && (
             <div className="border-t border-border p-3">
-              {row.kind === "general" && <TeamNotesThread employeeId={viewerId} viewerId={viewerId} />}
+              {row.kind === "general" && (
+                <TeamNotesThread employeeId={viewerId} viewerId={viewerId} onRead={() => router.refresh()} />
+              )}
               {row.kind === "topic" && (
                 <TeamNotesThread
                   employeeId={row.c.employeeId}
@@ -162,9 +169,12 @@ export default function MessagesInboxView({
                   topicType={row.c.topicType}
                   topicId={row.c.topicId}
                   topicDate={row.c.topicDate ?? undefined}
+                  onRead={() => router.refresh()}
                 />
               )}
-              {row.kind === "dm" && <DirectMessageThread otherEmployeeId={row.employeeId} viewerId={viewerId} />}
+              {row.kind === "dm" && (
+                <DirectMessageThread otherEmployeeId={row.employeeId} viewerId={viewerId} onRead={() => router.refresh()} />
+              )}
             </div>
           )}
         </div>
