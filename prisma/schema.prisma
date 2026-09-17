@@ -124,6 +124,8 @@ model Employee {
   announcementAudiences AnnouncementAudience[]
   auditLogEntries      AuditLog[]            @relation("ActorOnAuditLog")
   notifications        Notification[]        @relation("NotificationRecipient")
+  messageReadStates    MessageReadState[]
+  dashboardDismissals  DashboardDismissal[]
 
   @@index([supervisorId])
   @@index([departmentId])
@@ -1205,4 +1207,50 @@ model Notification {
 
   @@index([recipientId, createdAt])
   @@index([recipientId, readAt])
+}
+
+// ---------------------------------------------------------------------------
+// Messaging: read/unread tracking + dashboard notification dismissal
+// ---------------------------------------------------------------------------
+
+// Correction brief (Sept 2026, "Correction & Refinement Brief" #1): "genuinely unread
+// messages," synced everywhere, persisted server-side across refresh/logout/login. TeamNote
+// and DirectMessage (above) never tracked per-viewer read state — see their own doc comments'
+// "fromOthers is not read/unread tracking." One row per (employeeId, threadKey), not one row
+// per message: a "thread" here is always re-fetched as a whole list at once
+// (listTeamNotes/listMessages), so "the last time this viewer opened this thread" is all that's
+// needed to work out which of its messages are still unread — same idea Notification.readAt
+// captures per single event, just scoped to a whole conversation instead. See
+// src/lib/message-read-state.ts for the threadKey scheme (the TeamNote general thread, a
+// TeamNote topic, or a DM conversation) and exactly where this gets read/written.
+model MessageReadState {
+  id         String   @id @default(uuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  threadKey  String
+  lastReadAt DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([employeeId, threadKey])
+  @@index([employeeId])
+}
+
+// Correction brief #1/#9: "a deliberately dismissed notification must remain dismissed... do
+// not display a Show Again [action]." Replaces DashboardNotifications.tsx's old localStorage-
+// only dismissal (per-browser, recoverable via its own "N cleared — show again" link) with a
+// real per-employee record. `key` is content-derived from the CURRENT count at the moment of
+// dismissal (e.g. "messages:3" — see src/lib/dashboard-notifications.ts), not a per-notification
+// id: dismissing means "I've seen this exact count," so a genuinely different count (a new
+// pending item, a new unread message) always shows again on its own — see isDismissed in
+// src/lib/dashboard-dismissals.ts — with no user-facing "undo" needed either way.
+model DashboardDismissal {
+  id         String   @id @default(uuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  key         String
+  dismissedAt DateTime @default(now())
+
+  @@unique([employeeId, key])
 }
