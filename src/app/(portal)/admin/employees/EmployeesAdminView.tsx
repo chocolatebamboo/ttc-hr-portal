@@ -509,7 +509,16 @@ export default function EmployeesAdminView({
                       employeeId: row.id,
                       name: `${row.firstName} ${row.lastName}`,
                       avatarUrl: row.avatarUrl,
-                      onChange: load,
+                      onChange: () => {
+                        load();
+                        // load() only refreshes this admin table's own client-fetched rows. If
+                        // the admin just changed their OWN photo from here (not just someone
+                        // else's), the header/nav avatar won't pick it up without this — same
+                        // reasoning as ProfileView's onChange (Correction brief #3: "everywhere,
+                        // header/nav included"). Harmless no-op re-render when editing someone
+                        // else's photo.
+                        router.refresh();
+                      },
                     }}
                     departmentNames={departmentNames}
                     supervisorOptions={activeEmployees}
