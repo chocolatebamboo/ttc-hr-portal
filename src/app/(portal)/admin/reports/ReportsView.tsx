@@ -204,15 +204,7 @@ export default function ReportsView() {
         <button type="submit" disabled={rangeInvalid || loadState === "loading"} className="btn-primary text-sm px-5 py-2">
           {loadState === "loading" ? "Generating…" : "Generate"}
         </button>
-                {report && loadState !== "error" && (
-          
-            
-              href={`/api/payroll/hours/csv${csvQuery}`}
-            className="btn-neutral text-sm px-5 py-2"
-          >
-            Download CSV
-          </a>
-        )}
+                        {report && loadState !== "error" && <a href={`/api/payroll/hours/csv${csvQuery}`} className="btn-neutral text-sm px-5 py-2">Download CSV</a>}
         {rangeInvalid && <p className="text-xs text-accent basis-full">End date must be on or after the start date.</p>}
       </form>
 
