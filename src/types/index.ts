@@ -351,10 +351,15 @@ export interface TeamNoteDTO {
  * conversation on it, not just the ability to open one blind. `total` badges the chip itself
  * (src/components/TeamAvailabilityCards.tsx, TeamPtoCards.tsx, AvailabilityCalendar.tsx,
  * TimesheetView.tsx) so a conversation is discoverable at a glance. `fromOthers` is the count
- * authored by anyone other than the viewer — used for the home-page notification
- * (src/app/(portal)/dashboard/page.tsx) as a "someone said something to you" signal. Neither
- * one is true read/unread tracking (nothing records when a viewer last opened a thread) — a
- * count that's already been read stays counted until the conversation moves again.
+ * authored by anyone other than the viewer, read or not — kept for those same existing chip
+ * callers, unchanged.
+ *
+ * `unread` (Correction brief #1, Sept 2026: "genuinely unread messages") IS real read/unread
+ * tracking — messages from others posted after the viewer's own MessageReadState.lastReadAt for
+ * this specific topic (src/lib/message-read-state.ts), reset to now every time listTeamNotes
+ * fetches this exact thread. This is what the dashboard banner/badge and the My Messages inbox
+ * badge use; `fromOthers` above is left alone for the older chip callers that were never asked
+ * to become unread-aware.
  */
 export interface TeamNoteTopicCountDTO {
   employeeId: string;
@@ -369,6 +374,7 @@ export interface TeamNoteTopicCountDTO {
   topicDate: string | null;
   total: number;
   fromOthers: number;
+  unread: number;
 }
 
 /** What a DM references, once one is attached — see DirectMessage's doc comment in
@@ -401,11 +407,12 @@ export interface DirectMessageDTO {
   ref: DirectMessageRefDTO | null;
 }
 
-/** One row per DM conversation, most-recent-activity-first — same total/fromOthers shape as
- *  TeamNoteTopicCountDTO above, folded down from the message rows the same way
+/** One row per DM conversation, most-recent-activity-first — same total/fromOthers/unread shape
+ *  as TeamNoteTopicCountDTO above, folded down from the message rows the same way
  *  aggregateTopicCounts does, so the unified My Messages inbox can sort/badge every kind of
  *  conversation identically. `employeeId`/`employeeName` here is always the OTHER person, never
- *  the viewer. */
+ *  the viewer. `unread` is real read/unread tracking (Correction brief #1) — see
+ *  TeamNoteTopicCountDTO's own comment above for what distinguishes it from `fromOthers`. */
 export interface DirectConversationSummaryDTO {
   employeeId: string;
   employeeName: string;
@@ -413,6 +420,7 @@ export interface DirectConversationSummaryDTO {
   lastMessageAt: string; // ISO
   total: number;
   fromOthers: number;
+  unread: number;
 }
 
 /**
