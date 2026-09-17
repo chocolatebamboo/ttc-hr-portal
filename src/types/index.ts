@@ -807,3 +807,52 @@ export interface PayrollHoursReportDTO {
    *  from every row above, so a nonzero count here means the export is likely incomplete. */
   unapprovedEntryCount: number;
 }
+
+/** Phase 4 (client spec, Sept 2026): "a real in-app notification feed" — see Notification's own
+ *  doc comment in prisma/schema.prisma for the full list and why each one exists. */
+export type NotificationType =
+  | "SHIFT_CREATED"
+  | "SHIFT_CANCELLED"
+  | "SHIFT_REASSIGNED"
+  | "SHIFT_CHANGE_APPROVED"
+  | "SHIFT_REQUEST_DECLINED"
+  | "SHIFT_REQUEST_RECEIVED"
+  | "AVAILABILITY_APPROVED"
+  | "AVAILABILITY_DENIED"
+  | "AVAILABILITY_ADJUSTMENT_PROPOSED"
+  | "PTO_APPROVED"
+  | "PTO_DENIED"
+  | "DATE_TASK_ASSIGNED";
+
+export interface NotificationDTO {
+  id: string;
+  type: NotificationType;
+  title: string;
+  body: string | null;
+  targetType: string;
+  targetId: string;
+  read: boolean;
+  createdAt: string; // ISO
+}
+
+/** One row of Reports > Activity History (client spec, Sept 2026: "Reports and Activity History
+ *  views") — admin-only reading of the existing AuditLog table (prisma/schema.prisma), which
+ *  every phase from 1 onward has already been writing to. `actorName`/`targetLabel` are resolved
+ *  server-side (src/lib/activity.ts) so the UI never has to re-fetch the actor or target record
+ *  just to render a readable row. */
+export interface ActivityLogEntryDTO {
+  id: string;
+  actorId: string;
+  actorName: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  /** A short human label for what targetId actually refers to, when it can be resolved (e.g. a
+   *  Shift's own employee name + date) — falls back to targetType if the target row is gone or
+   *  isn't a type this view knows how to label yet. */
+  targetLabel: string;
+  oldValue: string | null;
+  newValue: string | null;
+  comment: string | null;
+  createdAt: string; // ISO
+}
