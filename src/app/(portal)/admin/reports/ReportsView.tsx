@@ -204,7 +204,7 @@ export default function ReportsView() {
         <button type="submit" disabled={rangeInvalid || loadState === "loading"} className="btn-primary text-sm px-5 py-2">
           {loadState === "loading" ? "Generating…" : "Generate"}
         </button>
-        {report && loadState !== "error" && (
+                {report && loadState !== "error" && (
           
             
               href={`/api/payroll/hours/csv${csvQuery}`}
