@@ -29,12 +29,17 @@ export default function DirectMessageThread({
   otherEmployeeId,
   viewerId,
   onMessagePosted,
+  onRead,
 }: {
   otherEmployeeId: string;
   viewerId: string;
   /** Fires after a message is successfully sent — lets the inbox list above refresh its
    *  conversation summary (last message, counts) without waiting for the next full page load. */
   onMessagePosted?: () => void;
+  /** Fires after this thread's messages successfully load — the moment listMessages marks it
+   *  read for the viewer server-side (see its own comment in src/lib/direct-messages.ts). Same
+   *  reasoning as TeamNotesThread's own onRead. */
+  onRead?: () => void;
 }) {
   const [messages, setMessages] = useState<DirectMessageDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
@@ -54,6 +59,7 @@ export default function DirectMessageThread({
       const data: { messages: DirectMessageDTO[] } = await res.json();
       setMessages(data.messages);
       setLoadState("ready");
+      onRead?.();
     } catch {
       setLoadState("error");
     }
