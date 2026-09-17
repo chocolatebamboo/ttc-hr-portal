@@ -3,26 +3,13 @@
 import { useEffect, useState } from "react";
 import ShiftStatusPill from "@/components/ShiftStatusPill";
 import MyDateTasksPanel from "@/components/MyDateTasksPanel";
-import TeamNotesThread from "@/components/TeamNotesThread";
-import { ChatIcon, ChecklistIcon } from "@/components/icons";
+import { ChecklistIcon } from "@/components/icons";
 import { formatSlotDate, formatTime12h } from "@/lib/availability-format";
-import type { ShiftDTO, TeamNoteTopicCountDTO } from "@/types";
+import type { ShiftDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
 
 const UPCOMING_STATUSES = new Set(["UPCOMING", "IN_PROGRESS", "CHANGE_REQUESTED", "CANCELLATION_REQUESTED"]);
-
-/** shiftId -> total message count, built from GET /api/team-notes/[employeeId]/topic-counts —
- *  same shape TeamAvailabilityCards' own countsByDate builds, just keyed on SHIFT topics
- *  instead of AVAILABILITY_DATE ones. */
-function countsByShift(counts: TeamNoteTopicCountDTO[]): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const c of counts) {
-    if (c.topicType !== "SHIFT") continue;
-    map.set(c.topicId, c.total);
-  }
-  return map;
-}
 
 /**
  * "My Schedule" — phase 1 of the scheduling workflow rebuild (client spec, Sept 2026): the
@@ -32,15 +19,16 @@ function countsByShift(counts: TeamNoteTopicCountDTO[]): Map<string, number> {
  * A team member can't edit or delete anything here directly (client spec: "the Team Member must
  * not be able to edit or delete it directly") — phase 2 adds the one path around that: Request
  * Shift Change / Request Cancellation, below. Phase 3 (client spec, Sept 2026): "re-point tasks
- * and messages onto shifts instead of the original availability submission" — each shift now
- * has its own expandable tasks/conversation section, same components AvailabilityCalendar
- * already uses for an availability date, just scoped to topicType="SHIFT" / the shift's own id
- * instead of an availability submission's date.
+ * and messages onto shifts instead of the original availability submission" — each shift now has
+ * its own expandable task list (MyDateTasksPanel), same component AvailabilityCalendar already
+ * uses for an availability date, just scoped to the shift's own date instead of an availability
+ * submission's. Correction brief #2 (Sept 2026): the standalone per-shift conversation that used
+ * to sit alongside that list is gone — each task now carries its own comment thread instead (see
+ * DateTaskRow's own doc comment).
  */
 export default function ScheduleView({ employeeId }: { employeeId: string }) {
   const [shifts, setShifts] = useState<ShiftDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
-  const [messageCounts, setMessageCounts] = useState<Map<string, number>>(new Map());
   const [openShiftId, setOpenShiftId] = useState<string | null>(null);
 
   async function load() {
@@ -56,24 +44,9 @@ export default function ScheduleView({ employeeId }: { employeeId: string }) {
     }
   }
 
-  // Best-effort, same reasoning as every other chip-badge fetch in this app — a shift missing
-  // its message count isn't worth failing the whole schedule over.
-  async function loadCounts() {
-    try {
-      const res = await fetch(`/api/team-notes/${employeeId}/topic-counts`);
-      if (!res.ok) return;
-      const data: { counts: TeamNoteTopicCountDTO[] } = await res.json();
-      setMessageCounts(countsByShift(data.counts));
-    } catch {
-      // ignored — see comment above
-    }
-  }
-
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
-    loadCounts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (loadState === "loading") {
@@ -121,10 +94,8 @@ export default function ScheduleView({ employeeId }: { employeeId: string }) {
                 key={s.id}
                 shift={s}
                 employeeId={employeeId}
-                messageCount={messageCounts.get(s.id) ?? 0}
                 expanded={openShiftId === s.id}
                 onToggleExpand={() => setOpenShiftId(openShiftId === s.id ? null : s.id)}
-                onMessagePosted={loadCounts}
                 onChanged={load}
               />
             ))}
@@ -143,10 +114,8 @@ export default function ScheduleView({ employeeId }: { employeeId: string }) {
                 key={s.id}
                 shift={s}
                 employeeId={employeeId}
-                messageCount={messageCounts.get(s.id) ?? 0}
                 expanded={openShiftId === s.id}
                 onToggleExpand={() => setOpenShiftId(openShiftId === s.id ? null : s.id)}
-                onMessagePosted={loadCounts}
               />
             ))}
           </div>
@@ -164,18 +133,14 @@ export default function ScheduleView({ employeeId }: { employeeId: string }) {
 function ShiftCard({
   shift,
   employeeId,
-  messageCount,
   expanded,
   onToggleExpand,
-  onMessagePosted,
   onChanged,
 }: {
   shift: ShiftDTO;
   employeeId: string;
-  messageCount: number;
   expanded: boolean;
   onToggleExpand: () => void;
-  onMessagePosted: () => void;
   onChanged?: () => void;
 }) {
   const [mode, setMode] = useState<"none" | "change" | "cancel">("none");
@@ -335,8 +300,10 @@ function ShiftCard({
       )}
 
       {/* Phase 3 (client spec, Sept 2026): "re-point tasks and messages onto shifts instead of
-          the original availability submission" — same per-date tasks/conversation pairing
-          AvailabilityCalendar already shows for an availability date, now on the shift itself. */}
+          the original availability submission" — same task list AvailabilityCalendar already
+          shows for an availability date, now on the shift itself. Correction brief #2 (Sept
+          2026): each task now carries its own comment thread instead of a standalone per-shift
+          conversation — see MyDateTasksPanel's own doc comment. */}
       <button
         type="button"
         onClick={onToggleExpand}
@@ -345,11 +312,7 @@ function ShiftCard({
         }`}
       >
         <ChecklistIcon className="h-3.5 w-3.5" />
-        Tasks & messages
-        <span className="flex items-center gap-0.5">
-          <ChatIcon className="h-3 w-3" />
-          {messageCount > 0 ? messageCount : ""}
-        </span>
+        Tasks
       </button>
 
       {expanded && (
@@ -361,14 +324,6 @@ function ShiftCard({
             </p>
             <MyDateTasksPanel employeeId={employeeId} taskDate={shift.date} />
           </div>
-          <TeamNotesThread
-            employeeId={employeeId}
-            viewerId={employeeId}
-            topicType="SHIFT"
-            topicId={shift.id}
-            placeholder="Message your supervisor or HR about this shift…"
-            onMessagePosted={onMessagePosted}
-          />
         </div>
       )}
     </div>
