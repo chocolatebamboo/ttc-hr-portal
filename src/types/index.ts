@@ -424,30 +424,71 @@ export interface DirectConversationSummaryDTO {
 }
 
 /**
- * A task an admin/supervisor pushes for one specific calendar date — CB, Sept 2026: "I like
- * how we have a texting feature but I feel like we should be also able to push different
- * tasks within that specific day... on the receiving end, they would see it on their main
- * dashboard." Two-way, not a plain checklist: PENDING (assigned) → COMPLETED (the employee
- * marked their part done) → APPROVED (an admin/supervisor confirmed it) — same submit/review
- * shape availability and PTO already use.
+ * A task an admin/supervisor assigns for one specific calendar date — see DateTask's own doc
+ * comment in prisma/schema.prisma for the full history. Correction brief (Sept 2026,
+ * "Correction & Refinement Brief" #2) redesigned this from a 3-state PENDING/COMPLETED/APPROVED
+ * checkbox into a real per-task workflow: "Assigned → In Progress → Submitted/Completed →
+ * Awaiting Review → Approved," with IN_PROGRESS as a purely self-reported "I've started this"
+ * signal (nothing gates on it — an employee may submit directly from ASSIGNED too) and
+ * "Submitted"/"Awaiting Review" collapsed into one AWAITING_REVIEW status, matching how every
+ * other submit-then-decide workflow in this app (AvailabilitySubmission, OnboardingItem) already
+ * uses one status for that moment. RETURNED replaces the old bare "send back to PENDING" —
+ * the brief specifically asks for "Return/Reopen with a note" (see DateTaskDTO.returnNote).
  */
-export type DateTaskStatus = "PENDING" | "COMPLETED" | "APPROVED";
+export type DateTaskStatus = "ASSIGNED" | "IN_PROGRESS" | "AWAITING_REVIEW" | "APPROVED" | "RETURNED";
 
 export interface DateTaskDTO {
   id: string;
-  employeeId: string;
+  employeeId: string; // the assignee
   employeeName: string;
   createdById: string;
   createdByName: string;
   taskDate: string; // "YYYY-MM-DD"
+  /** The short list-row label — correction brief #2: "task title" and "instructions/details" as
+   *  two distinct fields, where before there was only one combined `description`. */
+  title: string;
+  /** The longer instructions/details, shown once a task is expanded. */
   description: string;
   hasAttachment: boolean;
   attachmentName: string | null;
   status: DateTaskStatus;
-  completedAt: string | null; // ISO
+  startedAt: string | null; // ISO — set on ASSIGNED/RETURNED -> IN_PROGRESS
+  submittedAt: string | null; // ISO — set on -> AWAITING_REVIEW (was `completedAt`)
   approvedById: string | null;
   approvedByName: string | null;
   approvedAt: string | null; // ISO
+  returnedById: string | null;
+  returnedByName: string | null;
+  returnedAt: string | null; // ISO
+  /** The reviewer's note explaining why — required by returnDateTask, cleared implicitly by the
+   *  next submit (see DateTask.returnNote's own comment in prisma/schema.prisma). */
+  returnNote: string | null;
+  /** Total comments on this task — lets a collapsed row show "3 comments" without a second
+   *  fetch; the comments themselves are fetched separately (see DateTaskCommentDTO below) only
+   *  once a task is actually expanded. */
+  commentCount: number;
+  createdAt: string; // ISO
+}
+
+/**
+ * One comment/update on a single task — correction brief #2: "Opening/expanding a task should
+ * reveal its... comments/updates. This prevents users from having a generic conversation where
+ * it becomes unclear which task is being discussed." Replaces the standalone per-date TeamNote
+ * "Conversation" section that used to sit next to the task list on TeamAvailabilityCards,
+ * AvailabilityCalendar, TeamScheduleView, and ScheduleView — discussion now lives scoped to the
+ * one task it's actually about. Same shape as TeamNoteDTO/DirectMessageDTO (attachmentName shown
+ * to the client, the underlying key never is — downloading goes through
+ * /api/date-tasks/[taskId]/comments/[commentId]/download, which re-checks access and mints a
+ * short-lived signed URL rather than exposing the key itself).
+ */
+export interface DateTaskCommentDTO {
+  id: string;
+  taskId: string;
+  authorId: string;
+  authorName: string;
+  body: string;
+  hasAttachment: boolean;
+  attachmentName: string | null;
   createdAt: string; // ISO
 }
 
@@ -830,7 +871,9 @@ export type NotificationType =
   | "AVAILABILITY_ADJUSTMENT_PROPOSED"
   | "PTO_APPROVED"
   | "PTO_DENIED"
-  | "DATE_TASK_ASSIGNED";
+  | "DATE_TASK_ASSIGNED"
+  | "DATE_TASK_APPROVED"
+  | "DATE_TASK_RETURNED";
 
 export interface NotificationDTO {
   id: string;
