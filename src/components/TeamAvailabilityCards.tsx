@@ -3,13 +3,12 @@
 import { useState, useEffect } from "react";
 import AvailabilityStatusPill from "@/components/AvailabilityStatusPill";
 import ShiftStatusPill from "@/components/ShiftStatusPill";
-import TeamNotesThread from "@/components/TeamNotesThread";
 import DateTasksPanel from "@/components/DateTasksPanel";
 import SwipeReveal from "@/components/SwipeReveal";
-import { ChatIcon, ChecklistIcon, CheckCircleIcon, CalendarIcon } from "@/components/icons";
+import { ChecklistIcon, CheckCircleIcon, CalendarIcon } from "@/components/icons";
 import { slotChips } from "@/lib/availability-format";
 import { toneForStatus, YOU_TONE } from "@/lib/status-tone";
-import type { AdminAvailabilityDTO, AdminShiftDTO, AvailabilitySlot, TeamNoteTopicCountDTO } from "@/types";
+import type { AdminAvailabilityDTO, AdminShiftDTO, AvailabilitySlot } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -18,33 +17,28 @@ function initialsOf(name: string): string {
   return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
 }
 
-/** employeeId+submissionId+date -> total message count, built from
- *  GET /api/admin/team-notes/topic-counts. Only AVAILABILITY_DATE rows matter here — TeamPtoCards
- *  builds its own map the same way, keyed on PTO_REQUEST rows instead. */
-function countsByDate(counts: TeamNoteTopicCountDTO[]): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const c of counts) {
-    if (c.topicType !== "AVAILABILITY_DATE") continue;
-    map.set(`${c.employeeId}:${c.topicId}:${c.topicDate ?? ""}`, c.total);
-  }
-  return map;
-}
-
 /**
  * The HR-wide availability roster's actual card list — fetch, Approve/Deny/Undo,
- * Pending/Decided sections, and a per-date conversation on each card — extracted from
+ * Pending/Decided sections, and a per-date task list on each card — extracted from
  * AvailabilityAdminView (Sept 2026) so it can be dropped straight onto the dashboard's own
  * Availability widget page for admins, not just the standalone /admin/availability page.
  *
  * Round two (Sept 2026): CB, on the first version — "I see approved... but each scheduled day
  * may have different requests. I wanted to make comments under each day that was selected."
  * Tapping the card header no longer opens one shared thread for the whole submission; tapping
- * a specific date chip opens a conversation scoped to just that date (TeamNotesThread's
- * topicType="AVAILABILITY_DATE"), since a four-date submission can need four different
- * conversations. At most one date is open per card at a time (`openDate`).
+ * a specific date chip opens that date's own task list (DateTasksPanel), since a four-date
+ * submission can need four different sets of tasks. At most one date is open per card at a time
+ * (`openDate`).
  *
- * `viewerId` is the signed-in admin/supervisor viewing this list — needed so every open thread
- * (see TeamNotesThread) knows which side of the conversation is "you." Not used for any access
+ * Correction brief #2 (Sept 2026): "Remove the large standalone 'Conversation' section currently
+ * underneath the tasks... Communication should instead be contextual to each task." The
+ * per-date TeamNotesThread that used to sit below DateTasksPanel here (topicType=
+ * "AVAILABILITY_DATE") — and the per-chip message-count badge that existed only to flag activity
+ * in that now-removed thread — are both gone; every task opened via DateTasksPanel now carries
+ * its own comment thread instead (see DateTaskRow).
+ *
+ * `viewerId` is the signed-in admin/supervisor viewing this list — passed down to DateTasksPanel
+ * so its own task rows know which side of a comment they're rendering. Not used for any access
  * decision here; the API routes each card talks to re-check authorization themselves.
  */
 export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }) {
@@ -55,12 +49,10 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
   const [denyingId, setDenyingId] = useState<string | null>(null);
   const [denyComment, setDenyComment] = useState("");
   const [openDate, setOpenDate] = useState<{ submissionId: string; date: string } | null>(null);
-  const [messageCounts, setMessageCounts] = useState<Map<string, number>>(new Map());
   // Phase 1 of the scheduling workflow rebuild (client spec, Sept 2026): whether a given
   // date-chip on an APPROVED card has already been converted into a real confirmed Shift —
   // "Scheduling" is a deliberate second step after "Approve," not something Approve does by
-  // itself (see Shift's own doc comment in prisma/schema.prisma). Keyed "submissionId:date",
-  // same convention messageCounts already uses just above.
+  // itself (see Shift's own doc comment in prisma/schema.prisma). Keyed "submissionId:date".
   const [shiftsByDate, setShiftsByDate] = useState<Map<string, AdminShiftDTO>>(new Map());
   const [convertingDate, setConvertingDate] = useState<string | null>(null);
   // CB, Sept 2026: "[approve/deny] with no way to close out afterward" — once a card has been
@@ -85,21 +77,8 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
     }
   }
 
-  // Best-effort — a chip missing its message badge isn't worth failing the whole card list
-  // over, so a failed fetch here just leaves counts empty instead of throwing.
-  async function loadCounts() {
-    try {
-      const res = await fetch("/api/admin/team-notes/topic-counts");
-      if (!res.ok) return;
-      const data: { counts: TeamNoteTopicCountDTO[] } = await res.json();
-      setMessageCounts(countsByDate(data.counts));
-    } catch {
-      // ignored — see comment above
-    }
-  }
-
-  // Best-effort, same reasoning as loadCounts above — a chip missing its "already scheduled"
-  // badge isn't worth failing the card list over.
+  // Best-effort — a chip missing its "already scheduled" badge isn't worth failing the card
+  // list over, so a failed fetch here just leaves it empty instead of throwing.
   async function loadShifts() {
     try {
       const res = await fetch("/api/admin/shifts");
@@ -120,7 +99,6 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
-    loadCounts();
     loadShifts();
   }, []);
 
@@ -221,7 +199,6 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                 denying={denyingId === r.id}
                 denyComment={denyComment}
                 openDate={openDate?.submissionId === r.id ? openDate.date : null}
-                messageCounts={messageCounts}
                 shiftsByDate={shiftsByDate}
                 convertingDate={convertingDate}
                 onToggleDate={(date) =>
@@ -231,7 +208,6 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                 onDenyCommentChange={setDenyComment}
                 onDecide={decide}
                 onUndo={undo}
-                onMessagePosted={loadCounts}
                 onConvertToShift={convertToShift}
                 onRequestAdjustment={requestAdjustment}
               />
@@ -270,7 +246,6 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                   denying={false}
                   denyComment=""
                   openDate={openDate?.submissionId === r.id ? openDate.date : null}
-                  messageCounts={messageCounts}
                   shiftsByDate={shiftsByDate}
                   convertingDate={convertingDate}
                   onToggleDate={(date) =>
@@ -280,7 +255,6 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                   onDenyCommentChange={() => {}}
                   onDecide={() => {}}
                   onUndo={undo}
-                  onMessagePosted={loadCounts}
                   onConvertToShift={convertToShift}
                   onRequestAdjustment={() => {}}
                 />
@@ -300,7 +274,6 @@ function Card({
   denying,
   denyComment,
   openDate,
-  messageCounts,
   shiftsByDate,
   convertingDate,
   onToggleDate,
@@ -308,7 +281,6 @@ function Card({
   onDenyCommentChange,
   onDecide,
   onUndo,
-  onMessagePosted,
   onConvertToShift,
   onRequestAdjustment,
 }: {
@@ -318,7 +290,6 @@ function Card({
   denying: boolean;
   denyComment: string;
   openDate: string | null;
-  messageCounts: Map<string, number>;
   shiftsByDate: Map<string, AdminShiftDTO>;
   convertingDate: string | null;
   onToggleDate: (date: string) => void;
@@ -326,7 +297,6 @@ function Card({
   onDenyCommentChange: (v: string) => void;
   onDecide: (submissionId: string, decision: "APPROVED" | "DENIED", comment?: string) => void;
   onUndo: (submissionId: string) => void;
-  onMessagePosted: () => void;
   onConvertToShift: (submissionId: string, date: string) => void;
   onRequestAdjustment: (submissionId: string, adjustedSlots: AvailabilitySlot[], comment?: string) => void;
 }) {
@@ -382,8 +352,8 @@ function Card({
             </div>
           </div>
         </div>
-        <span className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center shrink-0" title="Tap a date below to message about it">
-          <ChatIcon className="h-4 w-4 text-white" />
+        <span className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center shrink-0" title="Tap a date below to see its tasks">
+          <ChecklistIcon className="h-4 w-4 text-white" />
         </span>
       </div>
 
@@ -391,33 +361,18 @@ function Card({
         <div className="mt-3.5 flex flex-wrap gap-1.5">
           {chips.map((c) => {
             const active = c.date === openDate;
-            const msgCount = messageCounts.get(`${r.employeeId}:${r.id}:${c.date}`) ?? 0;
             return (
               <button
                 key={c.date}
                 type="button"
                 onClick={() => onToggleDate(c.date)}
-                className={`relative flex flex-col items-start rounded-xl px-2.5 py-1.5 leading-tight transition-colors ${
+                className={`flex flex-col items-start rounded-xl px-2.5 py-1.5 leading-tight transition-colors ${
                   active ? "bg-white" : "bg-white/15 hover:bg-white/25 border border-white/25"
                 }`}
                 style={active ? { color: tone.to } : undefined}
               >
                 <span className={`text-xs font-semibold ${active ? "" : "text-white"}`}>{c.dateLabel}</span>
                 <span className={`text-[11px] ${active ? "opacity-70" : "text-white/80"}`}>{c.timeLabel}</span>
-                {/* CB, Sept 2026: "I don't see where Sean could see those messages... it needs
-                    to read cleanly" — every chip that has a conversation on it says so, whether
-                    the chip is open or not, so a glance at the card shows which dates actually
-                    have activity instead of every chip looking the same until you click it. */}
-                {msgCount > 0 && (
-                  <span
-                    className="absolute -top-1.5 -right-1.5 flex items-center gap-0.5 rounded-full bg-white px-1.5 py-0.5 text-[10px] font-bold shadow-sm"
-                    style={{ color: tone.to }}
-                    title={`${msgCount} message${msgCount === 1 ? "" : "s"} on this date`}
-                  >
-                    <ChatIcon className="h-2.5 w-2.5" />
-                    {msgCount}
-                  </span>
-                )}
               </button>
             );
           })}
@@ -573,31 +528,17 @@ function Card({
 
           {/* CB, Sept 2026: "I like how we have a texting feature but I feel like we should be
               also able to push different tasks within that specific day" — a discrete,
-              checkable item per date, separate from free-form messages below, with its own
-              two-way approval (DateTasksPanel pushes it, the employee's dashboard marks it
-              done, this panel confirms it). */}
+              checkable item per date, with its own two-way approval (DateTasksPanel pushes it,
+              the employee's dashboard marks it done, this panel confirms it). Correction brief
+              #2: each task now carries its own comment thread (DateTaskRow) instead of sharing
+              one standalone conversation with every other task on this date — see this
+              component's own doc comment for what that replaced. */}
           <div>
             <p className="text-xs font-semibold text-white/80 mb-1.5 flex items-center gap-1.5">
               <ChecklistIcon className="h-3.5 w-3.5 text-white/80" />
               {openChip.dateLabel} — tasks
             </p>
-            <DateTasksPanel employeeId={r.employeeId} taskDate={openChip.date} />
-          </div>
-
-          <div>
-            <p className="text-xs font-semibold text-white/80 mb-1.5 flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-white/80" />
-              {openChip.dateLabel} — conversation
-            </p>
-            <TeamNotesThread
-              employeeId={r.employeeId}
-              viewerId={viewerId}
-              topicType="AVAILABILITY_DATE"
-              topicId={r.id}
-              topicDate={openChip.date}
-              placeholder="Write a message about this date…"
-              onMessagePosted={onMessagePosted}
-            />
+            <DateTasksPanel employeeId={r.employeeId} taskDate={openChip.date} viewerId={viewerId} />
           </div>
         </div>
       )}
