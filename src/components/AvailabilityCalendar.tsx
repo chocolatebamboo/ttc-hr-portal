@@ -3,14 +3,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AvailabilityStatusPill from "@/components/AvailabilityStatusPill";
 import JumpToTodayButton from "@/components/JumpToTodayButton";
-import TeamNotesThread from "@/components/TeamNotesThread";
 import MyDateTasksPanel from "@/components/MyDateTasksPanel";
 import SwipeReveal from "@/components/SwipeReveal";
-import { ChatIcon, ChecklistIcon, ChevronDownIcon, TrashIcon } from "@/components/icons";
+import { ChecklistIcon, ChevronDownIcon, TrashIcon } from "@/components/icons";
 import { formatSlotDate, formatTime12h } from "@/lib/availability-format";
 import { todayDateKey, PTO_TYPE_LABEL } from "@/lib/time";
 import { getMonth, type Month } from "@/lib/month";
-import type { AvailabilityDTO, AvailabilitySlot, PtoType, TeamNoteTopicCountDTO } from "@/types";
+import type { AvailabilityDTO, AvailabilitySlot, PtoType } from "@/types";
 
 // Same four options TimeOffRequests' own standalone form offers (src/components/
 // TimeOffRequests.tsx) — small enough that duplicating it here beats exporting/importing it
@@ -71,10 +70,8 @@ function submissionsByDate(submissions: AvailabilityDTO[]): Map<string, Availabi
 }
 
 export interface AvailabilityCalendarControls {
-  /** The signed-in team member's own id — this calendar is always self-service, so it's both
-   *  the employeeId and the viewerId every per-date TeamNotesThread needs (CB, Sept 2026: "I
-   *  don't see where Sean could see those messages" — this is the fix, the same per-date
-   *  conversation admin cards already open, now reachable from the employee's own side). */
+  /** The signed-in team member's own id — this calendar is always self-service, so it's the
+   *  employeeId every per-date MyDateTasksPanel below needs. */
   employeeId: string;
   /** The signed-in team member's own submissions — newest first. This calendar is always
    *  self-service (submit your own availability); a supervisor/HR reviewing someone else's
@@ -185,33 +182,6 @@ export interface AvailabilityCalendarControls {
  */
 export default function AvailabilityCalendar({ controls }: { controls: AvailabilityCalendarControls }) {
   const { submissions, employeeId } = controls;
-
-  // Per-date message counts for this person's own conversations, keyed "submissionId:date" —
-  // fetched once here (rather than inside SubmissionDetail, which remounts every time a
-  // different submission is viewed thanks to Panel's key prop below) so switching between
-  // submissions doesn't re-fetch on every click. Best-effort: a missing badge isn't worth
-  // failing the calendar over.
-  const [messageCounts, setMessageCounts] = useState<Map<string, number>>(new Map());
-  async function loadCounts() {
-    try {
-      const res = await fetch(`/api/team-notes/${employeeId}/topic-counts`);
-      if (!res.ok) return;
-      const data: { counts: TeamNoteTopicCountDTO[] } = await res.json();
-      const map = new Map<string, number>();
-      for (const c of data.counts) {
-        if (c.topicType !== "AVAILABILITY_DATE") continue;
-        map.set(`${c.topicId}:${c.topicDate ?? ""}`, c.total);
-      }
-      setMessageCounts(map);
-    } catch {
-      // ignored — see comment above
-    }
-  }
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadCounts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [employeeId]);
 
   // Ascending offset order (PAST_OFFSET .. MAX_FUTURE_OFFSET) so the array is already in
   // top-to-bottom render order with no reordering logic needed — past months first, current
@@ -407,7 +377,7 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
           <ChevronDownIcon className="h-4 w-4 text-muted" />
         </button>
         <p className="text-center text-xs text-muted/60 py-2">
-          Tap the dates you're available — you can plan up to {MAX_FUTURE_OFFSET} months ahead.
+          Tap the dates you&apos;re available — you can plan up to {MAX_FUTURE_OFFSET} months ahead.
         </p>
         {months.map((month, i) => {
           const offset = PAST_OFFSET + i;
@@ -425,7 +395,7 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
             </div>
           );
         })}
-        <p className="text-center text-xs text-muted/60 py-2">That's as far as planning goes for now.</p>
+        <p className="text-center text-xs text-muted/60 py-2">That&apos;s as far as planning goes for now.</p>
       </div>
 
       {/* Same "don't get lost" affordance as My Time's calendar (CB, Sept 2026) — hidden while
@@ -437,8 +407,6 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
           key={viewingSubmission?.id ?? "draft"}
           viewingSubmission={viewingSubmission}
           employeeId={employeeId}
-          messageCounts={messageCounts}
-          onMessagePosted={loadCounts}
           draftDates={draftDates}
           draft={draft}
           onUpdateTime={(dateKey, field, value) => setDraft((d) => ({ ...d, [dateKey]: { ...d[dateKey], [field]: value } }))}
@@ -577,8 +545,6 @@ function MonthSection({
 function Panel({
   viewingSubmission,
   employeeId,
-  messageCounts,
-  onMessagePosted,
   draftDates,
   draft,
   onUpdateTime,
@@ -601,8 +567,6 @@ function Panel({
 }: {
   viewingSubmission: AvailabilityDTO | undefined;
   employeeId: string;
-  messageCounts: Map<string, number>;
-  onMessagePosted: () => void;
   draftDates: string[];
   draft: Record<string, { startTime: string; endTime: string }>;
   onUpdateTime: (dateKey: string, field: "startTime" | "endTime", value: string) => void;
@@ -683,8 +647,6 @@ function Panel({
         <SubmissionDetail
           submission={viewingSubmission}
           employeeId={employeeId}
-          messageCounts={messageCounts}
-          onMessagePosted={onMessagePosted}
           onResubmit={onResubmit}
           onCancel={onCancel}
           cancelling={cancelling}
@@ -714,8 +676,6 @@ function Panel({
 function SubmissionDetail({
   submission,
   employeeId,
-  messageCounts,
-  onMessagePosted,
   onResubmit,
   onCancel,
   cancelling,
@@ -726,8 +686,6 @@ function SubmissionDetail({
 }: {
   submission: AvailabilityDTO;
   employeeId: string;
-  messageCounts: Map<string, number>;
-  onMessagePosted: () => void;
   onResubmit?: () => void;
   onCancel?: () => void;
   cancelling?: boolean;
@@ -760,14 +718,12 @@ function SubmissionDetail({
           <AvailabilityStatusPill status={submission.status} />
         </div>
         <ul className="text-sm space-y-1">
-          {/* CB, Sept 2026: "I send it to Sean, I don't see where Sean could see those
-              messages that I put for that specific day" — this is that missing other half.
-              Tapping a date opens the exact same per-date conversation
-              (topicType="AVAILABILITY_DATE") a supervisor/admin opens from their own card for
-              this same submission, so a message posted from either side lands in one shared
-              thread instead of two that never meet. */}
+          {/* Tapping a date opens that date's own task list (MyDateTasksPanel) — the same
+              per-date tasks a supervisor/admin pushes from their own card (TeamAvailabilityCards'
+              DateTasksPanel). Correction brief #2 (Sept 2026): tasks now carry their own comment
+              thread each, replacing the standalone per-date conversation this used to open
+              alongside them — see MyDateTasksPanel's own doc comment. */}
           {lines.map((s) => {
-            const msgCount = messageCounts.get(`${submission.id}:${s.date}`) ?? 0;
             const active = openDate === s.date;
             const removingThisDate = removingDateKey === `${submission.id}:${s.date}`;
             const row = (
@@ -783,8 +739,8 @@ function SubmissionDetail({
                     {formatSlotDate(s.date)}: {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
                   </span>
                   <span className="flex items-center gap-1 shrink-0 text-xs text-white/60">
-                    <ChatIcon className="h-3 w-3" />
-                    {msgCount > 0 ? msgCount : "Message"}
+                    <ChecklistIcon className="h-3 w-3" />
+                    Tasks
                   </span>
                 </button>
                 {/* One date at a time, distinct from "Clear this submission" below (CB, Sept
@@ -830,7 +786,7 @@ function SubmissionDetail({
                         "once we create the task... they'll be able to... click a check mark" —
                         the same per-date task list a supervisor/admin already sees and pushes to
                         from their own card (TeamAvailabilityCards' DateTasksPanel), now visible
-                        and markable-done from the employee's own side too, right where they're
+                        and actionable from the employee's own side too, right where they're
                         already looking at this date. */}
                     <div>
                       <p className="text-xs font-semibold text-white/60 mb-1 flex items-center gap-1.5">
@@ -839,15 +795,6 @@ function SubmissionDetail({
                       </p>
                       <MyDateTasksPanel employeeId={employeeId} taskDate={s.date} />
                     </div>
-                    <TeamNotesThread
-                      employeeId={employeeId}
-                      viewerId={employeeId}
-                      topicType="AVAILABILITY_DATE"
-                      topicId={submission.id}
-                      topicDate={s.date}
-                      placeholder="Message your supervisor or HR about this date…"
-                      onMessagePosted={onMessagePosted}
-                    />
                   </div>
                 )}
               </li>
