@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import TeamNotesThread from "@/components/TeamNotesThread";
 import DirectMessageThread from "@/components/DirectMessageThread";
@@ -82,6 +82,28 @@ export default function MessagesInboxView({
   // directConversations (which only ever reflects rows that actually exist in the database)
   // until the first message is sent, at which point the real fetch below takes over.
   const [pendingDms, setPendingDms] = useState<Map<string, string>>(new Map());
+
+  // Correction brief #11 (Sept 2026): "The chat bubble on an availability request should take
+  // the user into My Messages... open the relevant conversation/thread for that specific team
+  // member." TeamAvailabilityCards.tsx's chat button links here as
+  // /messages?dm=<employeeId>&name=<employeeName> — read straight off window.location (not
+  // next/navigation's useSearchParams) so this page doesn't need a Suspense boundary, same
+  // reasoning src/app/login/page.tsx's own OAuth-error handling already documents. Reuses the
+  // exact "pending DM, not yet a real conversation" path handlePick below already established,
+  // so a chat started from an availability card behaves identically to one started from "New
+  // message." The URL is cleaned up immediately after, so refreshing or sharing this page's link
+  // doesn't keep re-opening the same conversation.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const dm = params.get("dm");
+    if (dm) {
+      const name = params.get("name") || "Team member";
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPendingDms((prev) => new Map(prev).set(dm, name));
+      setOpenKey(dmRowKey(dm));
+      window.history.replaceState(null, "", "/messages");
+    }
+  }, []);
 
   const dmRows: CountedRow[] = [...new Map([...pendingDms].map(([id, name]) => [id, name])).entries()]
     .filter(([id]) => !directConversations.some((c) => c.employeeId === id))
