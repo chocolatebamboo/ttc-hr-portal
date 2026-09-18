@@ -70,6 +70,12 @@ export default function MessagesInboxView({
 }) {
   const router = useRouter();
   const [openKey, setOpenKey] = useState<string | null>(null);
+  // Correction brief #9 (Sept 2026): "persist dismissal state" is required for "dismissible
+  // notifications and availability records" specifically — an inbox row here is neither (it's a
+  // conversation, not a Notification-model record or an AvailabilitySubmission), so this stays
+  // the same client-side-only clear it always was: reloading brings a dismissed row back. Only
+  // the swipe DIRECTION changed this round, to match the brief's "swipe left → reveal actions on
+  // the right" everywhere else (DashboardNotifications.tsx, TeamAvailabilityCards.tsx).
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [pickerOpen, setPickerOpen] = useState(false);
   // Conversations picked via "New message" but with no messages sent yet — not part of
@@ -122,7 +128,7 @@ export default function MessagesInboxView({
     return (
       <SwipeReveal
         key={row.key}
-        actionSide="left"
+        actionSide="right"
         actionLabel="Clear"
         actionIcon={<CheckCircleIcon className="h-4 w-4" />}
         actionClassName="bg-black/[0.06] text-accent-ink"
