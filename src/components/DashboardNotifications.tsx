@@ -134,7 +134,7 @@ export default function DashboardNotifications({
         {entries.map((e) => (
           <SwipeReveal
             key={e.key}
-            actionSide="left"
+            actionSide="right"
             actionLabel="Clear"
             actionIcon={<CheckCircleIcon className="h-4 w-4" />}
             actionClassName="bg-black/[0.06] text-accent-ink rounded-2xl"
