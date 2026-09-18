@@ -28,6 +28,31 @@ export function assertIsAdmin(actor: CurrentEmployee): void {
 }
 
 /**
+ * Correction brief #8 (Sept 2026), "Administrative access and role audit": "accessing reports"
+ * is one of the capabilities explicitly named for BOTH people identified for operational
+ * administrative functionality — Shawn Ho-Hing (HR_ADMIN, already covered by isAdmin()) and
+ * Daijour Ho-Hing (SUPERVISOR, who wasn't covered by anything before this). Extending Reports
+ * to every Supervisor (not just Daijour by name — roles are global, not per-user) is safe
+ * *because* getPayrollHoursReport scopes what a non-admin actually sees down to their own
+ * direct reports, the exact same "supervisorId = actor.id" narrowing every other
+ * supervisor-facing capability in this app already uses (see assertCanReviewTimesheet and
+ * friends below) — this is not a blanket grant of company-wide data to a Manager-level role.
+ * Activity History (the org-wide audit trail, a different tab on the same Reports page) stays
+ * admin-only — AuditLog has no per-employee column to scope it by the way TimeEntry/PtoRequest
+ * do, and the brief's own audit instruction is "don't grant a capability the existing intended
+ * permission model doesn't support" — so ReportsView hides that tab outright for a Supervisor
+ * rather than exposing something whose one guard is a component-level tab that just happens to
+ * not be visible (the API route underneath is still separately admin-only either way).
+ */
+export function canAccessReports(actor: CurrentEmployee): boolean {
+  return isAdmin(actor) || actor.role === "SUPERVISOR";
+}
+
+export function assertCanAccessReports(actor: CurrentEmployee): void {
+  if (!canAccessReports(actor)) throw new ForbiddenError();
+}
+
+/**
  * True if `actor` may view/act on `targetEmployeeId`'s work-related records (time entries,
  * PTO). Admins: anyone. Supervisors: their direct reports only — checked against the
  * database, not a client-supplied "I am their supervisor" claim. Employees: themselves only.
