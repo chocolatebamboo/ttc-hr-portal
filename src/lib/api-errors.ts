@@ -13,7 +13,7 @@ import { InvalidPtoRequestError } from "@/lib/pto-actions";
 import { InvalidAvailabilityError } from "@/lib/availability";
 import { InvalidEmployeeError } from "@/lib/employees-admin";
 import { InvalidDepartmentError } from "@/lib/departments-admin";
-import { DocumentNotFoundError, InvalidDocumentError } from "@/lib/documents";
+import { DocumentNotFoundError, InvalidDocumentError, DocumentFolderNotFoundError } from "@/lib/documents";
 import { DocumentUploadError, AvatarUploadError } from "@/lib/storage";
 import { OnboardingNotFoundError, InvalidOnboardingError, MissingReturnReasonError } from "@/lib/onboarding";
 import { AnnouncementNotFoundError, InvalidAnnouncementError } from "@/lib/announcements";
@@ -38,6 +38,7 @@ export function toErrorResponse(err: unknown) {
   }
   if (
     err instanceof DocumentNotFoundError ||
+    err instanceof DocumentFolderNotFoundError ||
     err instanceof OnboardingNotFoundError ||
     err instanceof AnnouncementNotFoundError ||
     err instanceof CertificationNotFoundError ||
