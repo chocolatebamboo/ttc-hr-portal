@@ -84,7 +84,7 @@ export default async function PortalLayout({ children }: { children: React.React
         <main className="flex-1 px-4 md:px-6 py-6 pb-24 md:pb-6 md:min-h-0 md:overflow-y-auto">{children}</main>
       </div>
 
-      <BottomNav needsOnboardingAttention={needsOnboardingAttention} />
+      <BottomNav role={employee.role} needsOnboardingAttention={needsOnboardingAttention} />
     </div>
   );
 }
