@@ -13,6 +13,12 @@ const STYLE: Record<AvailabilityStatus, string> = {
   // Adjustment Requested submission needs a decision too, just from the team member instead of
   // the reviewer this time.
   ADJUSTMENT_REQUESTED: "bg-amber-100 text-amber-800",
+  // Correction brief #10 (Sept 2026): included only to keep this a complete
+  // Record<AvailabilityStatus, ...> — every list this component's data comes from
+  // (listMyAvailability/listAvailabilityForEmployee/listAdminAvailability) filters REMOVED rows
+  // out server-side, so this entry is never actually looked up. Same reasoning
+  // AvailabilityCalendar.tsx's STATUS_CHIP documents for its own unreachable CANCELLED entry.
+  REMOVED: "bg-black/5 text-muted",
 };
 
 const LABEL: Record<AvailabilityStatus, string> = {
@@ -21,6 +27,7 @@ const LABEL: Record<AvailabilityStatus, string> = {
   DENIED: "Denied",
   CANCELLED: "Cancelled",
   ADJUSTMENT_REQUESTED: "Adjustment requested",
+  REMOVED: "Removed",
 };
 
 export default function AvailabilityStatusPill({ status }: { status: AvailabilityStatus }) {
