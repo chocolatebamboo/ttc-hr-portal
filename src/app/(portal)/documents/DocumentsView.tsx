@@ -6,10 +6,11 @@ import {
   DOCUMENT_VISIBILITY_LABEL,
   formatDocumentDate,
 } from "@/lib/documents-format";
-import { DownloadIcon, CheckCircleIcon, ArchiveIcon } from "@/components/icons";
+import { DownloadIcon, CheckCircleIcon, ArchiveIcon, FolderIcon, ChevronRightIcon } from "@/components/icons";
 import type {
   DocumentDTO,
   DocumentAdminSummaryDTO,
+  DocumentFolderContentsDTO,
   AssignmentOptionsDTO,
   DocumentCategory,
   DocumentVisibility,
@@ -18,56 +19,26 @@ import type {
 type LoadState = "loading" | "ready" | "error" | "empty";
 
 /**
- * Two tabs in one page rather than two nav links, because the underlying data is the same
- * "Documents" concept — an admin still has their own handbook/policy documents to read on
- * "My Documents" and shouldn't lose that just because they can also manage the library.
+ * Correction brief #4 (Sept 2026): "the separate My Documents and Manage experiences are
+ * unnecessarily fragmented... create one cohesive My Documents workspace" — one page, no tabs.
+ * Every employee sees "Shared with you" (their own assigned documents, unchanged from before);
+ * anyone with manage permission ALSO sees the Document Library folder browser directly beneath
+ * it on the same page, instead of a second tab they had to click into. The HR-assigned
+ * document/acknowledgment workflow (DocumentDTO/MyDocuments below) is completely untouched —
+ * only the library an admin organizes gained folders.
  */
 export default function DocumentsView({ canManage }: { canManage: boolean }) {
-  const [tab, setTab] = useState<"mine" | "manage">("mine");
-
   return (
     <div className="max-w-3xl">
-      <h1 className="page-title text-2xl mb-4">Documents</h1>
-
-      {canManage && (
-        <div className="flex gap-1.5 mb-5 border-b border-border">
-          <TabButton active={tab === "mine"} onClick={() => setTab("mine")}>
-            My Documents
-          </TabButton>
-          <TabButton active={tab === "manage"} onClick={() => setTab("manage")}>
-            Manage
-          </TabButton>
-        </div>
-      )}
-
-      {tab === "mine" ? <MyDocuments /> : <AdminDocumentsPanel />}
+      <h1 className="page-title text-2xl mb-4">My Documents</h1>
+      <MyDocuments />
+      {canManage && <DocumentLibrary />}
     </div>
   );
 }
 
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-        active ? "border-accent text-accent-ink" : "border-transparent text-muted hover:text-foreground"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
 // ---------------------------------------------------------------------------
-// Employee-facing: My Documents
+// Employee-facing: documents shared with you by HR (unchanged by brief #4)
 // ---------------------------------------------------------------------------
 
 function MyDocuments() {
@@ -197,7 +168,9 @@ function MyDocuments() {
 }
 
 // ---------------------------------------------------------------------------
-// Admin: Manage
+// HR/Admin: Document Library (correction brief #4) — folded directly into this page instead of
+// living behind a separate "Manage" tab. Folder create/open/organize/upload/view/archive/
+// version, all gated the same way the old Manage tab already was (canManage / is_admin()).
 // ---------------------------------------------------------------------------
 
 const CATEGORY_OPTIONS: DocumentCategory[] = [
@@ -217,22 +190,28 @@ const CATEGORY_OPTIONS: DocumentCategory[] = [
 
 const VISIBILITY_OPTIONS: DocumentVisibility[] = ["GLOBAL", "DEPARTMENT", "INDIVIDUAL", "CONFIDENTIAL_HR"];
 
-function AdminDocumentsPanel() {
-  const [documents, setDocuments] = useState<DocumentAdminSummaryDTO[]>([]);
+function DocumentLibrary() {
+  const [folderId, setFolderId] = useState<string | null>(null);
+  const [contents, setContents] = useState<DocumentFolderContentsDTO | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
-  const [formOpen, setFormOpen] = useState(false);
+  const [showUpload, setShowUpload] = useState(false);
+  const [showNewFolder, setShowNewFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [folderBusy, setFolderBusy] = useState(false);
+  const [folderError, setFolderError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [openingId, setOpeningId] = useState<string | null>(null);
   const [versioningId, setVersioningId] = useState<string | null>(null);
   const [versionError, setVersionError] = useState("");
 
-  async function load() {
+  async function load(id: string | null) {
     setLoadState("loading");
     try {
-      const res = await fetch("/api/documents/manage");
+      const res = await fetch(`/api/documents/manage/folders${id ? `?folderId=${id}` : ""}`);
       if (!res.ok) throw new Error();
-      const data = await res.json();
-      setDocuments(data.documents);
-      setLoadState(data.documents.length === 0 ? "empty" : "ready");
+      const data: DocumentFolderContentsDTO = await res.json();
+      setContents(data);
+      setLoadState("ready");
     } catch {
       setLoadState("error");
     }
@@ -240,14 +219,53 @@ function AdminDocumentsPanel() {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-  }, []);
+    load(folderId);
+  }, [folderId]);
+
+  function openFolder(id: string | null) {
+    setShowNewFolder(false);
+    setFolderError("");
+    setFolderId(id);
+  }
+
+  async function createFolder() {
+    if (!newFolderName.trim()) return;
+    setFolderBusy(true);
+    setFolderError("");
+    try {
+      const res = await fetch("/api/documents/manage/folders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newFolderName, parentFolderId: folderId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Couldn't create that folder.");
+      setShowNewFolder(false);
+      setNewFolderName("");
+      await load(folderId);
+    } catch (err) {
+      setFolderError(err instanceof Error ? err.message : "Couldn't create that folder.");
+    } finally {
+      setFolderBusy(false);
+    }
+  }
+
+  async function openDocument(id: string) {
+    setOpeningId(id);
+    try {
+      const res = await fetch(`/api/documents/${id}/download`);
+      const data = await res.json();
+      if (res.ok && data.url) window.open(data.url, "_blank", "noopener,noreferrer");
+    } finally {
+      setOpeningId(null);
+    }
+  }
 
   async function archive(id: string) {
     setBusyId(id);
     try {
       await fetch(`/api/documents/${id}/archive`, { method: "POST" });
-      await load();
+      await load(folderId);
     } finally {
       setBusyId(null);
     }
@@ -266,7 +284,7 @@ function AdminDocumentsPanel() {
         return;
       }
       setVersioningId(null);
-      await load();
+      await load(folderId);
     } catch {
       setVersionError("Unable to reach the server. Check your connection and try again.");
     } finally {
@@ -274,35 +292,98 @@ function AdminDocumentsPanel() {
     }
   }
 
-  const active = documents.filter((d) => !d.archivedAt);
-  const archived = documents.filter((d) => d.archivedAt);
+  const active = (contents?.documents ?? []).filter((d) => !d.archivedAt);
+  const archived = (contents?.documents ?? []).filter((d) => d.archivedAt);
+  const isEmpty =
+    loadState === "ready" && contents !== null && active.length === 0 && archived.length === 0 && contents.folders.length === 0;
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <p className="text-sm text-muted max-w-md">
-          Upload and track documents. Acknowledgment here is a read-and-confirm record for HR — not a
-          legal e-signature.
-        </p>
+    <div className="mt-10">
+      <h2 className="text-lg font-semibold mb-1">Document Library</h2>
+      <p className="text-sm text-muted mb-4 max-w-md">
+        Organize the shared library into folders, upload documents, and track acknowledgment.
+        Acknowledgment here is a read-and-confirm record for HR — not a legal e-signature.
+      </p>
+
+      <div className="flex items-center flex-wrap gap-1 text-sm mb-4">
         <button
-          onClick={() => setFormOpen((o) => !o)}
-          className={formOpen ? "btn-neutral text-sm px-4 py-2 shrink-0" : "btn-primary text-sm px-4 py-2 shrink-0"}
+          type="button"
+          onClick={() => openFolder(null)}
+          className={`font-medium ${folderId === null ? "text-accent-ink" : "text-muted hover:text-foreground"}`}
         >
-          {formOpen ? "Cancel" : "Upload Document"}
+          Library
+        </button>
+        {contents?.breadcrumb.map((f) => (
+          <span key={f.id} className="flex items-center gap-1">
+            <ChevronRightIcon className="h-3.5 w-3.5 text-muted/60" />
+            <button type="button" onClick={() => openFolder(f.id)} className="font-medium text-muted hover:text-foreground">
+              {f.name}
+            </button>
+          </span>
+        ))}
+        {contents?.folder && (
+          <span className="flex items-center gap-1">
+            <ChevronRightIcon className="h-3.5 w-3.5 text-muted/60" />
+            <span className="font-medium text-accent-ink">{contents.folder.name}</span>
+          </span>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <button
+          type="button"
+          onClick={() => {
+            setShowNewFolder((v) => !v);
+            setFolderError("");
+          }}
+          className={showNewFolder ? "btn-neutral text-sm px-4 py-2" : "btn-outline text-sm px-4 py-2"}
+        >
+          {showNewFolder ? "Cancel" : "+ New Folder"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowUpload((v) => !v)}
+          className={showUpload ? "btn-neutral text-sm px-4 py-2" : "btn-primary text-sm px-4 py-2"}
+        >
+          {showUpload ? "Cancel" : "Upload Document"}
         </button>
       </div>
 
-      {formOpen && (
+      {showNewFolder && (
+        <div className="rounded-xl border border-border bg-surface p-4 mb-4">
+          <div className="flex flex-col sm:flex-row gap-2 items-start">
+            <input
+              type="text"
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              placeholder="Folder name"
+              className="flex-1 w-full sm:w-auto rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
+            />
+            <button
+              type="button"
+              onClick={createFolder}
+              disabled={folderBusy || !newFolderName.trim()}
+              className="btn-primary text-sm px-4 py-2 shrink-0"
+            >
+              {folderBusy ? "Creating…" : "Create"}
+            </button>
+          </div>
+          {folderError && <p className="text-xs text-accent mt-2">{folderError}</p>}
+        </div>
+      )}
+
+      {showUpload && (
         <UploadDocumentForm
+          folderId={folderId}
           onUploaded={() => {
-            setFormOpen(false);
-            load();
+            setShowUpload(false);
+            load(folderId);
           }}
         />
       )}
 
       {loadState === "loading" && (
-        <div className="space-y-2 mt-4">
+        <div className="space-y-2">
           {[0, 1].map((i) => (
             <div key={i} className="h-16 rounded-xl border border-border bg-surface animate-pulse" />
           ))}
@@ -310,35 +391,55 @@ function AdminDocumentsPanel() {
       )}
 
       {loadState === "error" && (
-        <div className="rounded-xl border border-border bg-surface p-6 text-sm text-accent mt-4">
-          Unable to load documents. Please try again.
+        <div className="rounded-xl border border-border bg-surface p-6 text-sm text-accent">
+          Unable to load the document library. Please try again.
         </div>
       )}
 
-      {loadState === "empty" && (
-        <div className="rounded-xl border border-border bg-surface p-6 text-sm text-muted mt-4">
-          No documents have been uploaded yet.
-        </div>
-      )}
+      {loadState === "ready" && contents && (
+        <div className="space-y-6">
+          {contents.folders.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+              {contents.folders.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => openFolder(f.id)}
+                  className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3.5 py-3 text-left hover:bg-black/[0.02] transition-colors"
+                >
+                  <FolderIcon className="h-5 w-5 text-muted shrink-0" />
+                  <span className="text-sm font-medium truncate">{f.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
 
-      {loadState === "ready" && (
-        <div className="mt-4 space-y-6">
-          <DocumentTable
-            rows={active}
-            onArchive={archive}
-            busyId={busyId}
-            versioningId={versioningId}
-            onVersioningToggle={(id) => {
-              setVersionError("");
-              setVersioningId((current) => (current === id ? null : id));
-            }}
-            onUploadVersion={uploadNewVersion}
-            versionError={versionError}
-          />
+          {isEmpty && (
+            <div className="rounded-xl border border-border bg-surface p-6 text-sm text-muted">
+              This folder is empty. Create a subfolder or upload a document to get started.
+            </div>
+          )}
+
+          {active.length > 0 && (
+            <DocumentTable
+              rows={active}
+              onArchive={archive}
+              onView={openDocument}
+              openingId={openingId}
+              busyId={busyId}
+              versioningId={versioningId}
+              onVersioningToggle={(id) => {
+                setVersionError("");
+                setVersioningId((current) => (current === id ? null : id));
+              }}
+              onUploadVersion={uploadNewVersion}
+              versionError={versionError}
+            />
+          )}
           {archived.length > 0 && (
             <div>
-              <h2 className="text-sm font-medium text-muted mb-2">Archived</h2>
-              <DocumentTable rows={archived} onArchive={archive} busyId={busyId} archived />
+              <h3 className="text-sm font-medium text-muted mb-2">Archived</h3>
+              <DocumentTable rows={archived} onArchive={archive} onView={openDocument} openingId={openingId} busyId={busyId} archived />
             </div>
           )}
         </div>
@@ -350,6 +451,8 @@ function AdminDocumentsPanel() {
 function DocumentTable({
   rows,
   onArchive,
+  onView,
+  openingId = null,
   busyId,
   archived = false,
   versioningId = null,
@@ -359,6 +462,8 @@ function DocumentTable({
 }: {
   rows: DocumentAdminSummaryDTO[];
   onArchive: (id: string) => void;
+  onView: (id: string) => void;
+  openingId?: string | null;
   busyId: string | null;
   archived?: boolean;
   versioningId?: string | null;
@@ -389,27 +494,42 @@ function DocumentTable({
                 </p>
               )}
             </div>
-            {!archived && (
-              <div className="flex items-center gap-2 shrink-0">
-                {onVersioningToggle && (
-                  <button
-                    onClick={() => onVersioningToggle(doc.id)}
-                    disabled={busyId === doc.id}
-                    className="btn-neutral text-xs px-3 py-1.5"
-                  >
-                    New version
-                  </button>
-                )}
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Archived documents aren't resolvable through the download endpoint (see
+                  getDocumentForDownload in src/lib/documents.ts) — kept for the audit trail, not
+                  for viewing, so there's no live link to offer here once archived. */}
+              {!archived && (
                 <button
-                  onClick={() => onArchive(doc.id)}
-                  disabled={busyId === doc.id}
+                  onClick={() => onView(doc.id)}
+                  disabled={openingId === doc.id}
                   className="btn-neutral text-xs px-3 py-1.5 flex items-center gap-1.5"
                 >
-                  <ArchiveIcon className="h-3.5 w-3.5" />
-                  {busyId === doc.id ? "Archiving…" : "Archive"}
+                  <DownloadIcon className="h-3.5 w-3.5" />
+                  {openingId === doc.id ? "Opening…" : "View"}
                 </button>
-              </div>
-            )}
+              )}
+              {!archived && (
+                <>
+                  {onVersioningToggle && (
+                    <button
+                      onClick={() => onVersioningToggle(doc.id)}
+                      disabled={busyId === doc.id}
+                      className="btn-neutral text-xs px-3 py-1.5"
+                    >
+                      New version
+                    </button>
+                  )}
+                  <button
+                    onClick={() => onArchive(doc.id)}
+                    disabled={busyId === doc.id}
+                    className="btn-neutral text-xs px-3 py-1.5 flex items-center gap-1.5"
+                  >
+                    <ArchiveIcon className="h-3.5 w-3.5" />
+                    {busyId === doc.id ? "Archiving…" : "Archive"}
+                  </button>
+                </>
+              )}
+            </div>
           </div>
 
           {versioningId === doc.id && onUploadVersion && (
@@ -466,7 +586,7 @@ function NewVersionForm({
   );
 }
 
-function UploadDocumentForm({ onUploaded }: { onUploaded: () => void }) {
+function UploadDocumentForm({ folderId, onUploaded }: { folderId: string | null; onUploaded: () => void }) {
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState<DocumentCategory>("HR_POLICY");
   const [visibility, setVisibility] = useState<DocumentVisibility>("GLOBAL");
@@ -506,6 +626,7 @@ function UploadDocumentForm({ onUploaded }: { onUploaded: () => void }) {
     form.set("requiresAcknowledgment", String(requiresAcknowledgment && !confidentialAckDisabled));
     if (needsDepartment) form.set("assigneeDepartmentId", assigneeDepartmentId);
     if (needsEmployee) form.set("assigneeEmployeeId", assigneeEmployeeId);
+    if (folderId) form.set("folderId", folderId);
     form.set("file", file);
 
     try {
