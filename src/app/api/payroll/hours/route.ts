@@ -1,16 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireEmployee } from "@/lib/auth";
-import { assertIsAdmin } from "@/lib/authorization";
+import { assertCanAccessReports } from "@/lib/authorization";
 import { getPayrollHoursReport, InvalidPayrollRangeError } from "@/lib/payroll";
 import { toErrorResponse } from "@/lib/api-errors";
 
-/** GET /api/payroll/hours?start=YYYY-MM-DD&end=YYYY-MM-DD — HR/Super Admin only. The preview
- *  the Reports page's table renders; /api/payroll/hours/csv returns the same numbers as a
- *  downloadable file. */
+/** GET /api/payroll/hours?start=YYYY-MM-DD&end=YYYY-MM-DD — HR/Super Admin, or (correction
+ *  brief #8, Sept 2026) a Supervisor viewing only their own direct reports' hours; see
+ *  getPayrollHoursReport's own doc comment for the scoping. The preview the Reports page's
+ *  table renders; /api/payroll/hours/csv returns the same numbers as a downloadable file. */
 export async function GET(request: NextRequest) {
   try {
     const employee = await requireEmployee();
-    assertIsAdmin(employee);
+    assertCanAccessReports(employee);
 
     const { searchParams } = new URL(request.url);
     const start = searchParams.get("start");
