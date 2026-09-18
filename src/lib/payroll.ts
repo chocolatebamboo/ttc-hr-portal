@@ -1,5 +1,5 @@
 import { withRlsContext } from "@/lib/db";
-import { isAdmin, ForbiddenError } from "@/lib/authorization";
+import { isAdmin, assertCanAccessReports, ForbiddenError } from "@/lib/authorization";
 import type { CurrentEmployee, PayrollHoursReportDTO, PayrollHoursRowDTO } from "@/types";
 
 export class InvalidPayrollRangeError extends Error {
@@ -30,14 +30,35 @@ export async function getPayrollHoursReport(
   endDate: Date,
   employeeId?: string
 ): Promise<PayrollHoursReportDTO> {
-  if (!isAdmin(actor)) throw new ForbiddenError();
+  assertCanAccessReports(actor);
   if (endDate < startDate) {
     throw new InvalidPayrollRangeError("End date must be on or after the start date.");
   }
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    // Correction brief #8 (Sept 2026): a Supervisor sees this exact same report now too, but
+    // never the whole company — only their own direct reports, the same "supervisorId =
+    // actor.id" scoping every other supervisor-facing query in this app already applies (see
+    // TimeEntry/PtoRequest's own RLS policies in prisma/rls.sql). If they picked a specific
+    // team member, that person must actually BE one of their reports — checked against the
+    // database here, not trusted from the query string, same as assertCanAccessEmployeeRecords
+    // does everywhere else. Admins pass straight through, unscoped, exactly as before.
+    if (!isAdmin(actor) && employeeId) {
+      const target = await tx.employee.findUnique({
+        where: { id: employeeId },
+        select: { supervisorId: true },
+      });
+      if (target?.supervisorId !== actor.id) throw new ForbiddenError();
+    }
+
+    const employeeScope = employeeId
+      ? { id: employeeId }
+      : isAdmin(actor)
+        ? {}
+        : { supervisorId: actor.id };
+
     const employees = await tx.employee.findMany({
-      where: employeeId ? { id: employeeId, deactivatedAt: null } : { deactivatedAt: null },
+      where: { ...employeeScope, deactivatedAt: null },
       select: {
         id: true,
         employeeCode: true,
@@ -49,10 +70,15 @@ export async function getPayrollHoursReport(
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
     });
 
+    // Every other query below is scoped off this resolved employee list rather than repeating
+    // the same admin-or-supervisor branch three more times — whatever `employees` correctly
+    // narrowed down to above is exactly whose hours belong in the rest of this report.
+    const employeeIds = employees.map((e) => e.id);
+
     const timeEntries = await tx.timeEntry.findMany({
       where: {
         workDate: { gte: startDate, lte: endDate },
-        ...(employeeId ? { employeeId } : {}),
+        employeeId: { in: employeeIds },
       },
       select: { employeeId: true, status: true, totalMinutes: true },
     });
@@ -62,7 +88,7 @@ export async function getPayrollHoursReport(
         status: "APPROVED",
         startDate: { lte: endDate },
         endDate: { gte: startDate },
-        ...(employeeId ? { employeeId } : {}),
+        employeeId: { in: employeeIds },
       },
       select: { employeeId: true, type: true, hours: true },
     });
