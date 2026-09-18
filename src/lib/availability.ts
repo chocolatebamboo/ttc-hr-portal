@@ -86,7 +86,11 @@ function toDTO(row: AvailabilityRow): AvailabilityDTO {
 export async function listMyAvailability(actor: CurrentEmployee): Promise<AvailabilityDTO[]> {
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const rows = await tx.availabilitySubmission.findMany({
-      where: { employeeId: actor.id },
+      // Correction brief #10 (Sept 2026): REMOVED is an admin cleanup status, not a decision the
+      // employee needs to see reflected in their own history — see REMOVED's own doc comment in
+      // prisma/schema.prisma. Excluded here the same way listAvailabilityForEmployee and
+      // listAdminAvailability exclude it below.
+      where: { employeeId: actor.id, status: { not: "REMOVED" } },
       orderBy: { submittedAt: "desc" },
     });
     return rows.map(toDTO);
@@ -100,7 +104,10 @@ export async function listMyAvailability(actor: CurrentEmployee): Promise<Availa
 export async function listAvailabilityForEmployee(actor: CurrentEmployee, employeeId: string): Promise<AvailabilityDTO[]> {
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const rows = await tx.availabilitySubmission.findMany({
-      where: { employeeId },
+      // Correction brief #10 (Sept 2026): same REMOVED exclusion listMyAvailability applies —
+      // a supervisor/admin drilling into one employee's history shouldn't see admin cleanup
+      // noise here either.
+      where: { employeeId, status: { not: "REMOVED" } },
       orderBy: { submittedAt: "desc" },
     });
     return rows.map(toDTO);
@@ -455,7 +462,10 @@ export async function listAdminAvailability(
         orderBy: { submittedAt: "asc" },
       }),
       tx.availabilitySubmission.findMany({
-        where: { status: { not: "PENDING" } },
+        // Correction brief #10 (Sept 2026): REMOVED is explicitly "remove it from the normal
+        // active/decided interface" — excluded here the same way PENDING already is, so a
+        // removed request doesn't reappear in Decided right after an admin clears it out.
+        where: { status: { notIn: ["PENDING", "REMOVED"] } },
         include: { employee: { select: { firstName: true, lastName: true, preferredName: true } } },
         orderBy: { reviewedAt: "desc" },
         take: 200,
@@ -495,4 +505,72 @@ export async function dismissDecidedAvailability(actor: CurrentEmployee, submiss
   if (!row || row.status === "PENDING") return;
 
   await dismissKey(actor, decidedDismissalKey(toDTO(row)));
+}
+
+/**
+ * Correction brief #10 (Sept 2026): "administrative cleanup/removal of a request, such as an
+ * obsolete or duplicate record" — a swipe-revealed action distinct from Deny. The brief draws the
+ * line explicitly:
+ *   - Deny (decideAvailability) is a real decision ON THE MERITS of the request: it's recorded
+ *     as a decision, the employee is notified, and it only ever applies to a Pending submission.
+ *   - Remove is housekeeping: no decision is being made about whether the request itself was
+ *     good or bad, so there's no Notification row (nothing here calls writeNotification) — but
+ *     it's still recorded ("prefer retaining an internal audit record rather than destroying
+ *     important scheduling/HR history"), and unlike Deny it can clear out a request in ANY
+ *     non-terminal state (Pending, Approved, Denied, or Adjustment Requested), not just Pending —
+ *     an obsolete/duplicate record doesn't stop being clutter just because it was already decided.
+ *
+ * Same reviewer authority as decideAvailability/undecideAvailability — the caller checks
+ * assertCanReviewAvailability (admin, or that employee's actual supervisor) before calling this,
+ * and it's enforced again here under the reviewer's own RLS identity. The brief says "authorized
+ * administrators," which reads here as the same reviewing authority Approve/Deny/Undo already
+ * share on this exact card, not a stricter admin-only carve-out for one button among them — worth
+ * flagging in case the intent was actually to restrict Remove to Admin/Super Admin only.
+ *
+ * Never a hard delete: sets status REMOVED (see its own doc comment in prisma/schema.prisma)
+ * rather than calling .delete(), so the row — and the full decide/undo/adjust history already on
+ * it — survives for Activity History even though every normal list filters it out from here on.
+ *
+ * If this submission already produced a real Shift (Shift.sourceAvailabilitySubmissionId), that
+ * shift is left completely untouched: nothing here writes to the Shift table, and Shift's own
+ * onDelete: SetNull only matters for a hard delete, which this never performs — "do not silently
+ * delete the resulting schedule as a side effect" is satisfied structurally, not by a runtime
+ * check. What IS checked here is whether a live (non-Cancelled) shift exists, purely so the audit
+ * trail — and the confirmation the caller shows before this ever runs, see
+ * TeamAvailabilityCards.tsx — can say so plainly instead of leaving that relationship unmentioned.
+ */
+export async function removeAvailabilitySubmission(actor: CurrentEmployee, submissionId: string): Promise<void> {
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const existing = await tx.availabilitySubmission.findUnique({ where: { id: submissionId } });
+    if (!existing) {
+      throw new InvalidAvailabilityError("Submission not found.");
+    }
+    if (existing.status === "REMOVED") {
+      throw new InvalidAvailabilityError("This request has already been removed.");
+    }
+    if (existing.status === "CANCELLED") {
+      throw new InvalidAvailabilityError("This request was already withdrawn by the team member.");
+    }
+
+    const linkedShift = await tx.shift.findFirst({
+      where: { sourceAvailabilitySubmissionId: submissionId, status: { not: "CANCELLED" } },
+      select: { id: true },
+    });
+
+    const row = await tx.availabilitySubmission.update({
+      where: { id: submissionId },
+      data: { status: "REMOVED" },
+    });
+    await writeAuditLog(tx, {
+      actorId: actor.id,
+      action: "AVAILABILITY_REMOVED",
+      targetType: "AvailabilitySubmission",
+      targetId: row.id,
+      oldValue: existing.status,
+      newValue: "REMOVED",
+      comment: linkedShift
+        ? "A shift already scheduled from this request was left unaffected by the removal."
+        : undefined,
+    });
+  });
 }
