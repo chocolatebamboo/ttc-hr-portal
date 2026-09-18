@@ -36,3 +36,21 @@ export async function dismiss(actor: CurrentEmployee, key: string): Promise<void
     })
   );
 }
+
+/**
+ * Correction brief #9 (Sept 2026): the bulk counterpart to isDismissed, for a caller checking a
+ * whole list of content-derived keys at once (e.g. every Decided availability card on the HR
+ * roster) rather than one fixed key — one query instead of one per row. Returns just the subset
+ * of `keys` this employee has actually dismissed; a key that was never dismissed, or belongs to
+ * someone else, simply isn't in the result.
+ */
+export async function listDismissedKeys(actor: CurrentEmployee, keys: string[]): Promise<Set<string>> {
+  if (keys.length === 0) return new Set();
+  const rows = await withRlsContext({ employeeId: actor.id, role: actor.role }, (tx) =>
+    tx.dashboardDismissal.findMany({
+      where: { employeeId: actor.id, key: { in: keys } },
+      select: { key: true },
+    })
+  );
+  return new Set(rows.map((r) => r.key));
+}
