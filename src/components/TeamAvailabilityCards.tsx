@@ -5,7 +5,7 @@ import AvailabilityStatusPill from "@/components/AvailabilityStatusPill";
 import ShiftStatusPill from "@/components/ShiftStatusPill";
 import DateTasksPanel from "@/components/DateTasksPanel";
 import SwipeReveal from "@/components/SwipeReveal";
-import { ChecklistIcon, CheckCircleIcon, CalendarIcon } from "@/components/icons";
+import { ChecklistIcon, CheckCircleIcon, CalendarIcon, TrashIcon } from "@/components/icons";
 import { slotChips } from "@/lib/availability-format";
 import { toneForStatus, YOU_TONE } from "@/lib/status-tone";
 import type { AdminAvailabilityDTO, AdminShiftDTO, AvailabilitySlot } from "@/types";
@@ -40,6 +40,13 @@ function initialsOf(name: string): string {
  * `viewerId` is the signed-in admin/supervisor viewing this list — passed down to DateTasksPanel
  * so its own task rows know which side of a comment they're rendering. Not used for any access
  * decision here; the API routes each card talks to re-check authorization themselves.
+ *
+ * Correction brief #10 (Sept 2026): every card here — Pending or Decided — now also swipes to
+ * reveal an administrative "Remove" action, distinct from Deny (see removeSubmission below and
+ * removeAvailabilitySubmission's own comment in src/lib/availability.ts for exactly how). A
+ * Decided card's swipe therefore reveals two actions side by side: "Clear" (Correction brief #9's
+ * local dismiss, unchanged) and "Remove" (this round's real, permanent removal) — SwipeReveal's
+ * new secondaryAction prop makes that one swipe instead of two different gestures.
  */
 export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }) {
   const [pending, setPending] = useState<AdminAvailabilityDTO[]>([]);
@@ -66,6 +73,19 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
   // Only ever applies to Decided cards: a Pending one still needs an actual Approve/Deny, not a
   // way to make it disappear unactioned.
 
+  // Correction brief #10 (Sept 2026): which card (if any) has its "Remove this availability
+  // request?" confirmation open — tapping the swipe-revealed Remove button on either a Pending
+  // or Decided card sets this rather than removing immediately, same two-step shape Deny already
+  // uses (denyingId opens a confirm block; the actual decide only fires from a second, explicit
+  // tap) — see this component's own doc comment above for why "swipe, then a second tap, then a
+  // typed confirmation" is deliberate here, not accidental extra friction.
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  // Mirrors LoggedHoursSection.tsx's deleteError/deleteErrorEntryId pair — an error shown inline
+  // on the one card it belongs to, not a page-wide banner, and cleared the moment a new attempt
+  // (on any card) starts.
+  const [removeError, setRemoveError] = useState<string | undefined>();
+  const [removeErrorId, setRemoveErrorId] = useState<string | null>(null);
+
   async function load() {
     setLoadState("loading");
     try {
@@ -89,6 +109,39 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
     } catch {
       // ignored — see comment above
     }
+  }
+
+  // Correction brief #10 (Sept 2026): the actual removal, only ever called from the "Remove
+  // request" button inside the confirmation block below — never from the swipe action itself.
+  // Unlike dismissDecided's fire-and-forget, this is a real, permanent change the admin is
+  // waiting on, so it's awaited properly and surfaces a real error inline (via removeError/
+  // removeErrorId) rather than swallowing a failure silently.
+  async function removeSubmission(submissionId: string) {
+    setBusyId(submissionId);
+    setRemoveError(undefined);
+    setRemoveErrorId(null);
+    try {
+      const res = await fetch(`/api/availability/${submissionId}/remove`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setRemoveError(data.error ?? "Unable to remove this request. Please try again.");
+        setRemoveErrorId(submissionId);
+        return;
+      }
+      setRemovingId(null);
+      load();
+    } catch {
+      setRemoveError("Unable to reach the server. Check your connection and try again.");
+      setRemoveErrorId(submissionId);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  function cancelRemove() {
+    setRemovingId(null);
+    setRemoveError(undefined);
+    setRemoveErrorId(null);
   }
 
   // Best-effort — a chip missing its "already scheduled" badge isn't worth failing the card
@@ -203,26 +256,38 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
         ) : (
           <div className="space-y-3">
             {pending.map((r) => (
-              <Card
+              <SwipeReveal
                 key={r.id}
-                row={r}
-                viewerId={viewerId}
-                busy={busyId === r.id}
-                denying={denyingId === r.id}
-                denyComment={denyComment}
-                openDate={openDate?.submissionId === r.id ? openDate.date : null}
-                shiftsByDate={shiftsByDate}
-                convertingDate={convertingDate}
-                onToggleDate={(date) =>
-                  setOpenDate(openDate?.submissionId === r.id && openDate.date === date ? null : { submissionId: r.id, date })
-                }
-                onDenyToggle={() => setDenyingId(denyingId === r.id ? null : r.id)}
-                onDenyCommentChange={setDenyComment}
-                onDecide={decide}
-                onUndo={undo}
-                onConvertToShift={convertToShift}
-                onRequestAdjustment={requestAdjustment}
-              />
+                actionSide="right"
+                actionLabel="Remove"
+                actionIcon={<TrashIcon className="h-4 w-4" />}
+                actionClassName="bg-rose-600 text-white rounded-3xl"
+                onAction={() => setRemovingId(r.id)}
+              >
+                <Card
+                  row={r}
+                  viewerId={viewerId}
+                  busy={busyId === r.id}
+                  denying={denyingId === r.id}
+                  denyComment={denyComment}
+                  removing={removingId === r.id}
+                  removeError={removeErrorId === r.id ? removeError : undefined}
+                  openDate={openDate?.submissionId === r.id ? openDate.date : null}
+                  shiftsByDate={shiftsByDate}
+                  convertingDate={convertingDate}
+                  onToggleDate={(date) =>
+                    setOpenDate(openDate?.submissionId === r.id && openDate.date === date ? null : { submissionId: r.id, date })
+                  }
+                  onDenyToggle={() => setDenyingId(denyingId === r.id ? null : r.id)}
+                  onDenyCommentChange={setDenyComment}
+                  onDecide={decide}
+                  onUndo={undo}
+                  onConvertToShift={convertToShift}
+                  onRequestAdjustment={requestAdjustment}
+                  onRemoveConfirm={removeSubmission}
+                  onRemoveCancel={cancelRemove}
+                />
+              </SwipeReveal>
             ))}
           </div>
         )}
@@ -249,6 +314,12 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                   setDecided((prev) => prev.filter((x) => x.id !== r.id));
                   dismissDecided(r.id);
                 }}
+                secondaryAction={{
+                  label: "Remove",
+                  icon: <TrashIcon className="h-4 w-4" />,
+                  className: "bg-rose-600 text-white rounded-3xl",
+                  onAction: () => setRemovingId(r.id),
+                }}
               >
                 <Card
                   row={r}
@@ -256,6 +327,8 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                   busy={busyId === r.id}
                   denying={false}
                   denyComment=""
+                  removing={removingId === r.id}
+                  removeError={removeErrorId === r.id ? removeError : undefined}
                   openDate={openDate?.submissionId === r.id ? openDate.date : null}
                   shiftsByDate={shiftsByDate}
                   convertingDate={convertingDate}
@@ -268,6 +341,8 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                   onUndo={undo}
                   onConvertToShift={convertToShift}
                   onRequestAdjustment={() => {}}
+                  onRemoveConfirm={removeSubmission}
+                  onRemoveCancel={cancelRemove}
                 />
               </SwipeReveal>
             ))}
@@ -284,6 +359,8 @@ function Card({
   busy,
   denying,
   denyComment,
+  removing,
+  removeError,
   openDate,
   shiftsByDate,
   convertingDate,
@@ -294,12 +371,16 @@ function Card({
   onUndo,
   onConvertToShift,
   onRequestAdjustment,
+  onRemoveConfirm,
+  onRemoveCancel,
 }: {
   row: AdminAvailabilityDTO;
   viewerId: string;
   busy: boolean;
   denying: boolean;
   denyComment: string;
+  removing: boolean;
+  removeError?: string;
   openDate: string | null;
   shiftsByDate: Map<string, AdminShiftDTO>;
   convertingDate: string | null;
@@ -310,6 +391,8 @@ function Card({
   onUndo: (submissionId: string) => void;
   onConvertToShift: (submissionId: string, date: string) => void;
   onRequestAdjustment: (submissionId: string, adjustedSlots: AvailabilitySlot[], comment?: string) => void;
+  onRemoveConfirm: (submissionId: string) => void;
+  onRemoveCancel: () => void;
 }) {
   const chips = slotChips(r.slots);
   // Phase 2 (client spec, Sept 2026): local-only state for the "Adjust the proposed time"
@@ -329,6 +412,13 @@ function Card({
   const tone = isSelf ? YOU_TONE : toneForStatus(r.status);
   const isPending = r.status === "PENDING";
   const openChip = chips.find((c) => c.date === openDate);
+  // Correction brief #10 (Sept 2026): "if an already-approved availability request has
+  // generated or affected an actual schedule, handle the schedule relationship explicitly" —
+  // this doesn't change whether Remove is allowed (removeAvailabilitySubmission never touches
+  // the Shift table either way), just whether the confirmation below says so, so the admin isn't
+  // surprised later. shiftsByDate is the same admin-wide map the "Scheduled as a shift" section
+  // further down already uses, keyed "submissionId:date".
+  const hasLinkedShift = chips.some((c) => shiftsByDate.has(`${r.id}:${c.date}`));
 
   return (
     <div
@@ -501,6 +591,44 @@ function Card({
           >
             Send to team member
           </button>
+        </div>
+      )}
+
+      {/* Correction brief #10 (Sept 2026): the confirmation the brief explicitly asks for —
+          "Use a confirmation before destructive removal, such as: 'Remove this availability
+          request?'" — opened by the swipe-revealed Remove button above, not by the swipe itself,
+          so a swipe alone never removes anything. Distinct from Deny: this never notifies the
+          team member and never records a decision on the request's merits, only that HR cleaned
+          it up (see removeAvailabilitySubmission's own comment for the full reasoning). */}
+      {removing && (
+        <div className="mt-3.5 flex flex-col gap-2.5 bg-white/15 rounded-xl p-3">
+          <p className="text-sm font-semibold text-white">Remove this availability request?</p>
+          <p className="text-xs text-white/80">
+            This is administrative cleanup, not a decision — it won&rsquo;t notify{" "}
+            {isSelf ? "you" : r.employeeName}, and HR keeps an internal record even after it&rsquo;s
+            removed.
+            {hasLinkedShift &&
+              " A shift already scheduled from this request stays exactly as it is — removing the request will not cancel or change it."}
+          </p>
+          {removeError && <p className="text-xs font-medium text-rose-50">{removeError}</p>}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onRemoveCancel}
+              disabled={busy}
+              className="rounded-full bg-white/15 border border-white/35 px-4 py-2 text-sm font-semibold text-white hover:bg-white/25 disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => onRemoveConfirm(r.id)}
+              disabled={busy}
+              className="rounded-full bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-rose-700 disabled:opacity-60"
+            >
+              {busy ? "Removing…" : "Remove request"}
+            </button>
+          </div>
         </div>
       )}
 
