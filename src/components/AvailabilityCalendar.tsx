@@ -40,7 +40,10 @@ const DEFAULT_END = "17:00";
 // availability submission replaces the plain day cell entirely, the same way a PTO request
 // replaces the hours readout on My Time's calendar. CANCELLED is included only to keep this a
 // complete Record<AvailabilityDTO["status"], ...> — submissionsByDate below skips Cancelled
-// submissions entirely, so this entry is never actually looked up.
+// submissions entirely, so this entry is never actually looked up. REMOVED (Correction brief #10,
+// Sept 2026) is the same story one level up: listMyAvailability itself never returns a REMOVED
+// row to this component in the first place, so that entry is unreachable too — see
+// AvailabilityStatusPill.tsx's own REMOVED entry for the identical reasoning.
 // ADJUSTMENT_REQUESTED (Phase 2, client spec, Sept 2026): same amber "needs a decision" tone as
 // Pending — see AvailabilityStatusPill's own STYLE map, which this mirrors.
 const STATUS_CHIP: Record<AvailabilityDTO["status"], string> = {
@@ -49,6 +52,7 @@ const STATUS_CHIP: Record<AvailabilityDTO["status"], string> = {
   DENIED: "bg-rose-100 text-rose-800",
   CANCELLED: "bg-black/5 text-muted",
   ADJUSTMENT_REQUESTED: "bg-amber-100 text-amber-800",
+  REMOVED: "bg-black/5 text-muted",
 };
 
 /** Every calendar date covered by any of this person's submissions, newest-first so an
