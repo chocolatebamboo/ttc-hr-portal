@@ -470,6 +470,19 @@ create policy ack_insert on "DocumentAcknowledgment" for insert with check (
 );
 
 
+alter table "DocumentFolder" enable row level security;
+alter table "DocumentFolder" force row level security;
+
+-- Correction brief #4 (Sept 2026): folders are a pure organizing device for the same admin/HR
+-- audience that already manages the Document library (document_write above is is_admin()-only)
+-- — a regular employee's own "documents shared with me" view never touches this table at all.
+drop policy if exists document_folder_select on "DocumentFolder";
+create policy document_folder_select on "DocumentFolder" for select using (is_admin());
+
+drop policy if exists document_folder_write on "DocumentFolder";
+create policy document_folder_write on "DocumentFolder" for all using (is_admin()) with check (is_admin());
+
+
 alter table "EmployeeOnboarding" enable row level security;
 alter table "EmployeeOnboarding" force row level security;
 
