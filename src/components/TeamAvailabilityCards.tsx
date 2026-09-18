@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import AvailabilityStatusPill from "@/components/AvailabilityStatusPill";
 import ShiftStatusPill from "@/components/ShiftStatusPill";
 import DateTasksPanel from "@/components/DateTasksPanel";
 import SwipeReveal from "@/components/SwipeReveal";
-import { ChecklistIcon, CheckCircleIcon, CalendarIcon, TrashIcon } from "@/components/icons";
+import { ChecklistIcon, CheckCircleIcon, CalendarIcon, TrashIcon, ChatIcon } from "@/components/icons";
 import { slotChips } from "@/lib/availability-format";
 import { toneForStatus, YOU_TONE } from "@/lib/status-tone";
 import type { AdminAvailabilityDTO, AdminShiftDTO, AvailabilitySlot } from "@/types";
@@ -47,8 +48,20 @@ function initialsOf(name: string): string {
  * Decided card's swipe therefore reveals two actions side by side: "Clear" (Correction brief #9's
  * local dismiss, unchanged) and "Remove" (this round's real, permanent removal) — SwipeReveal's
  * new secondaryAction prop makes that one swipe instead of two different gestures.
+ *
+ * Correction brief #11 (Sept 2026): "The chat bubble on an availability request should take the
+ * user into My Messages... open the relevant conversation/thread for that specific team member/
+ * request rather than only opening the generic Messages landing page." This is a direct message,
+ * not a revival of the old AVAILABILITY_DATE topic thread Correction brief #2 already removed
+ * from this card — per-request communication now lives on each task's own comment thread
+ * (DateTaskRow), so "message this team member about their availability" means the same
+ * peer-to-peer DM every other person-to-person conversation in this app uses
+ * (src/lib/direct-messages.ts). One bubble per card, not per date, since a DM isn't scoped to a
+ * single date the way a task is. See openChat below and MessagesInboxView's own doc comment for
+ * the other half of this (reading `dm`/`name` off the URL on mount).
  */
 export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }) {
+  const router = useRouter();
   const [pending, setPending] = useState<AdminAvailabilityDTO[]>([]);
   const [decided, setDecided] = useState<AdminAvailabilityDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
@@ -85,6 +98,11 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
   // (on any card) starts.
   const [removeError, setRemoveError] = useState<string | undefined>();
   const [removeErrorId, setRemoveErrorId] = useState<string | null>(null);
+  // Correction brief #11 (Sept 2026): DM total/unread per team member, keyed by employeeId — the
+  // chat bubble's own badge, same /api/messages/conversations the unified My Messages inbox uses
+  // for its own DM rows. Best-effort like shiftsByDate below: a missing badge isn't worth failing
+  // the card list over.
+  const [dmCounts, setDmCounts] = useState<Map<string, { total: number; unread: number }>>(new Map());
 
   async function load() {
     setLoadState("loading");
@@ -163,11 +181,35 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
     }
   }
 
+  // Best-effort — same reasoning as loadShifts above, a missing DM badge isn't worth failing the
+  // card list over.
+  async function loadDmCounts() {
+    try {
+      const res = await fetch("/api/messages/conversations");
+      if (!res.ok) return;
+      const data: { conversations: { employeeId: string; total: number; unread: number }[] } = await res.json();
+      const map = new Map<string, { total: number; unread: number }>();
+      for (const c of data.conversations) map.set(c.employeeId, { total: c.total, unread: c.unread });
+      setDmCounts(map);
+    } catch {
+      // ignored — see comment above
+    }
+  }
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
     loadShifts();
+    loadDmCounts();
   }, []);
+
+  // Correction brief #11 (Sept 2026): navigates to the unified My Messages inbox with this team
+  // member's DM conversation pre-opened. `employeeName` only seeds the row's label for a
+  // conversation that doesn't exist yet — once real messages exist, the fetched
+  // DirectConversationSummaryDTO's own employeeName takes over, same as NewMessagePicker's flow.
+  function openChat(employeeId: string, employeeName: string) {
+    router.push(`/messages?dm=${employeeId}&name=${encodeURIComponent(employeeName)}`);
+  }
 
   async function convertToShift(submissionId: string, date: string) {
     setConvertingDate(`${submissionId}:${date}`);
@@ -275,6 +317,7 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                   openDate={openDate?.submissionId === r.id ? openDate.date : null}
                   shiftsByDate={shiftsByDate}
                   convertingDate={convertingDate}
+                  dmCounts={dmCounts}
                   onToggleDate={(date) =>
                     setOpenDate(openDate?.submissionId === r.id && openDate.date === date ? null : { submissionId: r.id, date })
                   }
@@ -286,6 +329,7 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                   onRequestAdjustment={requestAdjustment}
                   onRemoveConfirm={removeSubmission}
                   onRemoveCancel={cancelRemove}
+                  onOpenChat={openChat}
                 />
               </SwipeReveal>
             ))}
@@ -332,6 +376,7 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                   openDate={openDate?.submissionId === r.id ? openDate.date : null}
                   shiftsByDate={shiftsByDate}
                   convertingDate={convertingDate}
+                  dmCounts={dmCounts}
                   onToggleDate={(date) =>
                     setOpenDate(openDate?.submissionId === r.id && openDate.date === date ? null : { submissionId: r.id, date })
                   }
@@ -343,6 +388,7 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                   onRequestAdjustment={() => {}}
                   onRemoveConfirm={removeSubmission}
                   onRemoveCancel={cancelRemove}
+                  onOpenChat={openChat}
                 />
               </SwipeReveal>
             ))}
@@ -364,6 +410,7 @@ function Card({
   openDate,
   shiftsByDate,
   convertingDate,
+  dmCounts,
   onToggleDate,
   onDenyToggle,
   onDenyCommentChange,
@@ -373,6 +420,7 @@ function Card({
   onRequestAdjustment,
   onRemoveConfirm,
   onRemoveCancel,
+  onOpenChat,
 }: {
   row: AdminAvailabilityDTO;
   viewerId: string;
@@ -384,6 +432,7 @@ function Card({
   openDate: string | null;
   shiftsByDate: Map<string, AdminShiftDTO>;
   convertingDate: string | null;
+  dmCounts: Map<string, { total: number; unread: number }>;
   onToggleDate: (date: string) => void;
   onDenyToggle: () => void;
   onDenyCommentChange: (v: string) => void;
@@ -393,6 +442,7 @@ function Card({
   onRequestAdjustment: (submissionId: string, adjustedSlots: AvailabilitySlot[], comment?: string) => void;
   onRemoveConfirm: (submissionId: string) => void;
   onRemoveCancel: () => void;
+  onOpenChat: (employeeId: string, employeeName: string) => void;
 }) {
   const chips = slotChips(r.slots);
   // Phase 2 (client spec, Sept 2026): local-only state for the "Adjust the proposed time"
@@ -419,6 +469,9 @@ function Card({
   // surprised later. shiftsByDate is the same admin-wide map the "Scheduled as a shift" section
   // further down already uses, keyed "submissionId:date".
   const hasLinkedShift = chips.some((c) => shiftsByDate.has(`${r.id}:${c.date}`));
+  // Correction brief #11 (Sept 2026): the chat bubble's own unread badge — see this component's
+  // top-level doc comment for why this is a DM count, not a topic-thread count.
+  const dmCount = dmCounts.get(r.employeeId);
 
   return (
     <div
@@ -453,9 +506,33 @@ function Card({
             </div>
           </div>
         </div>
-        <span className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center shrink-0" title="Tap a date below to see its tasks">
-          <ChecklistIcon className="h-4 w-4 text-white" />
-        </span>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Correction brief #11 (Sept 2026): "The chat bubble on an availability request
+              should take the user into My Messages... open the relevant conversation/thread for
+              that specific team member." Not shown on the viewer's own card — messaging yourself
+              isn't a real conversation. */}
+          {!isSelf && (
+            <button
+              type="button"
+              onClick={() => onOpenChat(r.employeeId, r.employeeName)}
+              className="relative h-8 w-8 rounded-full bg-white/20 flex items-center justify-center hover:bg-white/30 transition-colors"
+              title={`Message ${r.employeeName}`}
+            >
+              <ChatIcon className="h-4 w-4 text-white" />
+              {!!dmCount?.unread && (
+                <span
+                  className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full text-white text-[9px] font-bold flex items-center justify-center"
+                  style={{ background: "#8b5cf6" }}
+                >
+                  {dmCount.unread > 9 ? "9+" : dmCount.unread}
+                </span>
+              )}
+            </button>
+          )}
+          <span className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center" title="Tap a date below to see its tasks">
+            <ChecklistIcon className="h-4 w-4 text-white" />
+          </span>
+        </div>
       </div>
 
       {chips.length > 0 ? (
