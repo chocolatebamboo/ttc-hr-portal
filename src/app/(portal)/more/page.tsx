@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentEmployee } from "@/lib/auth";
 import { getOnboardingAttention } from "@/lib/onboarding";
-import { navForRole } from "@/lib/nav";
+import { navForRole, bottomNavForRole } from "@/lib/nav";
 import { ChevronRightIcon } from "@/components/icons";
 
 export default async function MorePage() {
@@ -10,10 +10,14 @@ export default async function MorePage() {
   if (!employee) redirect("/login");
 
   const { primary, extra } = navForRole(employee.role);
-  // Home/My Time/Availability already live in the bottom bar (CB, Sept 2026: swapped in for
-  // Documents, which now surfaces here instead) — this screen is everything past those, plus
-  // the admin section for roles that have one.
-  const rest = primary.filter((i) => !["/dashboard", "/time", "/availability"].includes(i.href));
+  // Whatever's already in this role's bottom bar (Home/Availability plus either My Messages or
+  // Reports — see bottomNavForRole) doesn't need to be repeated here too. Role-aware rather than
+  // a fixed list (correction brief #7, Sept 2026): a regular team member's bottom bar already
+  // has My Messages, so it drops out of this list for them, but an admin's bottom bar has
+  // Reports instead — "Administrative users can still reach Messages through the... More
+  // area" — so My Messages stays in THIS list for admins.
+  const bottomHrefs = bottomNavForRole(employee.role).map((i) => i.href);
+  const rest = primary.filter((i) => !bottomHrefs.includes(i.href));
 
   // Same live attention flag BottomNav puts a dot on "More" for — repeated here on the actual
   // Onboarding row, since this is the screen that dot is pointing at.
