@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import AvailabilityCalendar from "@/components/AvailabilityCalendar";
+import LoggedHoursSection from "@/components/LoggedHoursSection";
 import MyAvailabilityPreview from "@/components/MyAvailabilityPreview";
 import TimeOffRequests from "@/components/TimeOffRequests";
 import { ChevronDownIcon } from "@/components/icons";
@@ -17,9 +18,15 @@ type LoadState = "loading" | "ready" | "error";
  * a single pattern that gets overwritten, so there's a real history of what was actually
  * offered and approved over time.
  *
- * Deliberately its own page rather than folded into My Time: that page already covers actual
- * worked hours and time-off requests, and this is conceptually the same *kind* of thing (dates
- * on a calendar, submit, get approved) but a different subject entirely.
+ * Correction brief #6 (Sept 2026), "Consolidate Availability and My Time": My Time didn't need
+ * its own primary destination, so its useful functionality (the "Logged hours" summary; Time
+ * Off was already shared between the two pages) moved here instead. This page is now the one
+ * central time/scheduling hub, organized into four accordion sections in the brief's own
+ * suggested order — Choose Your Availability, Your Submissions, Logged Hours, Time Off — so the
+ * calendar doesn't have to dominate the page the moment it loads. /time itself is now just a
+ * redirect to this page (see that route's own comment) so old bookmarks/links/the pink
+ * Availability shortcut and the bottom-nav Availability tab all land on this exact same unified
+ * experience — never two separate implementations of "Availability."
  */
 export default function AvailabilityView({ employeeId }: { employeeId: string }) {
   const [submissions, setSubmissions] = useState<AvailabilityDTO[]>([]);
@@ -48,17 +55,23 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
   const [submittingTimeOff, setSubmittingTimeOff] = useState(false);
   const [timeOffError, setTimeOffError] = useState<string | undefined>();
   // Bumped (to a fresh value, same "nonce" idea as a cache-buster) every time a time-off request
-  // is submitted from the calendar popup, so the Time Off list above can refetch and pick up the
+  // is submitted from the calendar popup, so the Time Off list below can refetch and pick up the
   // new request — that list otherwise only loads once on its own mount, and has no other way to
   // know a request was just created somewhere else on this page.
   const [ptoRefreshSignal, setPtoRefreshSignal] = useState<number | null>(null);
-  // CB, Sept 2026, after the page's scroll bug was fixed and she could finally see how much
-  // room these two sections were taking: "I feel like they could be kind of like a drop down or
-  // like a preview" — both start collapsed so the calendar gets the bulk of the page's height
-  // by default, same reasoning as everything else on this page that stays out of the calendar's
-  // way (see the md:shrink-0/md:max-h wrappers below, now only relevant once expanded).
+  // Brief #6: "Do not force the full calendar to dominate the page immediately... should work
+  // well as an expandable section." Same collapsed-by-default reasoning CB already gave for the
+  // two sections below (see their own comments) now applies to the calendar itself too — it's
+  // the first of the four accordions, but starts closed like the rest.
+  const [availabilityOpen, setAvailabilityOpen] = useState(false);
+  // CB, Sept 2026: "I feel like they could be kind of like a drop down or like a preview" — both
+  // start collapsed so no single section eats the whole page by default, same reasoning as
+  // availabilityOpen/timeOffOpen.
   const [submissionsOpen, setSubmissionsOpen] = useState(false);
   const [timeOffOpen, setTimeOffOpen] = useState(false);
+  // Brief #6's fourth section — the "Logged hours" summary that used to be My Time's whole page
+  // (see LoggedHoursSection). Same collapsed-by-default treatment as its three siblings here.
+  const [loggedHoursOpen, setLoggedHoursOpen] = useState(false);
 
   // CB, Sept 2026: "it needs to live within that pop up" — same POST /api/pto/requests the
   // shared TimeOffRequests widget's own form uses, just called directly from here since this
@@ -188,17 +201,79 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
 
   return (
     // md:h-full md:flex md:flex-col md:min-h-0 (CB, Sept 2026, restructuring this page's
-    // layout): gives AvailabilityCalendar's own row a real, bounded height to stretch into —
-    // exactly `main`'s own available height under the portal shell's fixed header — instead
-    // of the calendar sizing itself to its content and letting `main` scroll the whole page
-    // as one piece. Mobile is untouched (no md: prefix means none of this applies below the
-    // breakpoint): the page still scrolls normally there, same as before.
+    // layout): gives whichever section is currently the "expanded" one a real, bounded height
+    // to stretch into — exactly `main`'s own available height under the portal shell's fixed
+    // header — instead of the page sizing itself to its content and letting `main` scroll the
+    // whole page as one piece. Mobile is untouched (no md: prefix means none of this applies
+    // below the breakpoint): the page still scrolls normally there, same as before.
     <div className="md:h-full md:flex md:flex-col md:min-h-0">
       <h1 className="page-title text-2xl mb-1 md:shrink-0">Availability</h1>
       <p className="text-sm text-muted mb-4 md:shrink-0">
         Tap the dates you&apos;re available, set a time for each, and submit them for your
         supervisor or HR to approve — so they don&apos;t have to ask you individually.
       </p>
+
+      {/* Brief #6, "Choose Your Availability": collapsed by default with a short description
+          ("Do not force the full calendar to dominate the page immediately... Provide a short
+          description explaining that the user can select available dates/times and plan
+          availability ahead"). Only this section (and only while open) claims the page's
+          remaining height on desktop — md:flex-1 md:min-h-0 replaces the md:shrink-0 every other
+          section here keeps, exactly the role AvailabilityCalendar's own wrapper played before
+          this brief made the calendar collapsible. Collapsed, it's just the toggle row plus the
+          description line, same as every other section. */}
+      <div
+        className={`mb-4 md:min-h-0 md:flex md:flex-col ${availabilityOpen ? "md:flex-1" : "md:shrink-0"}`}
+      >
+        <button
+          type="button"
+          onClick={() => setAvailabilityOpen((v) => !v)}
+          className="w-full flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3 text-left md:shrink-0"
+        >
+          <span className="text-sm font-medium">Choose your availability</span>
+          <ChevronDownIcon
+            className={`h-4 w-4 text-muted shrink-0 transition-transform ${availabilityOpen ? "rotate-180" : ""}`}
+          />
+        </button>
+        {!availabilityOpen && (
+          <p className="mt-2 text-xs text-muted">
+            Select the dates and times you&apos;re available, and plan up to six months ahead.
+          </p>
+        )}
+        {availabilityOpen && (
+          <div className="mt-2 md:flex-1 md:min-h-0 md:flex md:flex-col">
+            {loadState === "loading" && (
+              <div className="h-64 rounded-xl border border-border bg-surface animate-pulse" />
+            )}
+
+            {loadState === "error" && (
+              <div className="rounded-xl border border-border bg-surface p-6 text-sm text-accent">
+                Unable to load your availability. Please try again or contact HR.
+              </div>
+            )}
+
+            {loadState === "ready" && (
+              <AvailabilityCalendar
+                controls={{
+                  employeeId,
+                  submissions,
+                  onSubmit: handleSubmit,
+                  submitting,
+                  error,
+                  onCancel: handleCancel,
+                  cancellingId,
+                  onRemoveDate: handleRemoveDate,
+                  removingDateKey,
+                  onDeleteSubmission: handleDeleteSubmission,
+                  deletingSubmissionId,
+                  onSubmitTimeOff: handleSubmitTimeOff,
+                  submittingTimeOff,
+                  timeOffError,
+                }}
+              />
+            )}
+          </div>
+        )}
+      </div>
 
       {/* CB, Sept 2026: wanted "a preview of the dates and times... selected," "cleanly," next
           to the calendar itself — this was briefly on My Time, then moved here per her follow-up
@@ -207,7 +282,7 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
           was fixed and this was visibly eating into the calendar's own space): the count next to
           the label is what a glance actually needs; the full list is one tap away. Expanded, it
           keeps the same capped height + its own scroll on desktop (md:max-h-56 md:overflow-y-auto)
-          so a long submission history still can't eat into the calendar row's own space below.
+          so a long submission history still can't eat into the calendar section's own space.
           showLink={false}/showHeading={false}: a "submit or edit" link back to this same page
           would be circular, and this toggle button is already this section's heading. */}
       {loadState === "ready" && submissions.length > 0 && (
@@ -232,18 +307,37 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
         </div>
       )}
 
+      {/* Brief #6's third section — the "Logged hours" summary folded in from My Time (see
+          LoggedHoursSection's own doc comment). Same collapsed-by-default toggle treatment and
+          capped expanded height as its siblings here, so it can't eat into the calendar
+          section's own space either. showHeading={false}: same "the toggle button is already
+          this section's heading" reasoning as the rest of this page. */}
+      <div className="mb-4 md:shrink-0">
+        <button
+          type="button"
+          onClick={() => setLoggedHoursOpen((v) => !v)}
+          className="w-full flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3 text-left"
+        >
+          <span className="text-sm font-medium">Logged hours</span>
+          <ChevronDownIcon
+            className={`h-4 w-4 text-muted shrink-0 transition-transform ${loggedHoursOpen ? "rotate-180" : ""}`}
+          />
+        </button>
+        {loggedHoursOpen && (
+          <div className="mt-2 md:max-h-80 md:overflow-y-auto">
+            <LoggedHoursSection showHeading={false} />
+          </div>
+        )}
+      </div>
+
       {/* CB, Sept 2026: "I don't see [time off] on the availability calendar to make those
-          adjustments... it needs to be multifunctional" — same Time Off widget My Time renders.
-          Deliberately placed ABOVE the calendar, not below it: the calendar can span up to 6
-          months of dates to scroll through, and on mobile its own date-picker panel is a fixed,
-          always-on-top overlay while a date is selected — CB kept not finding this section when
-          it lived below all of that ("I'm still not seeing it"). Collapsed by default behind its
-          own toggle, same reasoning and same timing as the submissions preview above; expanded,
-          it keeps the same capped height + its own scroll on desktop (md:max-h-80
-          md:overflow-y-auto) so it still can't eat into the calendar row's own space.
-          showHeading={false}: same "the toggle button is already the heading" reasoning as
-          above — the "Request time off" button inside stays either way, since that's a real
-          control rather than a label. */}
+          adjustments... it needs to be multifunctional" — same Time Off widget My Time used to
+          render. Collapsed by default behind its own toggle, same reasoning and same timing as
+          the sections above; expanded, it keeps the same capped height + its own scroll on
+          desktop (md:max-h-80 md:overflow-y-auto) so it still can't eat into the calendar
+          section's own space. showHeading={false}: same "the toggle button is already the
+          heading" reasoning as above — the "Request time off" button inside stays either way,
+          since that's a real control rather than a label. */}
       <div className="mb-4 md:shrink-0">
         <button
           type="button"
@@ -261,35 +355,6 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
           </div>
         )}
       </div>
-
-      {loadState === "loading" && <div className="h-64 rounded-xl border border-border bg-surface animate-pulse" />}
-
-      {loadState === "error" && (
-        <div className="rounded-xl border border-border bg-surface p-6 text-sm text-accent">
-          Unable to load your availability. Please try again or contact HR.
-        </div>
-      )}
-
-      {loadState === "ready" && (
-        <AvailabilityCalendar
-          controls={{
-            employeeId,
-            submissions,
-            onSubmit: handleSubmit,
-            submitting,
-            error,
-            onCancel: handleCancel,
-            cancellingId,
-            onRemoveDate: handleRemoveDate,
-            removingDateKey,
-            onDeleteSubmission: handleDeleteSubmission,
-            deletingSubmissionId,
-            onSubmitTimeOff: handleSubmitTimeOff,
-            submittingTimeOff,
-            timeOffError,
-          }}
-        />
-      )}
     </div>
   );
 }
