@@ -2,26 +2,20 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { HomeIcon, ClockIcon, CalendarIcon, MoreIcon } from "@/components/icons";
-
-// CB, Sept 2026: "I wanna replace [Documents] with the availability tab instead for easy
-// access... the documents could be in the more section" — Documents drops out of the fixed
-// bar (still reachable one tap away on /more, see that page's own filter) and Availability
-// takes its slot instead.
-//
-// Round four, CB: "I want the availability to go before the my time, to be honest. I think
-// that's gonna be main priority" — Availability moved ahead of My Time in the order below.
-const ITEMS = [
-  { label: "Home", href: "/dashboard", Icon: HomeIcon },
-  { label: "Availability", href: "/availability", Icon: CalendarIcon },
-  { label: "My Time", href: "/time", Icon: ClockIcon },
-  { label: "More", href: "/more", Icon: MoreIcon },
-];
+import { bottomNavForRole } from "@/lib/nav";
+import type { Role } from "@/types";
 
 /**
- * Mobile-only bottom tab bar — capped at five fixed, thumb-sized targets so nothing
- * requires horizontal scrolling to reach. "More" opens a plain list of everything else
- * (role-aware) rather than a nested menu, keeping every screen a single tap deep.
+ * Mobile-only bottom tab bar — capped at four fixed, thumb-sized targets so nothing requires
+ * horizontal scrolling to reach. "More" opens a plain list of everything else (role-aware)
+ * rather than a nested menu, keeping every screen a single tap deep.
+ *
+ * Correction brief #7 (Sept 2026), "Mobile navigation by permission level": the four items are
+ * now role-aware (see bottomNavForRole in src/lib/nav.ts) instead of one fixed list for
+ * everyone — regular team members get Home / Availability / My Messages / More, while
+ * SUPER_ADMIN/HR_ADMIN get Reports in that third slot instead. "My Time" dropped out of this
+ * bar entirely as part of the same brief's #6 (its functionality moved into Availability —
+ * /time now just redirects there).
  *
  * `needsOnboardingAttention` puts a small dot on "More" (not a dedicated Onboarding tab,
  * since Onboarding itself lives one tap deeper on the More screen — see more/page.tsx, which
@@ -35,15 +29,22 @@ const ITEMS = [
  * 2026 removal note), so this leans on shape and color rather than blur for the "premium"
  * feel, and labels stay for anyone less familiar with icon-only nav.
  */
-export default function BottomNav({ needsOnboardingAttention = false }: { needsOnboardingAttention?: boolean }) {
+export default function BottomNav({
+  role,
+  needsOnboardingAttention = false,
+}: {
+  role: Role;
+  needsOnboardingAttention?: boolean;
+}) {
   const pathname = usePathname();
+  const items = bottomNavForRole(role);
   return (
     <nav
       className="animate-in md:hidden fixed bottom-0 inset-x-0 z-20 px-3 pt-2 pointer-events-none"
       style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 10px)" }}
     >
       <div className="pointer-events-auto mx-auto max-w-sm flex items-center justify-between gap-1 rounded-full border border-border/70 bg-surface/90 backdrop-blur-md shadow-lg px-2 py-1.5">
-        {ITEMS.map(({ label, href, Icon }) => {
+        {items.map(({ label, href, icon: Icon }) => {
           const active = pathname === href || (href === "/more" && pathname.startsWith("/more"));
           return (
             <Link
