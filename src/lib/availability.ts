@@ -3,6 +3,7 @@ import { isAdmin, ForbiddenError } from "@/lib/authorization";
 import { todayDateKey } from "@/lib/time";
 import { writeAuditLog } from "@/lib/audit-log";
 import { writeNotification } from "@/lib/notifications";
+import { dismiss as dismissKey, listDismissedKeys } from "@/lib/dashboard-dismissals";
 import { Prisma } from "@prisma/client";
 import type { AdminAvailabilityDTO, AvailabilityDTO, AvailabilityStatus, AvailabilitySlot, CurrentEmployee } from "@/types";
 
@@ -408,48 +409,4 @@ export async function respondToAvailabilityAdjustment(
 
 /** Looks up which employee a submission belongs to, without any authorization check of its
  *  own — used by the decide route to resolve the employeeId assertCanReviewAvailability needs
- *  before it can decide whether the caller may act on it at all. Runs under the CALLER's own
- *  RLS identity like everything else here, so a caller with no visibility into this submission
- *  (not its owner, not their supervisor, not admin) gets null back exactly as if it didn't
- *  exist, rather than leaking which employee it belongs to. */
-export async function findAvailabilitySubmissionEmployeeId(actor: CurrentEmployee, submissionId: string): Promise<string | null> {
-  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
-    const row = await tx.availabilitySubmission.findUnique({ where: { id: submissionId }, select: { employeeId: true } });
-    return row?.employeeId ?? null;
-  });
-}
-
-/** HR-wide availability roster (src/app/(portal)/admin/availability) — admin-only, like
- *  listAdminPto: no new RLS policy needed since is_admin() already grants availability_select
- *  full org-wide read access (prisma/rls.sql). Split into a Pending queue HR needs to act on
- *  and everything already Decided, same shape listAdminPto uses for pending/decided. Decided
- *  is capped to the most recent 200 so this stays one page rather than growing forever. */
-export async function listAdminAvailability(
-  actor: CurrentEmployee
-): Promise<{ pending: AdminAvailabilityDTO[]; decided: AdminAvailabilityDTO[] }> {
-  if (!isAdmin(actor)) throw new ForbiddenError();
-
-  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
-    const [pending, decided] = await Promise.all([
-      tx.availabilitySubmission.findMany({
-        where: { status: "PENDING" },
-        include: { employee: { select: { firstName: true, lastName: true, preferredName: true } } },
-        orderBy: { submittedAt: "asc" },
-      }),
-      tx.availabilitySubmission.findMany({
-        where: { status: { not: "PENDING" } },
-        include: { employee: { select: { firstName: true, lastName: true, preferredName: true } } },
-        orderBy: { reviewedAt: "desc" },
-        take: 200,
-      }),
-    ]);
-
-    const toAdminDTO = (r: (typeof pending)[number]): AdminAvailabilityDTO => ({
-      ...toDTO(r),
-      employeeId: r.employeeId,
-      employeeName: `${r.employee.preferredName || r.employee.firstName} ${r.employee.lastName}`,
-    });
-
-    return { pending: pending.map(toAdminDTO), decided: decided.map(toAdminDTO) };
-  });
-}
+ *  before it can decide whether the caller may act on it at all.
