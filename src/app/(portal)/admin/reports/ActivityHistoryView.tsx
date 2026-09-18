@@ -31,6 +31,7 @@ const ACTIVITY_ACTION_LABELS: Record<string, string> = {
   AVAILABILITY_ADJUSTMENT_PROPOSED: "Availability adjustment proposed",
   AVAILABILITY_ADJUSTMENT_ACCEPTED: "Availability adjustment accepted",
   AVAILABILITY_ADJUSTMENT_DECLINED: "Availability adjustment declined",
+  AVAILABILITY_REMOVED: "Availability request removed",
   PTO_APPROVED: "PTO approved",
   PTO_DENIED: "PTO denied",
   DATE_TASK_ASSIGNED: "Task assigned",
