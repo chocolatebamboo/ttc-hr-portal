@@ -325,6 +325,17 @@ enum AvailabilityStatus {
   // employee accepts (→ APPROVED, adjustedSlots become the real slots) or declines (→ DENIED)
   // the supervisor's counter-proposal.
   ADJUSTMENT_REQUESTED
+  // Correction brief #10 (Sept 2026): "administrative cleanup/removal of a request, such as an
+  // obsolete or duplicate record" — deliberately distinct from CANCELLED (the EMPLOYEE withdrawing
+  // their own request) and from DENIED (a real reviewer decision on the merits). Set only by
+  // removeAvailabilitySubmission (src/lib/availability.ts), never by the employee. Never a hard
+  // delete — "prefer retaining an internal audit record rather than destroying important
+  // scheduling/HR history" — so the row and its AuditLog trail survive; every normal list
+  // (listMyAvailability/listAvailabilityForEmployee/listAdminAvailability) filters it out, same as
+  // the brief's "remove it from the normal active/decided interface" asks. Applied directly via
+  // mcp__Supabase__apply_migration (migration: add_availability_status_removed) — this app's
+  // Render build never runs prisma migrate deploy, per this repo's established deploy pattern.
+  REMOVED
 }
 
 // A team member's submitted availability for specific calendar dates — modeled after
