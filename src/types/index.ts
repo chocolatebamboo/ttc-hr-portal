@@ -209,7 +209,15 @@ export interface AdminPtoSummaryDTO {
   decided: AdminPtoRequestDTO[];
 }
 
-export type AvailabilityStatus = "PENDING" | "APPROVED" | "DENIED" | "CANCELLED" | "ADJUSTMENT_REQUESTED";
+// REMOVED (Correction brief #10, Sept 2026) is a real status in the database — see
+// AvailabilityStatus's own doc comment in prisma/schema.prisma — but every list this type flows
+// through (listMyAvailability/listAvailabilityForEmployee/listAdminAvailability) filters those
+// rows out server-side before they're ever turned into a DTO. It's included in this union so the
+// two exhaustive status maps that touch it (AvailabilityStatusPill's STYLE/LABEL,
+// AvailabilityCalendar's STATUS_CHIP) stay real TypeScript checks rather than needing an "as any"
+// escape hatch — same reasoning those files already document for why CANCELLED is listed there
+// even though some of their own call sites filter it out too.
+export type AvailabilityStatus = "PENDING" | "APPROVED" | "DENIED" | "CANCELLED" | "ADJUSTMENT_REQUESTED" | "REMOVED";
 
 /** One specific calendar date a team member marked themselves available, with a start/end
  *  time for that day — tapped directly on the Availability calendar, same "HH:MM" 24-hour
