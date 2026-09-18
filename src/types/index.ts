@@ -536,6 +536,29 @@ export interface DocumentAdminSummaryDTO {
   assignedToLabel: string;
   acknowledgedCount: number;
   eligibleCount: number;
+  // Correction brief #4 (Sept 2026) — which library folder this document lives in, null for the
+  // library root. Absent from the plain DocumentDTO above: an employee's own "shared with me"
+  // list has no concept of folders at all.
+  folderId: string | null;
+}
+
+/** One folder in the HR/Admin document library (correction brief #4, Sept 2026) — see
+ *  DocumentFolder in prisma/schema.prisma. Never shown to a regular employee. */
+export interface DocumentFolderDTO {
+  id: string;
+  name: string;
+  parentFolderId: string | null;
+  createdAt: string;
+}
+
+/** GET /api/documents/manage/folders response — one level of the library at a time: the current
+ *  folder (null = root), its ancestor chain for a breadcrumb, its direct subfolders, and the
+ *  documents filed directly in it. */
+export interface DocumentFolderContentsDTO {
+  folder: DocumentFolderDTO | null;
+  breadcrumb: DocumentFolderDTO[];
+  folders: DocumentFolderDTO[];
+  documents: DocumentAdminSummaryDTO[];
 }
 
 export interface DepartmentDTO {
