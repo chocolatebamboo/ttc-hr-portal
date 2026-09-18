@@ -289,4 +289,210 @@ export async function undecideAvailability(reviewer: CurrentEmployee, submission
     const existing = await tx.availabilitySubmission.findUnique({ where: { id: submissionId } });
     if (
       !existing ||
-      (existing.status !==
+      (existing.status !== "APPROVED" && existing.status !== "DENIED" && existing.status !== "ADJUSTMENT_REQUESTED")
+    ) {
+      throw new InvalidAvailabilityError('Only an "Approved," "Denied," or "Adjustment Requested" submission can be reopened.');
+    }
+
+    const row = await tx.availabilitySubmission.update({
+      where: { id: submissionId },
+      data: { status: "PENDING", reviewedById: null, reviewedAt: null, reviewComment: null, adjustedSlots: Prisma.JsonNull },
+    });
+    return toDTO(row);
+  });
+}
+
+/**
+ * Phase 2 (client spec, Sept 2026): the reviewer's third option besides outright Approve/Deny —
+ * "Adjust the proposed time and send it to the team member for confirmation." adjustedSlots must
+ * cover the exact same dates as the submission's own `slots` (only the times may differ — the
+ * spec says "the proposed TIME," not a different date), same discipline assertValidSlots already
+ * enforces for a fresh submission.
+ */
+export async function requestAvailabilityAdjustment(
+  reviewer: CurrentEmployee,
+  submissionId: string,
+  adjustedSlots: AvailabilitySlot[],
+  comment?: string
+): Promise<AvailabilityDTO> {
+  assertValidSlots(adjustedSlots);
+
+  return withRlsContext({ employeeId: reviewer.id, role: reviewer.role }, async (tx) => {
+    const existing = await tx.availabilitySubmission.findUnique({ where: { id: submissionId } });
+    if (!existing || existing.status !== "PENDING") {
+      throw new InvalidAvailabilityError('Only a "Pending" submission can have an adjustment requested.');
+    }
+
+    const originalDates = new Set((existing.slots as unknown as AvailabilitySlot[]).map((s) => s.date));
+    const adjustedDates = new Set(adjustedSlots.map((s) => s.date));
+    if (originalDates.size !== adjustedDates.size || [...originalDates].some((d) => !adjustedDates.has(d))) {
+      throw new InvalidAvailabilityError("The adjusted times must cover the exact same dates that were submitted.");
+    }
+
+    const row = await tx.availabilitySubmission.update({
+      where: { id: submissionId },
+      data: {
+        status: "ADJUSTMENT_REQUESTED",
+        adjustedSlots: adjustedSlots as unknown as Prisma.InputJsonValue,
+        reviewedById: reviewer.id,
+        reviewedAt: new Date(),
+        reviewComment: comment?.trim() || null,
+      },
+    });
+    await writeAuditLog(tx, {
+      actorId: reviewer.id,
+      action: "AVAILABILITY_ADJUSTMENT_PROPOSED",
+      targetType: "AvailabilitySubmission",
+      targetId: row.id,
+      oldValue: "PENDING",
+      newValue: "ADJUSTMENT_REQUESTED",
+      comment: comment?.trim() || undefined,
+    });
+    await writeNotification(tx, {
+      recipientId: existing.employeeId,
+      type: "AVAILABILITY_ADJUSTMENT_PROPOSED",
+      title: "Your supervisor proposed different times",
+      body: comment?.trim() || undefined,
+      targetType: "AvailabilitySubmission",
+      targetId: row.id,
+    });
+    return toDTO(row);
+  });
+}
+
+/**
+ * Team member's response to a pending ADJUSTMENT_REQUESTED — "send it to the team member for
+ * confirmation." Accepting makes the adjusted times the real, official ones (status → APPROVED,
+ * same terminal state a plain Approve reaches, so everything downstream — converting to a
+ * confirmed Shift — works exactly the same way regardless of which path got here). Declining
+ * (status → DENIED) leaves the ORIGINAL slots untouched and adjustedSlots in place as the record
+ * of what was offered and turned down — matching decideAvailability's own "never erase the
+ * submitted content" convention. No separate authorization check beyond ownership (checked here,
+ * and again by RLS under the actor's own identity) — this is the submission's own employee
+ * responding to a proposal made about THEM, not a supervisor/HR action.
+ */
+export async function respondToAvailabilityAdjustment(
+  actor: CurrentEmployee,
+  submissionId: string,
+  accept: boolean
+): Promise<AvailabilityDTO> {
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const existing = await tx.availabilitySubmission.findUnique({ where: { id: submissionId } });
+    if (!existing || existing.employeeId !== actor.id) {
+      throw new InvalidAvailabilityError("Submission not found.");
+    }
+    if (existing.status !== "ADJUSTMENT_REQUESTED") {
+      throw new InvalidAvailabilityError("This submission has no pending adjustment to respond to.");
+    }
+
+    const row = await tx.availabilitySubmission.update({
+      where: { id: submissionId },
+      data: accept
+        ? { status: "APPROVED", slots: existing.adjustedSlots as unknown as Prisma.InputJsonValue }
+        : { status: "DENIED" },
+    });
+    // Audit-only, no Notification row — Activity History benefits from every reviewable
+    // decision being recorded, but this particular one (the team member's own response to a
+    // proposal about THEM) has no separate person left to notify: the reviewer who made the
+    // proposal can already see the outcome the next time they look at this submission.
+    await writeAuditLog(tx, {
+      actorId: actor.id,
+      action: accept ? "AVAILABILITY_ADJUSTMENT_ACCEPTED" : "AVAILABILITY_ADJUSTMENT_DECLINED",
+      targetType: "AvailabilitySubmission",
+      targetId: row.id,
+      oldValue: "ADJUSTMENT_REQUESTED",
+      newValue: row.status,
+    });
+    return toDTO(row);
+  });
+}
+
+/** Looks up which employee a submission belongs to, without any authorization check of its
+ *  own — used by the decide route to resolve the employeeId assertCanReviewAvailability needs
+ *  before it can decide whether the caller may act on it at all. Runs under the CALLER's own
+ *  RLS identity like everything else here, so a caller with no visibility into this submission
+ *  (not its owner, not their supervisor, not admin) gets null back exactly as if it didn't
+ *  exist, rather than leaking which employee it belongs to. */
+export async function findAvailabilitySubmissionEmployeeId(actor: CurrentEmployee, submissionId: string): Promise<string | null> {
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const row = await tx.availabilitySubmission.findUnique({ where: { id: submissionId }, select: { employeeId: true } });
+    return row?.employeeId ?? null;
+  });
+}
+
+/**
+ * Correction brief #9 (Sept 2026): "persist dismissal state" for "dismissible notifications and
+ * availability records" — a Decided card's own dismiss key, content-derived exactly like
+ * dashboard-notifications.ts's "messages:3"-style keys, from fields that only change when this
+ * submission is genuinely re-decided: `status` alone isn't enough, since Undo (undecideAvailability,
+ * above) can send a card back to Pending and a reviewer can then approve or deny it again with the
+ * SAME status as before — `reviewedAt` is reset to null on Undo and stamped fresh on every decide,
+ * so folding it into the key means a fresh decision always produces a new, undismissed key even
+ * when the outcome (e.g. Approved again) repeats.
+ */
+function decidedDismissalKey(row: { id: string; status: AvailabilityStatus; reviewedAt: string | null }): string {
+  return `availability-decided:${row.id}:${row.status}:${row.reviewedAt ?? ""}`;
+}
+
+/** HR-wide availability roster (src/app/(portal)/admin/availability) — admin-only, like
+ *  listAdminPto: no new RLS policy needed since is_admin() already grants availability_select
+ *  full org-wide read access (prisma/rls.sql). Split into a Pending queue HR needs to act on
+ *  and everything already Decided, same shape listAdminPto uses for pending/decided. Decided
+ *  is capped to the most recent 200 so this stays one page rather than growing forever, and
+ *  (Correction brief #9) anything this admin has already swiped Decided cards to dismiss is
+ *  filtered out here — server-side and permanent, same as the dashboard notification banners,
+ *  rather than a client-only Set that resets on reload. */
+export async function listAdminAvailability(
+  actor: CurrentEmployee
+): Promise<{ pending: AdminAvailabilityDTO[]; decided: AdminAvailabilityDTO[] }> {
+  if (!isAdmin(actor)) throw new ForbiddenError();
+
+  const { pending, decided } = await withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const [pending, decided] = await Promise.all([
+      tx.availabilitySubmission.findMany({
+        where: { status: "PENDING" },
+        include: { employee: { select: { firstName: true, lastName: true, preferredName: true } } },
+        orderBy: { submittedAt: "asc" },
+      }),
+      tx.availabilitySubmission.findMany({
+        where: { status: { not: "PENDING" } },
+        include: { employee: { select: { firstName: true, lastName: true, preferredName: true } } },
+        orderBy: { reviewedAt: "desc" },
+        take: 200,
+      }),
+    ]);
+
+    const toAdminDTO = (r: (typeof pending)[number]): AdminAvailabilityDTO => ({
+      ...toDTO(r),
+      employeeId: r.employeeId,
+      employeeName: `${r.employee.preferredName || r.employee.firstName} ${r.employee.lastName}`,
+    });
+
+    return { pending: pending.map(toAdminDTO), decided: decided.map(toAdminDTO) };
+  });
+
+  const decidedKeys = decided.map(decidedDismissalKey);
+  const dismissedKeys = await listDismissedKeys(actor, decidedKeys);
+  const visibleDecided = decided.filter((_, i) => !dismissedKeys.has(decidedKeys[i]));
+
+  return { pending, decided: visibleDecided };
+}
+
+/**
+ * Correction brief #9 (Sept 2026): persists an admin swiping "Clear" on one Decided availability
+ * card — same admin-only access as the roster it's clearing a row from. Recomputes the key from
+ * the submission's OWN current status/reviewedAt, never trusting whatever the client last saw,
+ * same discipline dismissDashboardNotification uses for the banner keys: a stale dismiss request
+ * for a submission that's since been Undone and re-decided silently no-ops rather than hiding the
+ * new decision (it builds a different key than the one actually in front of the admin right now).
+ */
+export async function dismissDecidedAvailability(actor: CurrentEmployee, submissionId: string): Promise<void> {
+  if (!isAdmin(actor)) throw new ForbiddenError();
+
+  const row = await withRlsContext({ employeeId: actor.id, role: actor.role }, (tx) =>
+    tx.availabilitySubmission.findUnique({ where: { id: submissionId } })
+  );
+  if (!row || row.status === "PENDING") return;
+
+  await dismissKey(actor, decidedDismissalKey(toDTO(row)));
+}
