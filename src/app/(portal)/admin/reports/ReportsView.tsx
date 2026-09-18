@@ -33,7 +33,17 @@ function thisWeekRange(): { start: string; end: string } {
  */
 type Tab = "payroll" | "activity";
 
-export default function ReportsView() {
+/**
+ * `scope`, set by the server page from the viewer's own role (correction brief #8, Sept 2026,
+ * "Administrative access and role audit"):
+ *  - "all": SUPER_ADMIN/HR_ADMIN — the original full-company view, both tabs.
+ *  - "team": SUPERVISOR — same Payroll Hours report, but the team-member picker only ever
+ *    offers their own direct reports (see loadEmployees below; getPayrollHoursReport enforces
+ *    the same narrowing server-side regardless of what this picker shows). Activity History
+ *    doesn't render at all for this scope — that tab reads the org-wide AuditLog, which stays
+ *    admin-only (see canAccessReports's own doc comment in src/lib/authorization.ts for why).
+ */
+export default function ReportsView({ scope }: { scope: "all" | "team" }) {
   // Phase 4 (client spec, Sept 2026): "Reports and Activity History views" — same page, a tab
   // switcher between the pre-existing payroll-hours export and the new Activity History filter
   // below, rather than a separate nav entry for one more admin-only list.
@@ -72,6 +82,24 @@ export default function ReportsView() {
 
   async function loadEmployees() {
     try {
+      // "team" scope (a Supervisor): /api/roster/assignable is the full-company picker every
+      // other admin form shares (Documents, Announcements) and stays admin-only on purpose —
+      // reusing it here would mean either loosening it for everyone or teaching it a second,
+      // narrower mode it doesn't otherwise need. /api/team/reports already returns exactly the
+      // right list (the caller's own direct reports, no admin gate) since My Team already
+      // renders from it, so this borrows that instead of adding a new endpoint.
+      if (scope === "team") {
+        const res = await fetch("/api/team/reports");
+        if (!res.ok) return;
+        const data: { reports: { id: string; firstName: string; lastName: string; preferredName: string | null; employmentStatus: string }[] } =
+          await res.json();
+        setEmployees(
+          data.reports
+            .filter((r) => r.employmentStatus === "ACTIVE")
+            .map((r) => ({ id: r.id, name: `${r.preferredName || r.firstName} ${r.lastName}` }))
+        );
+        return;
+      }
       const res = await fetch("/api/roster/assignable");
       if (!res.ok) return;
       const data = await res.json();
@@ -122,38 +150,44 @@ export default function ReportsView() {
     <div className="max-w-4xl">
       <h1 className="page-title text-2xl mb-1">Reports</h1>
 
-      <div role="tablist" className="flex items-center gap-1 mb-5 border-b border-border">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "payroll"}
-          onClick={() => setTab("payroll")}
-          className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-            tab === "payroll" ? "border-accent text-accent-ink" : "border-transparent text-muted hover:text-foreground"
-          }`}
-        >
-          Payroll Hours
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "activity"}
-          onClick={() => setTab("activity")}
-          className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-            tab === "activity" ? "border-accent text-accent-ink" : "border-transparent text-muted hover:text-foreground"
-          }`}
-        >
-          Activity History
-        </button>
-      </div>
+      {/* "team" scope (a Supervisor) never sees this switcher at all — Activity History reads
+          the org-wide audit trail, which stays admin-only (see this file's own doc comment), so
+          there's nothing to switch to and no point showing a tab that would just be a dead end. */}
+      {scope === "all" && (
+        <div role="tablist" className="flex items-center gap-1 mb-5 border-b border-border">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "payroll"}
+            onClick={() => setTab("payroll")}
+            className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              tab === "payroll" ? "border-accent text-accent-ink" : "border-transparent text-muted hover:text-foreground"
+            }`}
+          >
+            Payroll Hours
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "activity"}
+            onClick={() => setTab("activity")}
+            className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              tab === "activity" ? "border-accent text-accent-ink" : "border-transparent text-muted hover:text-foreground"
+            }`}
+          >
+            Activity History
+          </button>
+        </div>
+      )}
 
       {tab === "activity" ? (
         <ActivityHistoryView />
       ) : (
         <div className="max-w-3xl">
       <p className="text-sm text-muted mb-4">
-        Approved hours for a pay period, ready to hand to your payroll company. This is hours only
-        — no pay rate, overtime, or tax math happens here.
+        {scope === "team"
+          ? "Approved hours for your own team, for a pay period. This is hours only — no pay rate, overtime, or tax math happens here."
+          : "Approved hours for a pay period, ready to hand to your payroll company. This is hours only — no pay rate, overtime, or tax math happens here."}
       </p>
 
       <div className="flex items-center gap-2 mb-3">
