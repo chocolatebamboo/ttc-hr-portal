@@ -12,6 +12,7 @@ import {
   ChartIcon,
   GearIcon,
   ChatIcon,
+  MoreIcon,
   type IconProps,
 } from "@/components/icons";
 
@@ -23,7 +24,12 @@ export interface NavItem {
 
 export const EMPLOYEE_NAV: NavItem[] = [
   { label: "Home", href: "/dashboard", icon: HomeIcon },
-  { label: "My Time", href: "/time", icon: ClockIcon },
+  // "My Time" was its own link here until correction brief #6 (Sept 2026), "Consolidate
+  // Availability and My Time" — its useful functionality (Logged Hours; Time Off was already
+  // shared) moved into Availability below, so a separate "My Time" link would now just be a
+  // second nav item pointing at the exact same destination (/time redirects to /availability) —
+  // the same "why does Announcements show up twice" duplicate-link bug CB flagged once already
+  // (see the ADMIN_NAV comment below), not something to reintroduce here.
   { label: "Availability", href: "/availability", icon: CalendarIcon },
   // Phase 1 of the scheduling workflow rebuild (client spec, Sept 2026) — the confirmed-Shift
   // counterpart to "Availability" just above: what you've SAID you're free for vs. what a
@@ -90,4 +96,34 @@ export function navForRole(role: Role): { primary: NavItem[]; extra: NavItem[] }
     return { primary: EMPLOYEE_NAV, extra: SUPERVISOR_NAV };
   }
   return { primary: EMPLOYEE_NAV, extra: [] };
+}
+
+/**
+ * The mobile bottom tab bar's four fixed slots — one set per permission level (correction
+ * brief #7, "Mobile navigation by permission level"): regular team members get
+ * Home / Availability / My Messages / More; SUPER_ADMIN/HR_ADMIN get Home / Availability /
+ * Reports / More instead — "Administrative users can still reach Messages through the
+ * appropriate interface/More area/chat entry points even if Messages is not one of their four
+ * primary navigation items" (My Messages still appears in their own More list; see
+ * src/app/(portal)/more/page.tsx).
+ *
+ * Deliberately SUPER_ADMIN/HR_ADMIN only, not SUPERVISOR too, even though brief §8 (the
+ * administrative-access/role audit fix, not yet done) eventually wants a Supervisor to reach
+ * reports: /admin/reports itself is still gated to isAdmin() only today (see
+ * src/app/(portal)/admin/reports/page.tsx), and brief §8 explicitly calls for a dedicated
+ * permissions audit *before* changing who can see what. Pointing a Supervisor's bottom nav at a
+ * page that currently redirects them straight back out to /dashboard would be worse than
+ * leaving them on My Messages until that audit lands — revisit this the same moment Reports
+ * access itself is extended to Supervisors.
+ */
+export function bottomNavForRole(role: Role): NavItem[] {
+  const isAdminRole = role === "SUPER_ADMIN" || role === "HR_ADMIN";
+  return [
+    { label: "Home", href: "/dashboard", icon: HomeIcon },
+    { label: "Availability", href: "/availability", icon: CalendarIcon },
+    isAdminRole
+      ? { label: "Reports", href: "/admin/reports", icon: ChartIcon }
+      : { label: "My Messages", href: "/messages", icon: ChatIcon },
+    { label: "More", href: "/more", icon: MoreIcon },
+  ];
 }
