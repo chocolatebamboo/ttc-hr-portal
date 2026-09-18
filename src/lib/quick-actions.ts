@@ -29,10 +29,11 @@ export interface QuickActionDef {
  * string rather than by href — a route can move without silently orphaning someone's saved
  * picks. CB, round five: "I should be able to customize what quick actions is there... based
  * off of what's available in the more tab" — this is deliberately the exact same set More
- * already lists (EMPLOYEE_NAV minus Home/My Time/Availability, which already live in the
- * bottom nav — see MorePage's own `rest` filter in src/app/(portal)/more/page.tsx) plus each
- * role's own admin/supervisor section from src/lib/nav.ts, so there's nothing pickable here
- * that isn't already a real destination this app has.
+ * already lists (EMPLOYEE_NAV minus whatever's already in this role's bottom nav — see
+ * bottomNavForRole in src/lib/nav.ts and MorePage's own `rest` filter in
+ * src/app/(portal)/more/page.tsx) plus each role's own admin/supervisor section from
+ * src/lib/nav.ts, so there's nothing pickable here that isn't already a real destination this
+ * app has.
  */
 const BASE_ACTIONS: QuickActionDef[] = [
   { key: "documents", label: "View Documents", href: "/documents", icon: FolderIcon, tone: "amber" },
