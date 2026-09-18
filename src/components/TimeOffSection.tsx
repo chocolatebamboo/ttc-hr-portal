@@ -52,10 +52,13 @@ export default function TimeOffSection({
         <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
           {rows.map((r) => (
             <div key={r.id} className="flex items-center hover:bg-black/[0.02] transition-colors">
-              {/* Links through to My Time (CB, Sept 2026: "I don't see where Sean could see
-                  those messages") — same "tap through to where the detail actually lives"
-                  pattern AvailabilityStatusSection already uses for its own rows. */}
-              <Link href="/time" className="flex-1 min-w-0 flex items-center justify-between gap-3 px-4 py-3 text-sm">
+              {/* Links through to Availability's own Time Off section (CB, Sept 2026: "I
+                  don't see where Sean could see those messages") — same "tap through to where
+                  the detail actually lives" pattern AvailabilityStatusSection already uses for
+                  its own rows. Points straight at /availability rather than through /time
+                  (which itself just redirects there, per correction brief #6) so this link
+                  lands in one hop instead of two. */}
+              <Link href="/availability" className="flex-1 min-w-0 flex items-center justify-between gap-3 px-4 py-3 text-sm">
                 <span className="truncate">
                   {PTO_TYPE_LABEL[r.type]} · {formatDateRange(r.startDate.toISOString(), r.endDate.toISOString())}
                 </span>
