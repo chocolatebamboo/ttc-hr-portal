@@ -57,11 +57,14 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
   const [convertingDate, setConvertingDate] = useState<string | null>(null);
   // CB, Sept 2026: "[approve/deny] with no way to close out afterward" — once a card has been
   // decided, swiping it away clears it from view, same SwipeReveal "Clear" pattern Messages
-  // already uses (actionSide="left", CheckCircleIcon). Client-side only, same as Messages' own
-  // dismiss — reloading (or a fresh decision changing this submission's id) brings it back, it
-  // isn't a persisted "read" flag. Only ever applies to Decided cards: a Pending one still needs
-  // an actual Approve/Deny, not a way to make it disappear unactioned.
-  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  // uses (CheckCircleIcon). Correction brief #9 (this round): dismissal is now real server state
+  // (src/lib/dashboard-dismissals.ts + /api/admin/availability/[id]/dismiss), not client-only —
+  // the server's own listAdminAvailability already excludes dismissed rows from `decided`, so
+  // this component doesn't track dismissal state itself; a swipe removes the row locally for an
+  // instant response, then persists it in the background. A fresh decision (even re-approving
+  // the same submission after Undo) always reappears — see decidedDismissalKey's own comment.
+  // Only ever applies to Decided cards: a Pending one still needs an actual Approve/Deny, not a
+  // way to make it disappear unactioned.
 
   async function load() {
     setLoadState("loading");
@@ -74,6 +77,17 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
       setLoadState("ready");
     } catch {
       setLoadState("error");
+    }
+  }
+
+  // Best-effort, same fire-and-forget convention DashboardNotifications.tsx's dismissBanner
+  // uses — the local removal above already gives the admin their instant response; worst case
+  // this POST fails silently and the card reappears the next time this list reloads.
+  async function dismissDecided(submissionId: string) {
+    try {
+      await fetch(`/api/admin/availability/${submissionId}/dismiss`, { method: "POST" });
+    } catch {
+      // ignored — see comment above
     }
   }
 
@@ -176,8 +190,6 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
     );
   }
 
-  const visibleDecided = decided.filter((r) => !dismissed.has(r.id));
-
   return (
     <>
       <section className="mb-8">
@@ -218,26 +230,25 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
 
       <section>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted mb-2.5">
-          Decided ({visibleDecided.length})
+          Decided ({decided.length})
         </h2>
         {decided.length === 0 ? (
           <div className="rounded-2xl border border-border bg-surface p-4 text-sm text-muted">
             Nothing decided yet.
           </div>
-        ) : visibleDecided.length === 0 ? (
-          <div className="rounded-2xl border border-border bg-surface p-4 text-sm text-muted">
-            All cleared — nothing left to review here.
-          </div>
         ) : (
           <div className="space-y-3">
-            {visibleDecided.map((r) => (
+            {decided.map((r) => (
               <SwipeReveal
                 key={r.id}
-                actionSide="left"
+                actionSide="right"
                 actionLabel="Clear"
                 actionIcon={<CheckCircleIcon className="h-4 w-4" />}
                 actionClassName="bg-black/[0.06] text-accent-ink rounded-3xl"
-                onAction={() => setDismissed((prev) => new Set(prev).add(r.id))}
+                onAction={() => {
+                  setDecided((prev) => prev.filter((x) => x.id !== r.id));
+                  dismissDecided(r.id);
+                }}
               >
                 <Card
                   row={r}
