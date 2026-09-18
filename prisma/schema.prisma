@@ -104,6 +104,7 @@ model Employee {
   ptoRequestsReviewed  PtoRequest[]          @relation("PtoReviewer")
   documentAssignments  DocumentAssignment[]
   acknowledgments      DocumentAcknowledgment[]
+  documentFoldersCreated DocumentFolder[]
   onboarding           EmployeeOnboarding?
   availabilitySubmissions AvailabilitySubmission[] @relation("AvailabilitySubject")
   availabilityReviewed    AvailabilitySubmission[] @relation("AvailabilityReviewer")
@@ -698,7 +699,7 @@ model DateTask {
   @@index([employeeId, status])
 }
 
-// Correction brief #2: "Opening/expanding a task should reveal its... comments/updates... This
+// Correction brief #2: "Opening/expanding a task should reveal its... comments/updates. This
 // prevents users from having a generic conversation where it becomes unclear which task is being
 // discussed." One row per comment, scoped to exactly one task — deliberately not a widened
 // TeamNote (a fifth topicType): TeamNote's access rule is keyed off "whose employee record is
@@ -752,6 +753,35 @@ enum DocumentVisibility {
   CONFIDENTIAL_HR // restricted to HR_ADMIN / SUPER_ADMIN only, regardless of assignment
 }
 
+// Correction brief #4 (Sept 2026): "Consolidate My Documents" — the separate "My Documents" and
+// "Manage" tabs were unnecessarily fragmented, per CB. HR/Admin now organizes the shared
+// document library into a folder tree (this model) from directly within the same "My Documents"
+// page — no more second tab to click into. A folder is purely an organizing device for whoever
+// already has manage permission (write access is is_admin()-only, same as Document itself, see
+// document_write/document_folder_write in prisma/rls.sql) — it is NOT a new per-employee
+// personal-file feature, and it changes nothing about how an employee's own "documents shared
+// with me" view works (DocumentAssignment/DocumentAcknowledgment below are entirely untouched).
+// A document with folderId null sits at the library's root — every document that existed before
+// this migration is unaffected and simply shows there.
+model DocumentFolder {
+  id   String @id @default(uuid())
+  name String
+
+  parentFolderId String?
+  parentFolder   DocumentFolder?  @relation("DocumentFolderChildren", fields: [parentFolderId], references: [id])
+  childFolders   DocumentFolder[] @relation("DocumentFolderChildren")
+
+  createdById String
+  createdBy   Employee @relation(fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  documents Document[]
+
+  @@index([parentFolderId])
+}
+
 model Document {
   id          String             @id @default(uuid())
   title       String
@@ -765,6 +795,11 @@ model Document {
   requiresAcknowledgment Boolean @default(false)
   archivedAt  DateTime?
 
+  // Correction brief #4 (Sept 2026) — see DocumentFolder above. Null means "library root," which
+  // is where every pre-existing document lands (nothing is hidden by this migration).
+  folderId String?
+  folder   DocumentFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -772,6 +807,8 @@ model Document {
   acknowledgments         DocumentAcknowledgment[]
   onboardingItems         OnboardingItem[]
   onboardingTemplateItems OnboardingTemplateItem[]
+
+  @@index([folderId])
 }
 
 model DocumentAssignment {
