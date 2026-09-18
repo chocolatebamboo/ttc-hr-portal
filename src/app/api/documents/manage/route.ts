@@ -53,6 +53,7 @@ export async function POST(request: Request) {
     const requiresAcknowledgment = form.get("requiresAcknowledgment") === "true";
     const assigneeEmployeeId = form.get("assigneeEmployeeId");
     const assigneeDepartmentId = form.get("assigneeDepartmentId");
+    const folderId = form.get("folderId");
     const file = form.get("file");
 
     if (!title) throw new InvalidDocumentError("Title is required.");
@@ -80,6 +81,7 @@ export async function POST(request: Request) {
         typeof assigneeEmployeeId === "string" && assigneeEmployeeId ? assigneeEmployeeId : undefined,
       assigneeDepartmentId:
         typeof assigneeDepartmentId === "string" && assigneeDepartmentId ? assigneeDepartmentId : undefined,
+      folderId: typeof folderId === "string" && folderId ? folderId : undefined,
     });
 
     return NextResponse.json({ document }, { status: 201 });
