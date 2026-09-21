@@ -5,6 +5,7 @@ import Link from "next/link";
 import AvailabilityStatusPill from "@/components/AvailabilityStatusPill";
 import { TrashIcon } from "@/components/icons";
 import { slotChips } from "@/lib/availability-format";
+import { toneForStatus, STATUS_TONE } from "@/lib/status-tone";
 import type { AvailabilityDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error" | "empty";
@@ -139,89 +140,123 @@ export default function MyAvailabilityPreview({
         </div>
       )}
 
+      {/* CB, Sept 2026: "I like the fact that they have colored backgrounds... I don't see that
+          for the availability side... it could get cluttered with just words." Solid colored
+          cards now, same tone system the admin-facing team cards already use (src/lib/status-
+          tone.ts), instead of a white card with a small pill — and per CB: "when we do approve
+          something, then it changes the color," this is the SAME card element recoloring as its
+          status changes, not a new one appearing. A submission still Approved-but-awaiting-a-
+          task (two-step approval workflow) deliberately keeps reading amber, not pink, until a
+          task's actually been pushed — see AvailabilityDTO.awaitingTask's own doc comment. */}
       {loadState === "ready" && (
-        <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
-          {submissions.map((s) => (
-            <div key={s.id} className="px-4 py-3">
-              <div className="flex items-center justify-between gap-3 mb-2">
-                {s.note ? (
-                  <p className="text-sm text-muted italic truncate">&ldquo;{s.note}&rdquo;</p>
-                ) : (
-                  <span />
-                )}
-                <div className="flex items-center gap-2 shrink-0">
-                  <AvailabilityStatusPill status={s.status} />
-                  {/* CB, Sept 2026: "the deleting isn't working on these" — a Cancelled
-                      submission has nothing left to act on, so it can go away for good; same
-                      Cancelled-only rule as the Time Off list's own delete. */}
-                  {s.status === "CANCELLED" && (
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(s.id)}
-                      disabled={deletingId === s.id}
-                      aria-label="Delete this submission"
-                      className="h-6 w-6 flex items-center justify-center rounded-full text-muted hover:text-accent hover:bg-accent/10 transition-colors disabled:opacity-50"
-                    >
-                      <TrashIcon className="h-3.5 w-3.5" />
-                    </button>
+        <div className="space-y-2.5">
+          {submissions.map((s) => {
+            const plain = s.status === "DENIED" || s.status === "CANCELLED";
+            const stillInProgress = s.status === "APPROVED" && s.awaitingTask;
+            const tone = plain ? null : stillInProgress ? STATUS_TONE.PENDING : toneForStatus(s.status);
+            return (
+              <div
+                key={s.id}
+                className={`rounded-2xl p-4 ${plain ? "border border-border bg-surface" : ""}`}
+                style={
+                  tone
+                    ? { background: `linear-gradient(150deg, ${tone.from} 0%, ${tone.to} 100%)`, color: "#fff" }
+                    : undefined
+                }
+              >
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  {s.note ? (
+                    <p className={`text-sm italic truncate ${plain ? "text-muted" : "text-white/85"}`}>
+                      &ldquo;{s.note}&rdquo;
+                    </p>
+                  ) : (
+                    <span />
                   )}
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {slotChips(s.slots).map((c) => (
-                  <div
-                    key={c.date}
-                    className="flex flex-col items-start rounded-lg bg-black/[0.03] px-2.5 py-1.5 leading-tight"
-                  >
-                    <span className="text-xs font-semibold">{c.dateLabel}</span>
-                    <span className="text-[11px] text-muted">{c.timeLabel}</span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <AvailabilityStatusPill status={s.status} awaitingTask={s.awaitingTask} />
+                    {/* CB, Sept 2026: "the deleting isn't working on these" — a Cancelled
+                        submission has nothing left to act on, so it can go away for good; same
+                        Cancelled-only rule as the Time Off list's own delete. */}
+                    {s.status === "CANCELLED" && (
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(s.id)}
+                        disabled={deletingId === s.id}
+                        aria-label="Delete this submission"
+                        className="h-6 w-6 flex items-center justify-center rounded-full text-muted hover:text-accent hover:bg-accent/10 transition-colors disabled:opacity-50"
+                      >
+                        <TrashIcon className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </div>
-                ))}
-              </div>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {slotChips(s.slots).map((c) => (
+                    <div
+                      key={c.date}
+                      className={`flex flex-col items-start rounded-lg px-2.5 py-1.5 leading-tight ${
+                        plain ? "bg-black/[0.03]" : "bg-white/15"
+                      }`}
+                    >
+                      <span className="text-xs font-semibold">{c.dateLabel}</span>
+                      <span className={`text-[11px] ${plain ? "text-muted" : "text-white/80"}`}>{c.timeLabel}</span>
+                    </div>
+                  ))}
+                </div>
 
-              {/* Phase 2 (client spec, Sept 2026): "Adjust the proposed time and send it to the
-                  team member for confirmation" — the reviewer's counter-proposed times, shown
-                  next to (not instead of) the originally-submitted ones above so it's clear
-                  what's changing. */}
-              {s.status === "ADJUSTMENT_REQUESTED" && s.adjustedSlots && (
-                <div className="mt-2.5 rounded-lg border border-amber-200 bg-amber-50 p-2.5">
-                  <p className="text-xs font-semibold text-amber-800 mb-1.5">Your supervisor proposed:</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {slotChips(s.adjustedSlots).map((c) => (
-                      <div key={c.date} className="flex flex-col items-start rounded-lg bg-white px-2.5 py-1.5 leading-tight">
-                        <span className="text-xs font-semibold">{c.dateLabel}</span>
-                        <span className="text-[11px] text-muted">{c.timeLabel}</span>
-                      </div>
-                    ))}
+                {stillInProgress && (
+                  <p className="text-xs text-white/80 mt-2.5">
+                    Approved — waiting on a task to be pushed before your shift is confirmed.
+                  </p>
+                )}
+
+                {/* Phase 2 (client spec, Sept 2026): "Adjust the proposed time and send it to the
+                    team member for confirmation" — the reviewer's counter-proposed times, shown
+                    next to (not instead of) the originally-submitted ones above so it's clear
+                    what's changing. */}
+                {s.status === "ADJUSTMENT_REQUESTED" && s.adjustedSlots && (
+                  <div className="mt-2.5 rounded-lg bg-white/15 p-2.5">
+                    <p className="text-xs font-semibold text-white mb-1.5">Your supervisor proposed:</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {slotChips(s.adjustedSlots).map((c) => (
+                        <div key={c.date} className="flex flex-col items-start rounded-lg bg-white/90 px-2.5 py-1.5 leading-tight">
+                          <span className="text-xs font-semibold text-foreground">{c.dateLabel}</span>
+                          <span className="text-[11px] text-muted">{c.timeLabel}</span>
+                        </div>
+                      ))}
+                    </div>
+                    {s.reviewComment && (
+                      <p className="text-xs text-white/85 italic mt-1.5">&ldquo;{s.reviewComment}&rdquo;</p>
+                    )}
+                    <div className="flex items-center gap-3 mt-2">
+                      <button
+                        type="button"
+                        onClick={() => handleRespondAdjustment(s.id, true)}
+                        disabled={respondingId === s.id}
+                        className="rounded-full bg-white px-3 py-1.5 text-xs font-semibold shadow-sm hover:brightness-95 disabled:opacity-60"
+                        style={{ color: STATUS_TONE.PENDING.to }}
+                      >
+                        Accept
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRespondAdjustment(s.id, false)}
+                        disabled={respondingId === s.id}
+                        className="text-xs font-medium text-white/85 hover:text-white underline underline-offset-2"
+                      >
+                        Decline
+                      </button>
+                    </div>
                   </div>
-                  {s.reviewComment && (
-                    <p className="text-xs text-amber-800 italic mt-1.5">&ldquo;{s.reviewComment}&rdquo;</p>
-                  )}
-                  <div className="flex items-center gap-3 mt-2">
-                    <button
-                      type="button"
-                      onClick={() => handleRespondAdjustment(s.id, true)}
-                      disabled={respondingId === s.id}
-                      className="btn-primary text-xs px-3 py-1.5"
-                    >
-                      Accept
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleRespondAdjustment(s.id, false)}
-                      disabled={respondingId === s.id}
-                      className="text-xs font-medium text-accent hover:underline"
-                    >
-                      Decline
-                    </button>
-                  </div>
-                </div>
-              )}
-              {s.status !== "ADJUSTMENT_REQUESTED" && s.status !== "PENDING" && s.reviewComment && (
-                <p className="text-xs text-muted italic mt-2">Reviewer note: &ldquo;{s.reviewComment}&rdquo;</p>
-              )}
-            </div>
-          ))}
+                )}
+                {s.status !== "ADJUSTMENT_REQUESTED" && s.status !== "PENDING" && s.reviewComment && (
+                  <p className={`text-xs italic mt-2 ${plain ? "text-muted" : "text-white/80"}`}>
+                    Reviewer note: &ldquo;{s.reviewComment}&rdquo;
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
