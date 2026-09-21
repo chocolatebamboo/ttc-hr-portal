@@ -4,7 +4,8 @@ import { assertCanAccessEmployeeRecords, assertCanAssignTasks, assertIsAdmin } f
 import { getSignedDownloadUrl, uploadDateTaskFile } from "@/lib/storage";
 import { writeAuditLog } from "@/lib/audit-log";
 import { writeNotification } from "@/lib/notifications";
-import type { CurrentEmployee, DateTaskCommentDTO, DateTaskDTO } from "@/types";
+import { readDateDecisions } from "@/lib/availability";
+import type { AvailabilitySlot, CurrentEmployee, DateTaskCommentDTO, DateTaskDTO } from "@/types";
 
 /**
  * Correction brief (Sept 2026, "Correction & Refinement Brief" #2): "Redesign this area into an
@@ -40,6 +41,7 @@ type TaskRow = {
   attachmentKey: string | null;
   attachmentName: string | null;
   status: string;
+  priority: string;
   startedAt: Date | null;
   submittedAt: Date | null;
   approvedById: string | null;
@@ -72,6 +74,7 @@ function toDTO(row: TaskRow): DateTaskDTO {
     hasAttachment: row.attachmentKey !== null,
     attachmentName: row.attachmentName,
     status: row.status as DateTaskDTO["status"],
+    priority: row.priority as DateTaskDTO["priority"],
     startedAt: row.startedAt?.toISOString() ?? null,
     submittedAt: row.submittedAt?.toISOString() ?? null,
     approvedById: row.approvedById,
@@ -108,7 +111,27 @@ export async function listDateTasks(actor: CurrentEmployee, employeeId: string):
       include: TASK_INCLUDE,
       orderBy: [{ taskDate: "asc" }, { createdAt: "asc" }],
     });
-    return rows.map(toDTO);
+
+    // QA pass (Sept 2026), CB: a task shouldn't be visible to the employee it's assigned to
+    // until that date's shift is actually confirmed — availability approval is not the same as
+    // a confirmed shift (see AvailabilitySubmission.dateDecisions' own doc comment and
+    // convertAvailabilityDateToShift in src/lib/shifts.ts), and showing someone a task for a day
+    // that could still change would tell them to plan around a shift that isn't real yet. Only
+    // applied when the caller is looking at their OWN tasks (actor.id === employeeId) — an
+    // admin/supervisor managing tasks from a date's own card (DateTasksPanel) always sees
+    // everything they've assigned, confirmed or not, since they're the one deciding what to
+    // confirm and needs the full picture to do that. A CANCELLED or REASSIGNED shift doesn't
+    // count as "confirmed" — that date is no longer really scheduled for this employee.
+    if (actor.id !== employeeId) return rows.map(toDTO);
+
+    const dates = [...new Set(rows.map((r) => r.taskDate))];
+    if (dates.length === 0) return [];
+    const confirmedShifts: { date: string }[] = await tx.shift.findMany({
+      where: { employeeId, date: { in: dates }, status: { notIn: ["CANCELLED", "REASSIGNED"] } },
+      select: { date: true },
+    });
+    const confirmedDates = new Set(confirmedShifts.map((s) => s.date));
+    return rows.filter((r) => confirmedDates.has(r.taskDate)).map(toDTO);
   });
 }
 
@@ -145,7 +168,8 @@ export async function createDateTask(
   taskDate: string,
   title: string,
   description: string,
-  attachment?: { key: string; name: string }
+  attachment?: { key: string; name: string },
+  priority: "NORMAL" | "URGENT" = "NORMAL"
 ): Promise<DateTaskDTO> {
   await assertCanAssignTasks(actor, employeeId);
 
@@ -166,6 +190,7 @@ export async function createDateTask(
         description: trimmedDescription,
         attachmentKey: attachment?.key ?? null,
         attachmentName: attachment?.name ?? null,
+        priority,
       },
       include: TASK_INCLUDE,
     });
@@ -185,6 +210,77 @@ export async function createDateTask(
       targetType: "DateTask",
       targetId: row.id,
     });
+
+    // CB, Sept 2026, two-step approval workflow, from the real meeting with Daijour: a
+    // supervisor approving a date doesn't finish anything by itself — it pings the admin, and
+    // it's the admin PUSHING A TASK for that date that actually confirms the shift, in one
+    // action, no separate "Confirm as Shift" tap. (That standalone button is intentionally gone
+    // from TeamAvailabilityCards — see its own comment.) Same transaction as the task write
+    // above, not a call out to convertAvailabilityDateToShift, which opens its own top-level
+    // withRlsContext/$transaction — nesting two interactive transactions on the same pooled
+    // connection is exactly the kind of thing that can hang under Supabase's connection limits,
+    // so this mirrors that function's logic inline against the tx already open here instead.
+    const alreadyShifted = await tx.shift.findFirst({
+      where: { employeeId, date: taskDate, status: { not: "CANCELLED" } },
+      select: { id: true },
+    });
+    if (!alreadyShifted) {
+      // Deliberately NOT filtered by submission.status === "APPROVED" here: decideAvailabilityDate
+      // (deciding one date at a time) leaves the submission's own status at PENDING until every
+      // date on it has been individually decided — see aggregateStatus/isInPerDateMode's own doc
+      // comments — so a date can be genuinely, individually APPROVED while its parent submission
+      // still reads PENDING. Filtering on submission.status would silently skip auto-confirming
+      // the shift for exactly that (common) per-date-review path. So this instead looks at every
+      // one of the employee's still-live submissions and asks THIS date's own dateDecisions entry
+      // whether it's approved — the same per-date truth convertAvailabilityDateToShift itself
+      // checks — rather than trusting the submission-level status.
+      const candidates = await tx.availabilitySubmission.findMany({
+        where: { employeeId, status: { notIn: ["REMOVED", "CANCELLED"] } },
+        orderBy: { submittedAt: "desc" },
+      });
+      let approvedSubmission: (typeof candidates)[number] | undefined;
+      let approvedSlot: AvailabilitySlot | undefined;
+      for (const candidate of candidates) {
+        const slots = candidate.slots as unknown as AvailabilitySlot[];
+        const slot = slots.find((s) => s.date === taskDate);
+        if (!slot) continue;
+        const decision = readDateDecisions(slots, candidate.dateDecisions).find((d) => d.date === taskDate);
+        if (decision?.status === "APPROVED") {
+          approvedSubmission = candidate;
+          approvedSlot = slot;
+          break;
+        }
+      }
+      if (approvedSubmission && approvedSlot) {
+        const shift = await tx.shift.create({
+          data: {
+            employeeId,
+            date: approvedSlot.date,
+            startTime: approvedSlot.startTime,
+            endTime: approvedSlot.endTime,
+            note: approvedSubmission.note,
+            sourceAvailabilitySubmissionId: approvedSubmission.id,
+            createdById: actor.id,
+          },
+        });
+        await writeAuditLog(tx, {
+          actorId: actor.id,
+          action: "SHIFT_CREATED",
+          targetType: "Shift",
+          targetId: shift.id,
+          newValue: `${shift.date} ${shift.startTime}-${shift.endTime} for ${employeeId} (confirmed by task push, from availability ${approvedSubmission.id})`,
+        });
+        await writeNotification(tx, {
+          recipientId: employeeId,
+          type: "SHIFT_CREATED",
+          title: "You've been scheduled for a new shift",
+          body: `${shift.date}, ${shift.startTime}–${shift.endTime}`,
+          targetType: "Shift",
+          targetId: shift.id,
+        });
+      }
+    }
+
     return toDTO(row);
   });
 }
