@@ -46,14 +46,26 @@ const DEFAULT_END = "17:00";
 // AvailabilityStatusPill.tsx's own REMOVED entry for the identical reasoning.
 // ADJUSTMENT_REQUESTED (Phase 2, client spec, Sept 2026): same amber "needs a decision" tone as
 // Pending — see AvailabilityStatusPill's own STYLE map, which this mirrors.
+// CB, Sept 2026: unified APPROVED to brand pink (matching STATUS_TONE in src/lib/status-tone.ts,
+// already used on the admin-facing team cards) instead of the emerald this used to be — one
+// color vocabulary for "approved" everywhere, not a different green just on this calendar.
 const STATUS_CHIP: Record<AvailabilityDTO["status"], string> = {
   PENDING: "bg-amber-100 text-amber-800",
-  APPROVED: "bg-emerald-100 text-emerald-800",
+  APPROVED: "bg-accent/15 text-accent-ink",
   DENIED: "bg-rose-100 text-rose-800",
   CANCELLED: "bg-black/5 text-muted",
   ADJUSTMENT_REQUESTED: "bg-amber-100 text-amber-800",
   REMOVED: "bg-black/5 text-muted",
 };
+
+/** Two-step approval workflow (CB, Sept 2026): an Approved submission doesn't read as fully done
+ *  to the team member until a task's actually been pushed for it — that's what confirms the
+ *  shift. `awaitingTask` (set only by listMyAvailability) means keep showing the "still needs
+ *  something" Pending tone even though the real status already flipped to Approved. */
+function chipClassFor(submission: AvailabilityDTO): string {
+  if (submission.status === "APPROVED" && submission.awaitingTask) return STATUS_CHIP.PENDING;
+  return STATUS_CHIP[submission.status];
+}
 
 /** Every calendar date covered by any of this person's submissions, newest-first so an
  *  overlapping resubmission (a Denied one and a later Pending one for the same date, say)
@@ -509,7 +521,7 @@ function MonthSection({
                     isDraft
                       ? "bg-accent-ink text-white"
                       : submission
-                        ? STATUS_CHIP[submission.status]
+                        ? chipClassFor(submission)
                         : "bg-black/[0.07] hover:bg-black/[0.12]"
                   }`}
                 >
@@ -719,7 +731,7 @@ function SubmissionDetail({
       <div className="rounded-2xl bg-white/5 p-4">
         <div className="flex items-center justify-between gap-3 mb-2">
           <p className="text-xs text-white/50 uppercase tracking-wide">Dates & times</p>
-          <AvailabilityStatusPill status={submission.status} />
+          <AvailabilityStatusPill status={submission.status} awaitingTask={submission.awaitingTask} />
         </div>
         <ul className="text-sm space-y-1">
           {/* Tapping a date opens that date's own task list (MyDateTasksPanel) — the same
