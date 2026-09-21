@@ -867,3 +867,138 @@ model DocumentAcknowledgment {
 
   @@unique([documentId, employeeId, documentVersion])
 }
+// ---------------------------------------------------------------------------
+// Phase 4 of the scheduling/attendance/task workflow rebuild (client spec, Sept 2026): "a real
+// in-app notification feed" — AuditLog above already recorded THAT an action happened (an
+// admin-facing history, one row per event, visible to admins only via Reports > Activity
+// History); this table is the missing other half, ONE ROW PER RECIPIENT of an event actually
+// worth surfacing to them personally, with real server-tracked read/unread state. Deliberately
+// separate from AuditLog rather than widening it: AuditLog's audience is always "admins looking
+// back," this table's audience is always "one specific person, right now" — different access
+// rule (recipientId = current_employee_id(), see prisma/rls.sql's notification_select) and a
+// different shape (readAt, no oldValue/newValue diffing) than AuditLog needs.
+//
+// Replaces nothing that already existed: DashboardNotifications.tsx's two banners (pending-
+// approvals count, unread-messages count) are deliberately left as they are — aggregate "you
+// have N things to review" nudges, not a record of discrete past events, which is a genuinely
+// different job than this feed does. The header bell (src/components/NotificationBell.tsx) is
+// additive alongside those, not a replacement for them.
+// ---------------------------------------------------------------------------
+
+enum NotificationType {
+  // A supervisor/admin scheduled you (converted availability, or created one from scratch) —
+  // see convertAvailabilityToShift/createShiftManually in src/lib/shifts.ts.
+  SHIFT_CREATED
+  // Your shift was cancelled — either directly, or as the resolution of your own cancellation
+  // request. One type covers both (see cancelShift/approveShiftCancellation) since the message
+  // to YOU reads the same either way: "your shift was cancelled."
+  SHIFT_CANCELLED
+  // A shift was reassigned TO you (see reassignShift) — the employee it was reassigned AWAY
+  // FROM isn't separately notified; their own copy of the shift still shows REASSIGNED status
+  // right there on My Schedule, which reads clearly enough without a second notification row.
+  SHIFT_REASSIGNED
+  // Your requested shift change was approved, with the final date/time (see approveShiftChange).
+  SHIFT_CHANGE_APPROVED
+  // Your requested shift change OR cancellation was declined (see denyShiftRequest) — one type
+  // for both, same reasoning as SHIFT_CANCELLED above.
+  SHIFT_REQUEST_DECLINED
+  // Someone requested a change/cancellation on a shift YOU created — see requestShiftChange/
+  // requestShiftCancellation, notifying existing.createdById (whoever scheduled it originally,
+  // almost always the actual supervisor/admin who should review the request) rather than every
+  // admin org-wide.
+  SHIFT_REQUEST_RECEIVED
+  // Your availability submission was approved/denied (see decideAvailability).
+  AVAILABILITY_APPROVED
+  AVAILABILITY_DENIED
+  // A supervisor proposed different times for your submission instead of approving/denying
+  // outright, and it's waiting on your Accept/Decline (see requestAvailabilityAdjustment).
+  AVAILABILITY_ADJUSTMENT_PROPOSED
+  // Your PTO request was approved/denied (see decidePtoRequest in src/lib/pto-actions.ts).
+  PTO_APPROVED
+  PTO_DENIED
+  // A supervisor/admin pushed a new task onto one of your days (see createDateTask in
+  // src/lib/date-tasks.ts).
+  DATE_TASK_ASSIGNED
+  // A task you submitted was confirmed (see approveDateTask) — added alongside the correction
+  // brief's #2 rework so a review decision is actually communicated, the same way every other
+  // submit-then-decide workflow here (PTO, availability) already notifies both outcomes.
+  DATE_TASK_APPROVED
+  // A task you submitted was sent back with a note instead (see returnDateTask) — the note
+  // itself lives on the task's own comment thread, not in this notification's body.
+  DATE_TASK_RETURNED
+}
+
+model Notification {
+  id          String   @id @default(uuid())
+  recipientId String
+  recipient   Employee @relation("NotificationRecipient", fields: [recipientId], references: [id])
+
+  type  NotificationType
+  title String
+  // Optional — most notifications are self-explanatory from title+type alone (the icon/label the
+  // UI picks from `type` already says "shift" vs "PTO" vs "task"); body is for the one extra
+  // line that's genuinely useful, e.g. a decline comment or the final approved date/time.
+  body  String?
+
+  // What this notification is ABOUT, so clicking it can deep-link straight there. Same plain-
+  // columns shape (no formal @relation) as TeamNote.topicType/topicId — spans several unrelated
+  // tables (Shift, AvailabilitySubmission, PtoRequest, DateTask) and a notification's own access
+  // rule never depends on the target table's own RLS, so a formal relation would add nothing.
+  targetType String // "Shift" | "AvailabilitySubmission" | "PtoRequest" | "DateTask"
+  targetId   String
+
+  // Null = unread. A real timestamp (not a boolean) so "unread" and "read 3 minutes ago" are
+  // both answerable from one column, same shape TimeSession.clockOut already uses for open/closed.
+  readAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([recipientId, createdAt])
+  @@index([recipientId, readAt])
+}
+
+// ---------------------------------------------------------------------------
+// Messaging: read/unread tracking + dashboard notification dismissal
+// ---------------------------------------------------------------------------
+
+// Correction brief (Sept 2026, "Correction & Refinement Brief" #1): "genuinely unread
+// messages," synced everywhere, persisted server-side across refresh/logout/login. TeamNote
+// and DirectMessage (above) never tracked per-viewer read state — see their own doc comments'
+// "fromOthers is not read/unread tracking." One row per (employeeId, threadKey), not one row
+// per message: a "thread" here is always re-fetched as a whole list at once
+// (listTeamNotes/listMessages), so "the last time this viewer opened this thread" is all that's
+// needed to work out which of its messages are still unread — same idea Notification.readAt
+// captures per single event, just scoped to a whole conversation instead. See
+// src/lib/message-read-state.ts for the threadKey scheme (the TeamNote general thread, a
+// TeamNote topic, or a DM conversation) and exactly where this gets read/written.
+model MessageReadState {
+  id         String   @id @default(uuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  threadKey  String
+  lastReadAt DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([employeeId, threadKey])
+  @@index([employeeId])
+}
+
+// Correction brief #1/#9: "a deliberately dismissed notification must remain dismissed... do
+// not display a Show Again [action]." Replaces DashboardNotifications.tsx's old localStorage-
+// only dismissal (per-browser, recoverable via its own "N cleared — show again" link) with a
+// real per-employee record. `key` is content-derived from the CURRENT count at the moment of
+// dismissal (e.g. "messages:3" — see src/lib/dashboard-notifications.ts), not a per-notification
+// id: dismissing means "I've seen this exact count," so a genuinely different count (a new
+// pending item, a new unread message) always shows again on its own — see isDismissed in
+// src/lib/dashboard-dismissals.ts — with no user-facing "undo" needed either way.
+model DashboardDismissal {
+  id         String   @id @default(uuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  key         String
+  dismissedAt DateTime @default(now())
+
+  @@unique([employeeId, key])
+}
