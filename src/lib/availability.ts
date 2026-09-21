@@ -5,7 +5,14 @@ import { writeAuditLog } from "@/lib/audit-log";
 import { writeNotification } from "@/lib/notifications";
 import { dismiss as dismissKey, listDismissedKeys } from "@/lib/dashboard-dismissals";
 import { Prisma } from "@prisma/client";
-import type { AdminAvailabilityDTO, AvailabilityDTO, AvailabilityStatus, AvailabilitySlot, CurrentEmployee } from "@/types";
+import type {
+  AdminAvailabilityDTO,
+  AvailabilityDTO,
+  AvailabilityDateDecision,
+  AvailabilityStatus,
+  AvailabilitySlot,
+  CurrentEmployee,
+} from "@/types";
 
 /** Hand-declared rather than importing Prisma's generated AvailabilitySubmission type — same
  *  convention src/lib/employees-admin.ts's EmployeeWithRelations follows, so this file doesn't
@@ -19,7 +26,53 @@ type AvailabilityRow = {
   reviewComment: string | null;
   reviewedAt: Date | null;
   adjustedSlots: unknown;
+  dateDecisions: unknown;
 };
+
+/** Every entry in `slots`, defaulted to PENDING — what a brand-new submission's dateDecisions
+ *  starts as (submitAvailability), and the fallback for any row created before this column
+ *  existed (dateDecisions is null in the database). Keeping this derivation in one place means
+ *  an old row behaves exactly like a fresh one: nothing decided per-date yet, bulk actions still
+ *  fully available. */
+function defaultDateDecisions(slots: AvailabilitySlot[]): AvailabilityDateDecision[] {
+  return slots.map((s) => ({ date: s.date, status: "PENDING" as const, decidedAt: null, decidedById: null, comment: null }));
+}
+
+/** Reads a row's dateDecisions back as real entries, falling back to defaultDateDecisions for a
+ *  null column (pre-migration rows) or a length mismatch (shouldn't happen in practice, but a
+ *  submission's own `slots` is always the source of truth for which dates exist). Exported for
+ *  src/lib/shifts.ts's convertAvailabilityDateToShift, which needs to check one specific date's
+ *  own decision now that a date can be individually approved while the submission as a whole is
+ *  still Pending. */
+export function readDateDecisions(slots: AvailabilitySlot[], raw: unknown): AvailabilityDateDecision[] {
+  if (Array.isArray(raw) && raw.length === slots.length) {
+    return raw as AvailabilityDateDecision[];
+  }
+  return defaultDateDecisions(slots);
+}
+
+/** True once every date has moved off PENDING — the point at which a submission decided
+ *  entirely date-by-date reaches the same "fully reviewed" terminal point a bulk decide reaches
+ *  immediately. */
+function allDatesDecided(decisions: AvailabilityDateDecision[]): boolean {
+  return decisions.every((d) => d.status !== "PENDING");
+}
+
+/** The submission-wide status once every date has been individually decided — APPROVED if the
+ *  reviewer approved at least one date, DENIED only if every single date was denied. Matches
+ *  decideAvailability's own two terminal outcomes, so "decide the whole thing at once" and
+ *  "decide it one date at a time" land on the same status vocabulary either way. */
+function aggregateStatus(decisions: AvailabilityDateDecision[]): "APPROVED" | "DENIED" {
+  return decisions.some((d) => d.status === "APPROVED") ? "APPROVED" : "DENIED";
+}
+
+/** Whether any date has already been individually decided — once true, this submission is "in
+ *  per-date mode" and the whole-submission bulk actions (decideAvailability,
+ *  requestAvailabilityAdjustment) step aside until Undo resets it. See dateDecisions' own doc
+ *  comment in prisma/schema.prisma for the full either/or reasoning. */
+function isInPerDateMode(decisions: AvailabilityDateDecision[]): boolean {
+  return decisions.some((d) => d.status !== "PENDING");
+}
 
 export class InvalidAvailabilityError extends Error {
   constructor(message: string) {
@@ -68,15 +121,17 @@ export function assertValidSlots(slots: unknown): asserts slots is AvailabilityS
 }
 
 function toDTO(row: AvailabilityRow): AvailabilityDTO {
+  const slots = row.slots as unknown as AvailabilitySlot[];
   return {
     id: row.id,
-    slots: row.slots as unknown as AvailabilitySlot[],
+    slots,
     note: row.note,
     status: row.status,
     submittedAt: row.submittedAt.toISOString(),
     reviewComment: row.reviewComment,
     reviewedAt: row.reviewedAt ? row.reviewedAt.toISOString() : null,
     adjustedSlots: row.adjustedSlots ? (row.adjustedSlots as unknown as AvailabilitySlot[]) : null,
+    dateDecisions: readDateDecisions(slots, row.dateDecisions),
   };
 }
 
@@ -86,10 +141,6 @@ function toDTO(row: AvailabilityRow): AvailabilityDTO {
 export async function listMyAvailability(actor: CurrentEmployee): Promise<AvailabilityDTO[]> {
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const rows = await tx.availabilitySubmission.findMany({
-      // Correction brief #10 (Sept 2026): REMOVED is an admin cleanup status, not a decision the
-      // employee needs to see reflected in their own history — see REMOVED's own doc comment in
-      // prisma/schema.prisma. Excluded here the same way listAvailabilityForEmployee and
-      // listAdminAvailability exclude it below.
       where: { employeeId: actor.id, status: { not: "REMOVED" } },
       orderBy: { submittedAt: "desc" },
     });
@@ -104,9 +155,6 @@ export async function listMyAvailability(actor: CurrentEmployee): Promise<Availa
 export async function listAvailabilityForEmployee(actor: CurrentEmployee, employeeId: string): Promise<AvailabilityDTO[]> {
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const rows = await tx.availabilitySubmission.findMany({
-      // Correction brief #10 (Sept 2026): same REMOVED exclusion listMyAvailability applies —
-      // a supervisor/admin drilling into one employee's history shouldn't see admin cleanup
-      // noise here either.
       where: { employeeId, status: { not: "REMOVED" } },
       orderBy: { submittedAt: "desc" },
     });
@@ -134,6 +182,7 @@ export async function submitAvailability(
         slots: input.slots as unknown as Prisma.InputJsonValue,
         note: input.note?.trim() || null,
         status: "PENDING",
+        dateDecisions: defaultDateDecisions(input.slots) as unknown as Prisma.InputJsonValue,
       },
     });
     return toDTO(row);
@@ -234,11 +283,15 @@ export async function deleteAvailabilitySubmission(actor: CurrentEmployee, submi
 
 type Decision = "APPROVED" | "DENIED";
 
-/** Supervisor/HR decides on one submission. Authorization (is the reviewer actually this
- *  employee's supervisor, or HR/Super Admin?) is checked by the caller
- *  (assertCanReviewAvailability, using the submission's employeeId) and enforced again here
- *  under the REVIEWER's own identity via withRlsContext, same two-layer shape as
- *  decidePtoRequest. */
+/** Supervisor/HR decides on the WHOLE submission at once — "I have the option to approve
+ *  everything at one time." Authorization (is the reviewer actually this employee's supervisor,
+ *  or HR/Super Admin?) is checked by the caller (assertCanReviewAvailability, using the
+ *  submission's employeeId) and enforced again here under the REVIEWER's own identity via
+ *  withRlsContext, same two-layer shape as decidePtoRequest. Only available while nothing on
+ *  this submission has been decided date-by-date yet (dateDecisions' own doc comment in
+ *  prisma/schema.prisma) — once decideAvailabilityDate below has touched even one date, this
+ *  throws instead of silently overriding whatever's already been decided; the reviewer finishes
+ *  the remaining dates individually, or calls undecideAvailability first to start over. */
 export async function decideAvailability(
   reviewer: CurrentEmployee,
   submissionId: string,
@@ -250,6 +303,21 @@ export async function decideAvailability(
     if (!existing || existing.status !== "PENDING") {
       throw new InvalidAvailabilityError('Only a "Pending" submission can be decided.');
     }
+    const slots = existing.slots as unknown as AvailabilitySlot[];
+    const decisions = readDateDecisions(slots, existing.dateDecisions);
+    if (isInPerDateMode(decisions)) {
+      throw new InvalidAvailabilityError(
+        "Some dates on this request have already been decided individually — finish the rest one at a time, or Undo first to start over."
+      );
+    }
+
+    const decidedDates: AvailabilityDateDecision[] = decisions.map((d) => ({
+      ...d,
+      status: decision,
+      decidedAt: new Date().toISOString(),
+      decidedById: reviewer.id,
+      comment: comment?.trim() || null,
+    }));
 
     const row = await tx.availabilitySubmission.update({
       where: { id: submissionId },
@@ -258,6 +326,7 @@ export async function decideAvailability(
         reviewedById: reviewer.id,
         reviewedAt: new Date(),
         reviewComment: comment?.trim() || null,
+        dateDecisions: decidedDates as unknown as Prisma.InputJsonValue,
       },
     });
     await writeAuditLog(tx, {
@@ -274,6 +343,85 @@ export async function decideAvailability(
       type: decision === "APPROVED" ? "AVAILABILITY_APPROVED" : "AVAILABILITY_DENIED",
       title: decision === "APPROVED" ? "Your availability was approved" : "Your availability was denied",
       body: comment?.trim() || undefined,
+      targetType: "AvailabilitySubmission",
+      targetId: row.id,
+    });
+    return toDTO(row);
+  });
+}
+
+/**
+ * Supervisor/HR decides on ONE date within a submission — "you have to approve each thing, like
+ * each date one at a time." The either/or counterpart to decideAvailability above: available
+ * only while this specific date is still PENDING (an already-decided date needs Undo first, same
+ * as the whole-submission path). The submission's own `status` stays PENDING until every date has
+ * been individually decided, at which point it's stamped to the same aggregate outcome a bulk
+ * decide would reach (aggregateStatus) — reviewedById/reviewedAt/reviewComment are set then too,
+ * matching decideAvailability's own shape, but reviewComment intentionally reflects only that
+ * LAST date's comment (each date already carries its own comment in dateDecisions; the
+ * submission-level field is a legacy single slot, not a place to concatenate several).
+ */
+export async function decideAvailabilityDate(
+  reviewer: CurrentEmployee,
+  submissionId: string,
+  date: string,
+  decision: Decision,
+  comment?: string
+): Promise<AvailabilityDTO> {
+  return withRlsContext({ employeeId: reviewer.id, role: reviewer.role }, async (tx) => {
+    const existing = await tx.availabilitySubmission.findUnique({ where: { id: submissionId } });
+    if (!existing || existing.status !== "PENDING") {
+      throw new InvalidAvailabilityError('Only a "Pending" submission can be decided.');
+    }
+    const slots = existing.slots as unknown as AvailabilitySlot[];
+    const decisions = readDateDecisions(slots, existing.dateDecisions);
+    const index = decisions.findIndex((d) => d.date === date);
+    if (index === -1) {
+      throw new InvalidAvailabilityError("That date isn't part of this submission.");
+    }
+    if (decisions[index].status !== "PENDING") {
+      throw new InvalidAvailabilityError("This date has already been decided.");
+    }
+
+    const trimmedComment = comment?.trim() || null;
+    const nextDecisions = decisions.slice();
+    nextDecisions[index] = {
+      ...nextDecisions[index],
+      status: decision,
+      decidedAt: new Date().toISOString(),
+      decidedById: reviewer.id,
+      comment: trimmedComment,
+    };
+    const nowFullyDecided = allDatesDecided(nextDecisions);
+
+    const row = await tx.availabilitySubmission.update({
+      where: { id: submissionId },
+      data: {
+        dateDecisions: nextDecisions as unknown as Prisma.InputJsonValue,
+        ...(nowFullyDecided
+          ? {
+              status: aggregateStatus(nextDecisions),
+              reviewedById: reviewer.id,
+              reviewedAt: new Date(),
+              reviewComment: trimmedComment,
+            }
+          : {}),
+      },
+    });
+    await writeAuditLog(tx, {
+      actorId: reviewer.id,
+      action: decision === "APPROVED" ? "AVAILABILITY_DATE_APPROVED" : "AVAILABILITY_DATE_DENIED",
+      targetType: "AvailabilitySubmission",
+      targetId: row.id,
+      oldValue: date,
+      newValue: decision,
+      comment: trimmedComment ?? undefined,
+    });
+    await writeNotification(tx, {
+      recipientId: existing.employeeId,
+      type: decision === "APPROVED" ? "AVAILABILITY_APPROVED" : "AVAILABILITY_DENIED",
+      title: decision === "APPROVED" ? `Your ${date} availability was approved` : `Your ${date} availability was denied`,
+      body: trimmedComment ?? undefined,
       targetType: "AvailabilitySubmission",
       targetId: row.id,
     });
@@ -301,9 +449,17 @@ export async function undecideAvailability(reviewer: CurrentEmployee, submission
       throw new InvalidAvailabilityError('Only an "Approved," "Denied," or "Adjustment Requested" submission can be reopened.');
     }
 
+    const slots = existing.slots as unknown as AvailabilitySlot[];
     const row = await tx.availabilitySubmission.update({
       where: { id: submissionId },
-      data: { status: "PENDING", reviewedById: null, reviewedAt: null, reviewComment: null, adjustedSlots: Prisma.JsonNull },
+      data: {
+        status: "PENDING",
+        reviewedById: null,
+        reviewedAt: null,
+        reviewComment: null,
+        adjustedSlots: Prisma.JsonNull,
+        dateDecisions: defaultDateDecisions(slots) as unknown as Prisma.InputJsonValue,
+      },
     });
     return toDTO(row);
   });
@@ -328,6 +484,12 @@ export async function requestAvailabilityAdjustment(
     const existing = await tx.availabilitySubmission.findUnique({ where: { id: submissionId } });
     if (!existing || existing.status !== "PENDING") {
       throw new InvalidAvailabilityError('Only a "Pending" submission can have an adjustment requested.');
+    }
+    const existingSlots = existing.slots as unknown as AvailabilitySlot[];
+    if (isInPerDateMode(readDateDecisions(existingSlots, existing.dateDecisions))) {
+      throw new InvalidAvailabilityError(
+        "Some dates on this request have already been decided individually — Undo first if you want to propose new times for the whole request."
+      );
     }
 
     const originalDates = new Set((existing.slots as unknown as AvailabilitySlot[]).map((s) => s.date));
@@ -392,16 +554,24 @@ export async function respondToAvailabilityAdjustment(
       throw new InvalidAvailabilityError("This submission has no pending adjustment to respond to.");
     }
 
+    const finalSlots = accept ? (existing.adjustedSlots as unknown as AvailabilitySlot[]) : (existing.slots as unknown as AvailabilitySlot[]);
+    const settledDecisions: AvailabilityDateDecision[] = defaultDateDecisions(finalSlots).map((d) => ({
+      ...d,
+      status: accept ? "APPROVED" : "DENIED",
+      decidedAt: new Date().toISOString(),
+      decidedById: actor.id,
+    }));
+
     const row = await tx.availabilitySubmission.update({
       where: { id: submissionId },
       data: accept
-        ? { status: "APPROVED", slots: existing.adjustedSlots as unknown as Prisma.InputJsonValue }
-        : { status: "DENIED" },
+        ? {
+            status: "APPROVED",
+            slots: existing.adjustedSlots as unknown as Prisma.InputJsonValue,
+            dateDecisions: settledDecisions as unknown as Prisma.InputJsonValue,
+          }
+        : { status: "DENIED", dateDecisions: settledDecisions as unknown as Prisma.InputJsonValue },
     });
-    // Audit-only, no Notification row — Activity History benefits from every reviewable
-    // decision being recorded, but this particular one (the team member's own response to a
-    // proposal about THEM) has no separate person left to notify: the reviewer who made the
-    // proposal can already see the outcome the next time they look at this submission.
     await writeAuditLog(tx, {
       actorId: actor.id,
       action: accept ? "AVAILABILITY_ADJUSTMENT_ACCEPTED" : "AVAILABILITY_ADJUSTMENT_DECLINED",
@@ -462,9 +632,6 @@ export async function listAdminAvailability(
         orderBy: { submittedAt: "asc" },
       }),
       tx.availabilitySubmission.findMany({
-        // Correction brief #10 (Sept 2026): REMOVED is explicitly "remove it from the normal
-        // active/decided interface" — excluded here the same way PENDING already is, so a
-        // removed request doesn't reappear in Decided right after an admin clears it out.
         where: { status: { notIn: ["PENDING", "REMOVED"] } },
         include: { employee: { select: { firstName: true, lastName: true, preferredName: true } } },
         orderBy: { reviewedAt: "desc" },
