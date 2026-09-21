@@ -263,6 +263,13 @@ export interface AvailabilityDTO {
    *  see decideAvailabilityDate in src/lib/availability.ts for how each entry moves off PENDING,
    *  and this submission's own doc comment above for the either/or with bulk decide/deny. */
   dateDecisions: AvailabilityDateDecision[];
+  /** Display-only hint, set only by listMyAvailability (src/lib/availability.ts): true when
+   *  status is APPROVED but at least one approved date on this submission doesn't have a
+   *  confirmed Shift yet. CB, Sept 2026, two-step approval workflow: approving a date pings the
+   *  admin who pushes tasks, and it's THAT push that actually confirms the shift — until then
+   *  the team member's own card keeps reading as "still in progress," not "done," even though
+   *  the underlying status already flipped to Approved. Never set on the admin-facing DTOs. */
+  awaitingTask?: boolean;
 }
 
 /** Same shape as AvailabilityDTO plus who it belongs to — for the supervisor/HR-wide
@@ -340,6 +347,7 @@ export interface AdminShiftDTO extends ShiftDTO {
    *  reviewedAt. */
   reviewedByName: string | null;
 }
+
 /** One message in a team member's notes/messaging thread (src/lib/team-notes.ts) — see
  *  TeamNote in prisma/schema.prisma for the full "why one thread per person" reasoning.
  *  attachmentName is shown to the client; the underlying storage key never is — downloading
@@ -461,6 +469,10 @@ export interface DirectConversationSummaryDTO {
  */
 export type DateTaskStatus = "ASSIGNED" | "IN_PROGRESS" | "AWAITING_REVIEW" | "APPROVED" | "RETURNED";
 
+/** QA pass (Sept 2026): a simple priority flag set at assignment time — see DateTaskPriority's
+ *  own doc comment in prisma/schema.prisma. */
+export type DateTaskPriority = "NORMAL" | "URGENT";
+
 export interface DateTaskDTO {
   id: string;
   employeeId: string; // the assignee
@@ -476,6 +488,7 @@ export interface DateTaskDTO {
   hasAttachment: boolean;
   attachmentName: string | null;
   status: DateTaskStatus;
+  priority: DateTaskPriority;
   startedAt: string | null; // ISO — set on ASSIGNED/RETURNED -> IN_PROGRESS
   submittedAt: string | null; // ISO — set on -> AWAITING_REVIEW (was `completedAt`)
   approvedById: string | null;
@@ -732,6 +745,7 @@ export interface OnboardingTemplateDTO {
   description: string | null;
   items: OnboardingTemplateItemDTO[];
 }
+
 // ---------------------------------------------------------------------------
 // Certification (Aug 2026 document gap analysis, item 5) — see src/lib/certification.ts
 // ---------------------------------------------------------------------------
