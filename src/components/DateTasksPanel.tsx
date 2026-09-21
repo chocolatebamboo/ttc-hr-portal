@@ -39,6 +39,12 @@ export default function DateTasksPanel({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  // QA pass (Sept 2026): a simple priority flag on assignment — see DateTaskPriority's own doc
+  // comment in prisma/schema.prisma. CB, Sept 2026: replaced the "Mark as urgent" checkbox with
+  // a proper Normal/Urgent segmented control — the checkbox read as "is this on or off" instead
+  // of "which of these two is it," and a bug in an earlier mockup pass had both options able to
+  // look selected at once. Only one of the two is ever the active segment.
+  const [priority, setPriority] = useState<"NORMAL" | "URGENT">("NORMAL");
   const [submitting, setSubmitting] = useState(false);
   const [addError, setAddError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -72,6 +78,7 @@ export default function DateTasksPanel({
       form.set("taskDate", taskDate);
       form.set("title", title);
       form.set("description", description);
+      form.set("priority", priority);
       if (file) form.set("file", file);
       const res = await fetch(`/api/date-tasks/${employeeId}`, { method: "POST", body: form });
       const data = await res.json().catch(() => ({}));
@@ -82,6 +89,7 @@ export default function DateTasksPanel({
       setTitle("");
       setDescription("");
       setFile(null);
+      setPriority("NORMAL");
       if (fileInputRef.current) fileInputRef.current.value = "";
       await load();
     } catch {
@@ -125,6 +133,30 @@ export default function DateTasksPanel({
           rows={2}
           className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent resize-none"
         />
+        <div className="inline-flex rounded-lg border border-border overflow-hidden text-xs font-semibold" role="radiogroup" aria-label="Priority">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={priority === "NORMAL"}
+            onClick={() => setPriority("NORMAL")}
+            className={`px-3 py-1.5 transition-colors ${
+              priority === "NORMAL" ? "bg-black/[0.06] text-foreground" : "bg-surface text-muted hover:bg-black/[0.03]"
+            }`}
+          >
+            Normal
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={priority === "URGENT"}
+            onClick={() => setPriority("URGENT")}
+            className={`px-3 py-1.5 border-l border-border transition-colors ${
+              priority === "URGENT" ? "bg-rose-600 text-white" : "bg-surface text-muted hover:bg-black/[0.03]"
+            }`}
+          >
+            Urgent
+          </button>
+        </div>
         {addError && <p className="text-xs text-accent">{addError}</p>}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
