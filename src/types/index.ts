@@ -230,6 +230,19 @@ export interface AvailabilitySlot {
   endTime: string; // "HH:MM", 24-hour, after startTime
 }
 
+/** One date's own individual decision within a submission — see
+ *  AvailabilitySubmission.dateDecisions's doc comment in prisma/schema.prisma for the full
+ *  either/or relationship with the existing whole-submission bulk actions. `comment` is that
+ *  date's own reviewer note, separate from the submission-level `reviewComment` a bulk
+ *  decide/deny still uses. */
+export interface AvailabilityDateDecision {
+  date: string; // "YYYY-MM-DD" — matches one entry in this submission's `slots`
+  status: "PENDING" | "APPROVED" | "DENIED";
+  decidedAt: string | null;
+  decidedById: string | null;
+  comment: string | null;
+}
+
 /** One submitted-availability record (see AvailabilitySubmission in prisma/schema.prisma) —
  *  a team member can have many of these over time, same as PtoRequestDTO; approving or
  *  denying one never overwrites another, so the full list is a real history. */
@@ -246,6 +259,10 @@ export interface AvailabilityDTO {
    *  the team member for confirmation"). See AvailabilitySubmission.adjustedSlots's own doc
    *  comment in prisma/schema.prisma for why this is kept even after the employee responds. */
   adjustedSlots: AvailabilitySlot[] | null;
+  /** One entry per date in `slots`, always present and always the same length/dates as `slots` —
+   *  see decideAvailabilityDate in src/lib/availability.ts for how each entry moves off PENDING,
+   *  and this submission's own doc comment above for the either/or with bulk decide/deny. */
+  dateDecisions: AvailabilityDateDecision[];
 }
 
 /** Same shape as AvailabilityDTO plus who it belongs to — for the supervisor/HR-wide
@@ -323,7 +340,6 @@ export interface AdminShiftDTO extends ShiftDTO {
    *  reviewedAt. */
   reviewedByName: string | null;
 }
-
 /** One message in a team member's notes/messaging thread (src/lib/team-notes.ts) — see
  *  TeamNote in prisma/schema.prisma for the full "why one thread per person" reasoning.
  *  attachmentName is shown to the client; the underlying storage key never is — downloading
@@ -715,226 +731,4 @@ export interface OnboardingTemplateDTO {
   name: string;
   description: string | null;
   items: OnboardingTemplateItemDTO[];
-}
-
-// ---------------------------------------------------------------------------
-// Certification (Aug 2026 document gap analysis, item 5) — see src/lib/certification.ts
-// ---------------------------------------------------------------------------
-
-export type CertificationQuestionType =
-  | "MULTIPLE_CHOICE"
-  | "FILL_IN_BLANK"
-  | "CHECKBOX_ALL"
-  | "LIST_MATCH"
-  | "SHORT_ANSWER";
-
-export type CertificationAttemptStatus = "SUBMITTED" | "PASSED" | "FAILED";
-
-export type CertificationReviewOutcome = "MEETS" | "DOES_NOT_MEET";
-
-export interface CertificationOptionDTO {
-  key: string;
-  label: string;
-}
-
-/** What an employee sees while taking the test, or reviewing their own past answers — NEVER
- *  includes the answer key (correctOptionKeys/acceptedAnswers) regardless of who's viewing; see
- *  getCertificationQuestionsForTaking in src/lib/certification.ts. rubric is included since it's
- *  reviewer guidance, not the key itself — low sensitivity either way. */
-export interface CertificationQuestionDTO {
-  id: string;
-  number: number;
-  section: string;
-  sortOrder: number;
-  prompt: string;
-  type: CertificationQuestionType;
-  points: number;
-  options: CertificationOptionDTO[] | null;
-  /** LIST_MATCH only — how many entries the employee should fill in. */
-  requiredMatchCount: number | null;
-}
-
-/** Admin-only — the question bank editor's view, with the answer key included. See
- *  listCertificationQuestionsForAdmin in src/lib/certification.ts. */
-export interface CertificationQuestionAdminDTO extends CertificationQuestionDTO {
-  correctOptionKeys: string[];
-  acceptedAnswers: string[];
-  rubric: string | null;
-  active: boolean;
-}
-
-/** One graded (or awaiting-grading) answer within an attempt — shared by the employee's own
- *  results view and the HR/supervisor review panel; see listCertificationAttempts. Never
- *  includes the question's own answer key, only this response's outcome. */
-export interface CertificationResponseDTO {
-  id: string;
-  questionId: string;
-  number: number;
-  section: string;
-  prompt: string;
-  type: CertificationQuestionType;
-  options: CertificationOptionDTO[] | null;
-  rubric: string | null;
-  answerText: string | null;
-  selectedKeys: string[];
-  isAutoScored: boolean;
-  isCorrect: boolean | null;
-  pointsEarned: number | null;
-  pointsPossible: number;
-  needsManualReview: boolean;
-  reviewOutcome: CertificationReviewOutcome | null;
-  reviewComment: string | null;
-  reviewedAt: string | null;
-}
-
-export interface CertificationAttemptDTO {
-  id: string;
-  status: CertificationAttemptStatus;
-  submittedAt: string;
-  objectivePointsEarned: number;
-  objectivePointsPossible: number;
-  totalPointsPossible: number;
-  manualPointsEarned: number | null;
-  /** Null until every needsManualReview response has been graded. */
-  finalScorePercent: number | null;
-  passThresholdPercent: number;
-  reviewedAt: string | null;
-  responses: CertificationResponseDTO[];
-}
-
-/** One answer the employee is submitting for a single question — see submitCertificationAttempt.
- *  Which of answerText/selectedKeys is used depends on the question's type (MULTIPLE_CHOICE/
- *  CHECKBOX_ALL use selectedKeys; FILL_IN_BLANK/SHORT_ANSWER use answerText; LIST_MATCH reuses
- *  selectedKeys to hold each free-text list entry — see CertificationResponse's doc comment in
- *  schema.prisma). */
-export interface CertificationAnswerInput {
-  questionId: string;
-  answerText?: string;
-  selectedKeys?: string[];
-}
-
-/** Live "does anything need this person's attention right now" summary — see
- *  getOnboardingAttention in src/lib/onboarding.ts. Not a notification feed: there's nothing to
- *  mark read, it's always just the current truth, recomputed on every page load. */
-export interface OnboardingAttentionDTO {
-  needsAttention: boolean;
-  label: string | null;
-}
-
-/** One row in the company directory. Deliberately narrow — see src/lib/directory.ts for why
- *  this list of fields is the entire contract: nothing else is ever selected from Employee for
- *  this feature, so there's nothing sensitive to accidentally widen later. */
-export interface DirectoryEntryDTO {
-  id: string;
-  name: string;
-  jobTitle: string;
-  department: string | null;
-  role: Role;
-  email: string;
-  workPhone: string | null;
-}
-
-export type AnnouncementAudienceType = "EVERYONE" | "DEPARTMENTS" | "EMPLOYEES";
-
-/** What every employee sees on the Announcements page — already filtered by publish/expiration
- *  window and audience match, so there's nothing here to decide client-side. */
-export interface AnnouncementDTO {
-  id: string;
-  title: string;
-  message: string;
-  authorName: string;
-  publishDate: string;
-  expirationDate: string | null;
-  createdAt: string;
-}
-
-/** Admin management view — includes drafts/future/expired posts and who they targeted, which a
- *  regular employee should never see about a post that isn't (yet, or anymore) theirs. */
-export interface AnnouncementAdminDTO {
-  id: string;
-  title: string;
-  message: string;
-  authorName: string;
-  publishDate: string;
-  expirationDate: string | null;
-  createdAt: string;
-  audienceType: AnnouncementAudienceType;
-  audienceLabel: string;
-  isActive: boolean;
-}
-
-/** One row of the payroll hours export — everything TTC's payroll company needs to run pay
- *  for one employee in the chosen period, and nothing more: no rate, no dollar amount, no tax
- *  withholding. See src/lib/payroll.ts for exactly what counts toward each column. */
-export interface PayrollHoursRowDTO {
-  employeeId: string;
-  employeeCode: string;
-  name: string;
-  department: string | null;
-  regularHours: number;
-  vacationHours: number;
-  sickHours: number;
-  personalHours: number;
-  otherLeaveHours: number;
-  totalHours: number;
-}
-
-export interface PayrollHoursReportDTO {
-  startDate: string; // ISO date, e.g. "2026-08-01"
-  endDate: string;
-  rows: PayrollHoursRowDTO[];
-  /** Time entries that overlap the period but aren't Approved yet — their hours are excluded
-   *  from every row above, so a nonzero count here means the export is likely incomplete. */
-  unapprovedEntryCount: number;
-}
-
-/** Phase 4 (client spec, Sept 2026): "a real in-app notification feed" — see Notification's own
- *  doc comment in prisma/schema.prisma for the full list and why each one exists. */
-export type NotificationType =
-  | "SHIFT_CREATED"
-  | "SHIFT_CANCELLED"
-  | "SHIFT_REASSIGNED"
-  | "SHIFT_CHANGE_APPROVED"
-  | "SHIFT_REQUEST_DECLINED"
-  | "SHIFT_REQUEST_RECEIVED"
-  | "AVAILABILITY_APPROVED"
-  | "AVAILABILITY_DENIED"
-  | "AVAILABILITY_ADJUSTMENT_PROPOSED"
-  | "PTO_APPROVED"
-  | "PTO_DENIED"
-  | "DATE_TASK_ASSIGNED"
-  | "DATE_TASK_APPROVED"
-  | "DATE_TASK_RETURNED";
-
-export interface NotificationDTO {
-  id: string;
-  type: NotificationType;
-  title: string;
-  body: string | null;
-  targetType: string;
-  targetId: string;
-  read: boolean;
-  createdAt: string; // ISO
-}
-
-/** One row of Reports > Activity History (client spec, Sept 2026: "Reports and Activity History
- *  views") — admin-only reading of the existing AuditLog table (prisma/schema.prisma), which
- *  every phase from 1 onward has already been writing to. `actorName`/`targetLabel` are resolved
- *  server-side (src/lib/activity.ts) so the UI never has to re-fetch the actor or target record
- *  just to render a readable row. */
-export interface ActivityLogEntryDTO {
-  id: string;
-  actorId: string;
-  actorName: string;
-  action: string;
-  targetType: string;
-  targetId: string;
-  /** A short human label for what targetId actually refers to, when it can be resolved (e.g. a
-   *  Shift's own employee name + date) — falls back to targetType if the target row is gone or
-   *  isn't a type this view knows how to label yet. */
-  targetLabel: string;
-  oldValue: string | null;
-  newValue: string | null;
-  comment: string | null;
-  createdAt: string; // ISO
 }
