@@ -56,24 +56,20 @@ export default function MyDateTasksPanel({ employeeId, taskDate }: { employeeId:
   }, [employeeId, taskDate]);
 
   return (
-    <div className="bg-surface border border-border rounded-2xl overflow-hidden">
-      <div className="divide-y divide-border max-h-[26rem] overflow-y-auto">
-        {loadState === "loading" && (
-          <div className="p-3.5">
-            <div className="h-9 rounded-lg bg-black/[0.04] animate-pulse" />
-          </div>
-        )}
-        {loadState === "error" && (
-          <p className="p-3.5 text-sm text-accent">Unable to load tasks. Please try again.</p>
-        )}
-        {loadState === "ready" && tasks.length === 0 && (
-          <p className="p-3.5 text-sm text-muted">No tasks for this date yet.</p>
-        )}
-        {loadState === "ready" &&
-          tasks.map((t) => (
-            <DateTaskRow key={t.id} task={t} viewerId={employeeId} canReview={false} onChanged={load} />
-          ))}
-      </div>
+    <div className="space-y-2.5 max-h-[28rem] overflow-y-auto p-0.5">
+      {loadState === "loading" && <div className="h-16 rounded-2xl bg-black/[0.04] animate-pulse" />}
+      {loadState === "error" && (
+        <p className="text-sm text-accent bg-surface border border-border rounded-2xl p-3.5">
+          Unable to load tasks. Please try again.
+        </p>
+      )}
+      {loadState === "ready" && tasks.length === 0 && (
+        <p className="text-sm text-muted bg-surface border border-border rounded-2xl p-3.5">
+          No tasks for this date yet.
+        </p>
+      )}
+      {loadState === "ready" &&
+        tasks.map((t) => <DateTaskRow key={t.id} task={t} viewerId={employeeId} canReview={false} onChanged={load} />)}
     </div>
   );
 }
