@@ -100,18 +100,15 @@ export default function DateTasksPanel({
   }
 
   return (
-    <div className="bg-surface border border-border rounded-2xl overflow-hidden">
-      <div className="divide-y divide-border max-h-[26rem] overflow-y-auto">
-        {loadState === "loading" && (
-          <div className="p-3.5">
-            <div className="h-9 rounded-lg bg-black/[0.04] animate-pulse" />
-          </div>
-        )}
-        {loadState === "error" && (
-          <p className="p-3.5 text-sm text-accent">Unable to load tasks. Please try again.</p>
-        )}
+    <div>
+      {/* CB, Sept 2026: "it needs to be like an appropriate colored background" — each task is
+          now its own colored card (DateTaskRow), so this list is a stack of independent cards
+          rather than rows sharing one white box divided by hairlines. */}
+      <div className="space-y-2.5 max-h-[28rem] overflow-y-auto p-0.5">
+        {loadState === "loading" && <div className="h-16 rounded-2xl bg-black/[0.04] animate-pulse" />}
+        {loadState === "error" && <p className="text-sm text-accent">Unable to load tasks. Please try again.</p>}
         {loadState === "ready" && tasks.length === 0 && (
-          <p className="p-3.5 text-sm text-muted">No tasks pushed for this date yet.</p>
+          <p className="text-sm text-muted">No tasks pushed for this date yet.</p>
         )}
         {loadState === "ready" &&
           tasks.map((t) => (
@@ -119,7 +116,7 @@ export default function DateTasksPanel({
           ))}
       </div>
 
-      <form onSubmit={addTask} className="border-t border-border p-3 space-y-2">
+      <form onSubmit={addTask} className="mt-2.5 bg-surface border border-border rounded-2xl p-3 space-y-2">
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
@@ -133,14 +130,14 @@ export default function DateTasksPanel({
           rows={2}
           className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent resize-none"
         />
-        <div className="inline-flex rounded-lg border border-border overflow-hidden text-xs font-semibold" role="radiogroup" aria-label="Priority">
+        <div className="flex w-full rounded-lg border border-border overflow-hidden text-xs font-semibold" role="radiogroup" aria-label="Priority">
           <button
             type="button"
             role="radio"
             aria-checked={priority === "NORMAL"}
             onClick={() => setPriority("NORMAL")}
-            className={`px-3 py-1.5 transition-colors ${
-              priority === "NORMAL" ? "bg-black/[0.06] text-foreground" : "bg-surface text-muted hover:bg-black/[0.03]"
+            className={`flex-1 px-3.5 py-1.5 transition-colors ${
+              priority === "NORMAL" ? "bg-slate-600 text-white" : "bg-black/[0.03] text-muted hover:bg-black/[0.06]"
             }`}
           >
             Normal
@@ -150,8 +147,8 @@ export default function DateTasksPanel({
             role="radio"
             aria-checked={priority === "URGENT"}
             onClick={() => setPriority("URGENT")}
-            className={`px-3 py-1.5 border-l border-border transition-colors ${
-              priority === "URGENT" ? "bg-rose-600 text-white" : "bg-surface text-muted hover:bg-black/[0.03]"
+            className={`flex-1 px-3.5 py-1.5 border-l border-border transition-colors ${
+              priority === "URGENT" ? "bg-rose-600 text-white" : "bg-black/[0.03] text-muted hover:bg-black/[0.06]"
             }`}
           >
             Urgent
