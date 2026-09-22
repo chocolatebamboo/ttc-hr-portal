@@ -339,6 +339,37 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
     }
   }
 
+  // CB, Sept 2026: "even if it's approved, I should still be able to make adjustments... it's
+  // not just final" — the per-date counterpart to undo() above. Reopens just ONE date's own
+  // decision (the rest of a multi-date submission stays exactly as decided), for the case undo()
+  // can't reach: a date decided individually while its submission is still sitting in the
+  // Pending queue because other dates on it aren't decided yet (see
+  // undecideAvailabilityDate's own doc comment in src/lib/availability.ts).
+  async function undoDate(submissionId: string, date: string) {
+    setBusyId(submissionId);
+    setDecideError(undefined);
+    setDecideErrorId(null);
+    try {
+      const res = await fetch(`/api/availability/${submissionId}/undecide-date`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setDecideError(data.error ?? "Unable to reopen that date. Please try again.");
+        setDecideErrorId(submissionId);
+        return;
+      }
+    } catch {
+      setDecideError("Couldn't reach the server. Check your connection and try again.");
+      setDecideErrorId(submissionId);
+    } finally {
+      setBusyId(null);
+      load();
+    }
+  }
+
   // Phase 2 (client spec, Sept 2026): the reviewer's third option besides Approve/Deny —
   // "Adjust the proposed time and send it to the team member for confirmation." Still a
   // whole-submission action (adjustedSlots must cover every date, unchanged) — see Card below
@@ -427,6 +458,7 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                   onDecide={decide}
                   onDecideDate={decideDate}
                   onUndo={undo}
+                  onUndoDate={undoDate}
                   onRequestAdjustment={requestAdjustment}
                   onRemoveConfirm={removeSubmission}
                   onRemoveCancel={cancelRemove}
@@ -487,6 +519,7 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                   onDecide={() => {}}
                   onDecideDate={() => {}}
                   onUndo={undo}
+                  onUndoDate={undoDate}
                   onRequestAdjustment={() => {}}
                   onRemoveConfirm={removeSubmission}
                   onRemoveCancel={cancelRemove}
@@ -515,7 +548,6 @@ function DateDecisionDot({ status }: { status: AvailabilityDateDecision["status"
     />
   );
 }
-
 function Card({
   row: r,
   viewerId,
@@ -534,6 +566,7 @@ function Card({
   onDecide,
   onDecideDate,
   onUndo,
+  onUndoDate,
   onRequestAdjustment,
   onRemoveConfirm,
   onRemoveCancel,
@@ -558,6 +591,7 @@ function Card({
   onDecideDate: (submissionId: string, date: string, decision: "APPROVED" | "DENIED", comment?: string) => void;
   onUndo: (submissionId: string) => void;
   onRequestAdjustment: (submissionId: string, adjustedSlots: AvailabilitySlot[], comment?: string) => void;
+  onUndoDate: (submissionId: string, date: string) => void;
   onRemoveConfirm: (submissionId: string) => void;
   onRemoveCancel: () => void;
   onOpenChat: (employeeId: string, employeeName: string) => void;
@@ -992,10 +1026,30 @@ function Card({
                   </div>
                 )
               ) : (
-                <p className="text-xs font-medium text-white/90">
-                  {openDecision.status === "APPROVED" ? "This date is approved." : "This date is denied."}
-                  {openDecision.comment && <span className="block italic text-white/80 mt-1">&ldquo;{openDecision.comment}&rdquo;</span>}
-                </p>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <p className="text-xs font-medium text-white/90">
+                    {openDecision.status === "APPROVED" ? "This date is approved." : "This date is denied."}
+                    {openDecision.comment && <span className="block italic text-white/80 mt-1">&ldquo;{openDecision.comment}&rdquo;</span>}
+                  </p>
+                  {/* CB, Sept 2026: "even if it's approved, I should still be able to make
+                      adjustments... it's not just final." This date's own decision was already
+                      made while the rest of the submission is still waiting, so the whole-card
+                      Undo above (only shown once the ENTIRE submission is Decided) can't reach
+                      it — this reopens just this one date, leaving every other date's decision
+                      untouched. Hidden once a real shift already exists for this date (task
+                      pushed) — see undecideAvailabilityDate's own doc comment for why that case
+                      goes through Team Schedule instead. */}
+                  {!shiftsByDate.has(`${r.id}:${openChip.date}`) && (
+                    <button
+                      type="button"
+                      onClick={() => onUndoDate(r.id, openChip.date)}
+                      disabled={busy}
+                      className="text-xs font-medium text-white/85 hover:text-white underline underline-offset-2 disabled:opacity-50"
+                    >
+                      Undo
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           )}
