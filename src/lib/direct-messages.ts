@@ -1,3 +1,4 @@
+import type { PrismaClient } from "@prisma/client";
 import { withRlsContext } from "@/lib/db";
 import { getSignedDownloadUrl } from "@/lib/storage";
 import { threadKeyForDirectMessage, markThreadRead, getLastReadMap, isUnread } from "@/lib/message-read-state";
@@ -79,7 +80,7 @@ function toDTO(row: MessageRow, labels: Map<string, string>): DirectMessageDTO {
  *  gets written today, so this only resolves that kind; an unresolvable ref just renders as a
  *  plain message with no card, never an error. */
 async function resolveRefLabels(
-  tx: { dateTask: { findMany: (args: unknown) => Promise<{ id: string; title: string }[]> } },
+  tx: PrismaClient,
   rows: MessageRow[]
 ): Promise<Map<string, string>> {
   const taskIds = [...new Set(rows.filter((r) => r.refType === "DATE_TASK" && r.refId).map((r) => r.refId as string))];
