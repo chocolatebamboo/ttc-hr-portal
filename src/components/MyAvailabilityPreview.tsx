@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import AvailabilityStatusPill from "@/components/AvailabilityStatusPill";
+import SwipeReveal from "@/components/SwipeReveal";
 import { TrashIcon } from "@/components/icons";
 import { slotChips } from "@/lib/availability-format";
 import { toneForStatus, STATUS_TONE } from "@/lib/status-tone";
@@ -48,6 +49,14 @@ export default function MyAvailabilityPreview({
   // pending ADJUSTMENT_REQUESTED is currently in flight for — same single-row-busy shape as
   // deletingId above.
   const [respondingId, setRespondingId] = useState<string | null>(null);
+  // Redesign follow-up (Sept 2026), CB: "I'm still not able to slide to the left and delete for
+  // the submissions... there's no way for me to cancel that." Which submission (if any) a
+  // cancel is currently in flight for — same single-row-busy shape as deletingId above, just for
+  // the separate cancel action (see cancelAvailabilitySubmission's own doc comment in
+  // src/lib/availability.ts for why this is a distinct action from delete: cancel sets a Pending
+  // or Denied submission to Cancelled and keeps the record; delete permanently removes an
+  // already-Cancelled one).
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -75,6 +84,23 @@ export default function MyAvailabilityPreview({
       if (res.ok) setSubmissions((prev) => prev.filter((s) => s.id !== id));
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  // Redesign follow-up (Sept 2026): the swipe-to-cancel counterpart to handleDelete above — same
+  // POST /api/availability/[id]/cancel AvailabilityView's own handleCancel already uses, just
+  // called from this list directly. Pending or Denied only (cancelAvailabilitySubmission enforces
+  // this server-side too); an Approved submission isn't something the employee unwinds
+  // unilaterally, same stance PTO already takes.
+  async function handleCancel(id: string) {
+    setCancellingId(id);
+    try {
+      const res = await fetch(`/api/availability/${id}/cancel`, { method: "POST" });
+      if (!res.ok) return;
+      const updated: AvailabilityDTO = await res.json();
+      setSubmissions((prev) => prev.map((s) => (s.id === id ? updated : s)));
+    } finally {
+      setCancellingId(null);
     }
   }
 
@@ -154,9 +180,17 @@ export default function MyAvailabilityPreview({
             const plain = s.status === "DENIED" || s.status === "CANCELLED";
             const stillInProgress = s.status === "APPROVED" && s.awaitingTask;
             const tone = plain ? null : stillInProgress ? STATUS_TONE.PENDING : toneForStatus(s.status);
-            return (
+            // Redesign follow-up (Sept 2026), CB: "I'm still not able to slide to the left and
+            // delete for the submissions... there's no way for me to cancel that." Same swipe-
+            // reveal pattern used everywhere else in this app (TeamAvailabilityCards, Messages) —
+            // a Pending or Denied submission swipes to reveal Cancel; an already-Cancelled one
+            // swipes to reveal the real, permanent Delete that used to be a plain always-visible
+            // icon button. Approved/Adjustment-requested submissions get neither: nothing here is
+            // the employee's to unwind unilaterally once a supervisor's acted on it.
+            const canCancel = s.status === "PENDING" || s.status === "DENIED";
+            const canDelete = s.status === "CANCELLED";
+            const card = (
               <div
-                key={s.id}
                 className={`rounded-2xl p-4 ${plain ? "border border-border bg-surface" : ""}`}
                 style={
                   tone
@@ -174,20 +208,6 @@ export default function MyAvailabilityPreview({
                   )}
                   <div className="flex items-center gap-2 shrink-0">
                     <AvailabilityStatusPill status={s.status} awaitingTask={s.awaitingTask} onColor={!plain} />
-                    {/* CB, Sept 2026: "the deleting isn't working on these" — a Cancelled
-                        submission has nothing left to act on, so it can go away for good; same
-                        Cancelled-only rule as the Time Off list's own delete. */}
-                    {s.status === "CANCELLED" && (
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(s.id)}
-                        disabled={deletingId === s.id}
-                        aria-label="Delete this submission"
-                        className="h-6 w-6 flex items-center justify-center rounded-full text-muted hover:text-accent hover:bg-accent/10 transition-colors disabled:opacity-50"
-                      >
-                        <TrashIcon className="h-3.5 w-3.5" />
-                      </button>
-                    )}
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
@@ -256,6 +276,40 @@ export default function MyAvailabilityPreview({
                 )}
               </div>
             );
+
+            if (canCancel) {
+              return (
+                <SwipeReveal
+                  key={s.id}
+                  actionSide="right"
+                  actionLabel="Cancel"
+                  actionIcon={<TrashIcon className="h-4 w-4" />}
+                  actionClassName="bg-rose-600 text-white rounded-2xl"
+                  busy={cancellingId === s.id}
+                  onAction={() => handleCancel(s.id)}
+                >
+                  {card}
+                </SwipeReveal>
+              );
+            }
+
+            if (canDelete) {
+              return (
+                <SwipeReveal
+                  key={s.id}
+                  actionSide="right"
+                  actionLabel="Delete"
+                  actionIcon={<TrashIcon className="h-4 w-4" />}
+                  actionClassName="bg-rose-600 text-white rounded-2xl"
+                  busy={deletingId === s.id}
+                  onAction={() => handleDelete(s.id)}
+                >
+                  {card}
+                </SwipeReveal>
+              );
+            }
+
+            return <div key={s.id}>{card}</div>;
           })}
         </div>
       )}
