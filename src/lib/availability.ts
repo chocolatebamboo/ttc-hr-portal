@@ -458,7 +458,7 @@ export async function decideAvailabilityDate(
     const existing = await tx.availabilitySubmission.findUnique({ where: { id: submissionId } });
     if (!existing || existing.status !== "PENDING") {
       throw new InvalidAvailabilityError('Only a "Pending" submission can be decided.');
-    }
+          }
     const slots = existing.slots as unknown as AvailabilitySlot[];
     const decisions = readDateDecisions(slots, existing.dateDecisions);
     const index = decisions.findIndex((d) => d.date === date);
@@ -555,6 +555,85 @@ export async function undecideAvailability(reviewer: CurrentEmployee, submission
 }
 
 /**
+ * CB, Sept 2026: "even if it's approved, I should still be able to make adjustments just in
+ * case as an admin... it's not just final." The per-date counterpart to undecideAvailability
+ * above — that one only ever appears once the WHOLE submission has reached a terminal status
+ * (its own "Undo" button is gated on `!isPending`), so it never helps the in-between case: a
+ * multi-date request where this one date was already approved/denied individually but the
+ * submission as a whole is still sitting in the Pending queue because other dates aren't decided
+ * yet. This reopens just THAT ONE date back to PENDING — decidedAt/decidedById/comment all
+ * cleared, same "as if it had never been decided" shape undecideAvailability gives the whole
+ * submission — while every other date's own decision is left completely untouched.
+ *
+ * Refused once a real Shift already exists for this date (Shift.sourceAvailabilitySubmissionId +
+ * date, same lookup convertAvailabilityDateToShift's own duplicate-guard uses in
+ * src/lib/shifts.ts) — the two-step workflow means that date's shift is already confirmed and
+ * potentially in progress; reopening the availability decision underneath it would leave a
+ * confirmed shift pointing at a date with no real decision behind it. A shift already on the
+ * books gets changed through Team Schedule's own reassign/change/cancel flow instead, not by
+ * unwinding the availability approval that originally produced it.
+ */
+export async function undecideAvailabilityDate(
+  reviewer: CurrentEmployee,
+  submissionId: string,
+  date: string
+): Promise<AvailabilityDTO> {
+  return withRlsContext({ employeeId: reviewer.id, role: reviewer.role }, async (tx) => {
+    const existing = await tx.availabilitySubmission.findUnique({ where: { id: submissionId } });
+    if (!existing) {
+      throw new InvalidAvailabilityError("Submission not found.");
+    }
+    const slots = existing.slots as unknown as AvailabilitySlot[];
+    const decisions = readDateDecisions(slots, existing.dateDecisions);
+    const index = decisions.findIndex((d) => d.date === date);
+    if (index === -1) {
+      throw new InvalidAvailabilityError("That date isn't part of this submission.");
+    }
+    if (decisions[index].status === "PENDING") {
+      throw new InvalidAvailabilityError("This date hasn't been decided yet.");
+    }
+
+    const linkedShift = await tx.shift.findFirst({
+      where: { sourceAvailabilitySubmissionId: submissionId, date, status: { not: "CANCELLED" } },
+      select: { id: true },
+    });
+    if (linkedShift) {
+      throw new InvalidAvailabilityError(
+        "This date already has a confirmed shift — change or cancel it from Team Schedule instead."
+      );
+    }
+
+    const nextDecisions = decisions.slice();
+    nextDecisions[index] = { date, status: "PENDING", decidedAt: null, decidedById: null, comment: null };
+
+    const row = await tx.availabilitySubmission.update({
+      where: { id: submissionId },
+      data: {
+        dateDecisions: nextDecisions as unknown as Prisma.InputJsonValue,
+        // If the submission had already reached a whole-submission terminal status (every date
+        // was decided, so this one date being reopened means it's no longer "fully decided"),
+        // reopen the submission itself back to Pending too — same reasoning undecideAvailability
+        // already applies at the whole-submission level, just reached from one date's own Undo
+        // instead of the card-level one. A submission that was still Pending (other dates not
+        // decided yet) simply stays Pending, unaffected.
+        ...(existing.status !== "PENDING"
+          ? { status: "PENDING", reviewedById: null, reviewedAt: null, reviewComment: null }
+          : {}),
+      },
+    });
+    await writeAuditLog(tx, {
+      actorId: reviewer.id,
+      action: "AVAILABILITY_DATE_UNDECIDED",
+      targetType: "AvailabilitySubmission",
+      targetId: row.id,
+      oldValue: date,
+      newValue: "PENDING",
+    });
+    return toDTO(row);
+  });
+}
+
+/**
  * Phase 2 (client spec, Sept 2026): the reviewer's third option besides outright Approve/Deny —
  * "Adjust the proposed time and send it to the team member for confirmation." adjustedSlots must
  * cover the exact same dates as the submission's own `slots` (only the times may differ — the
@@ -617,8 +696,6 @@ export async function requestAvailabilityAdjustment(
     return toDTO(row);
   });
 }
-
-/**
  * Team member's response to a pending ADJUSTMENT_REQUESTED — "send it to the team member for
  * confirmation." Accepting makes the adjusted times the real, official ones (status → APPROVED,
  * same terminal state a plain Approve reaches, so everything downstream — converting to a
@@ -841,3 +918,4 @@ export async function removeAvailabilitySubmission(actor: CurrentEmployee, submi
     });
   });
 }
+/**
