@@ -130,15 +130,16 @@ export default function TeamPtoCards({ viewerId }: { viewerId: string }) {
 
   return (
     <>
-      <section className="mb-8">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted mb-2.5">
-          Pending ({summary.pending.length})
-        </h2>
-        {summary.pending.length === 0 ? (
-          <div className="rounded-2xl border border-border bg-surface p-4 text-sm text-muted">
-            Nothing pending right now.
-          </div>
-        ) : (
+      {/* Redesign follow-up (Sept 2026), CB: "I don't like how there's pending zero, decided
+          zero, time off request zero, stuff like that... we shouldn't see those things if
+          there's nothing in there." Same fix as TeamAvailabilityCards' matching sections — each
+          heading and its content disappear together once that count is zero, instead of showing
+          an empty "(0)" heading plus a "Nothing pending/decided" placeholder. */}
+      {summary.pending.length > 0 && (
+        <section className="mb-8">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted mb-2.5">
+            Pending ({summary.pending.length})
+          </h2>
           <div className="space-y-3">
             {summary.pending.map((r) => (
               <Card
@@ -159,18 +160,14 @@ export default function TeamPtoCards({ viewerId }: { viewerId: string }) {
               />
             ))}
           </div>
-        )}
-      </section>
+        </section>
+      )}
 
-      <section>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted mb-2.5">
-          Decided ({summary.decided.length})
-        </h2>
-        {summary.decided.length === 0 ? (
-          <div className="rounded-2xl border border-border bg-surface p-4 text-sm text-muted">
-            Nothing decided yet.
-          </div>
-        ) : (
+      {summary.decided.length > 0 && (
+        <section>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted mb-2.5">
+            Decided ({summary.decided.length})
+          </h2>
           <div className="space-y-3">
             {summary.decided.map((r) => (
               <Card
@@ -191,8 +188,8 @@ export default function TeamPtoCards({ viewerId }: { viewerId: string }) {
               />
             ))}
           </div>
-        )}
-      </section>
+        </section>
+      )}
     </>
   );
 }
