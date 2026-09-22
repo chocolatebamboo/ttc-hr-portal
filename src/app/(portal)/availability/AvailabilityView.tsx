@@ -366,7 +366,11 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
             );
           })}
         </div>
-        <button type="button" onClick={() => setCalendarOpen(true)} className="btn-primary w-full text-sm mt-3">
+        <button
+          type="button"
+          onClick={() => setCalendarOpen(true)}
+          className="btn-primary w-full text-sm py-2.5 mt-3"
+        >
           Add availability
         </button>
       </div>
@@ -393,25 +397,37 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
               Unable to load your availability. Please try again or contact HR.
             </div>
           )}
+          {/* CB, Sept 2026: "I don't want it to take over... even if it's a little bit shorter...
+              I still want to be able to see the month and the days." AvailabilityCalendar was
+              originally built to be the whole page's remaining height once opened (this page's
+              only accordion that ever claimed real vertical space) — here it's one widget among
+              several, so it gets a fixed, modest, self-scrolling panel instead: the month grid
+              and day-tap popup all still work exactly as before, just inside a bounded box rather
+              than pushing the rest of the page open-endedly down. */}
           {loadState === "ready" && (
-            <AvailabilityCalendar
-              controls={{
-                employeeId,
-                submissions,
-                onSubmit: handleSubmit,
-                submitting,
-                error,
-                onCancel: handleCancel,
-                cancellingId,
-                onRemoveDate: handleRemoveDate,
-                removingDateKey,
-                onDeleteSubmission: handleDeleteSubmission,
-                deletingSubmissionId,
-                onSubmitTimeOff: handleSubmitTimeOff,
-                submittingTimeOff,
-                timeOffError,
-              }}
-            />
+            <div
+              className="rounded-2xl border border-border bg-surface p-3 overflow-y-auto"
+              style={{ maxHeight: "28rem" }}
+            >
+              <AvailabilityCalendar
+                controls={{
+                  employeeId,
+                  submissions,
+                  onSubmit: handleSubmit,
+                  submitting,
+                  error,
+                  onCancel: handleCancel,
+                  cancellingId,
+                  onRemoveDate: handleRemoveDate,
+                  removingDateKey,
+                  onDeleteSubmission: handleDeleteSubmission,
+                  deletingSubmissionId,
+                  onSubmitTimeOff: handleSubmitTimeOff,
+                  submittingTimeOff,
+                  timeOffError,
+                }}
+              />
+            </div>
           )}
         </div>
       )}
