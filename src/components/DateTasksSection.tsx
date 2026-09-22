@@ -52,12 +52,8 @@ export default function DateTasksSection({ className, employeeId }: { className?
   return (
     <div className={className}>
       <h2 className="text-sm font-medium text-muted mb-2">Your tasks</h2>
-      <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
-        {loadState === "loading" && (
-          <div className="p-4">
-            <div className="h-10 rounded-lg bg-black/[0.04] animate-pulse" />
-          </div>
-        )}
+      <div className="space-y-2.5">
+        {loadState === "loading" && <div className="h-16 rounded-2xl bg-black/[0.04] animate-pulse" />}
         {loadState === "ready" &&
           tasks.map((t) => (
             <DateTaskRow key={t.id} task={t} viewerId={employeeId} canReview={false} showDate onChanged={load} />
