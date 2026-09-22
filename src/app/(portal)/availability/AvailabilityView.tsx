@@ -5,7 +5,7 @@ import AvailabilityCalendar from "@/components/AvailabilityCalendar";
 import LoggedHoursSection from "@/components/LoggedHoursSection";
 import MyAvailabilityPreview from "@/components/MyAvailabilityPreview";
 import TimeOffRequests from "@/components/TimeOffRequests";
-import { ChevronDownIcon, CalendarIcon } from "@/components/icons";
+import { ChevronDownIcon } from "@/components/icons";
 import type { AvailabilityDTO, AvailabilitySlot, PtoType, TimeEntryDTO, PtoRequestDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
@@ -97,6 +97,14 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
   // loads first, same "don't force the calendar to dominate the page" reasoning Brief #6 already
   // established, just reached a different way now.
   const [calendarOpen, setCalendarOpen] = useState(false);
+  // Redesign follow-up (Sept 2026), CB: "I should be able to click within the days, within the
+  // week and select... it's not giving me the flexibility to select from that view." Tapping a
+  // day in the "This week" strip below sets this to that date and opens the calendar; the
+  // calendar reacts to it exactly as if that date had been tapped on its own month grid (opens
+  // its existing submission, or starts a fresh draft right on that date) — see AvailabilityCalendar's
+  // own focusDate handling. Cleared back to null once the calendar's acted on it, via
+  // onFocusDateHandled, so tapping the same day again later still fires.
+  const [focusDateKey, setFocusDateKey] = useState<string | null>(null);
   // Same "opened from a summary, not always-open" treatment for the two stat tiles' own detail
   // views — tapping "Logged hours" or "Time off" (or "Request time off" inside that tile) reveals
   // the exact same LoggedHoursSection / TimeOffRequests this page always had, corrections and
@@ -329,16 +337,33 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
       {/* "This week" — always visible, no tap required to see it. Each day that has an active
           submitted slot shows amber-filled with its compact hour range; today gets its own ring
           regardless of whether it's also submitted, so "today" and "submitted" read as two
-          separate, layerable facts rather than one color doing double duty. */}
+          separate, layerable facts rather than one color doing double duty.
+          Redesign follow-up (Sept 2026), CB: "I should be able to click within the days... and
+          select" plus "the drop down for the calendar... needs to be a little bit more
+          integrated... it's still kind of clunky." Two changes from the first version: (1) every
+          day cell is now a real button — tapping one opens the full calendar already focused on
+          that exact date (see focusDateKey above and AvailabilityCalendar's own focusDate
+          handling), not just a generic "go find it yourself" expand; (2) the full calendar no
+          longer lives in its own separate bordered card below this one — it now opens INSIDE this
+          same card, right under the day strip, so the whole thing reads as one widget that
+          expands rather than two stacked cards that happen to be related. */}
       <div className="mb-4 md:shrink-0 rounded-2xl border border-border bg-surface p-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold">This week</h2>
           <button
             type="button"
-            onClick={() => setCalendarOpen(true)}
-            className="text-xs font-medium text-accent-ink hover:underline flex items-center gap-0.5"
+            onClick={() => setCalendarOpen((v) => !v)}
+            className="text-xs font-medium text-accent-ink hover:underline flex items-center gap-1"
           >
-            Full calendar <span aria-hidden>›</span>
+            {calendarOpen ? (
+              <>
+                Hide calendar <ChevronDownIcon className="h-3.5 w-3.5 rotate-180" />
+              </>
+            ) : (
+              <>
+                Full calendar <span aria-hidden>›</span>
+              </>
+            )}
           </button>
         </div>
         <div className="grid grid-cols-7 gap-1.5">
@@ -347,11 +372,16 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
             const slot = activeSlotFor(dateKey);
             const isToday = dateKey === todayKey;
             return (
-              <div
+              <button
+                type="button"
                 key={dateKey}
-                className={`flex flex-col items-center rounded-xl py-2 ${slot ? "bg-amber-100" : "bg-black/[0.03]"} ${
-                  isToday ? "ring-2 ring-accent" : ""
-                }`}
+                onClick={() => {
+                  setCalendarOpen(true);
+                  setFocusDateKey(dateKey);
+                }}
+                className={`flex flex-col items-center rounded-xl py-2 transition-colors ${
+                  slot ? "bg-amber-100 hover:bg-amber-200" : "bg-black/[0.03] hover:bg-black/[0.06]"
+                } ${isToday ? "ring-2 ring-accent" : ""}`}
               >
                 <span className="text-[10px] font-medium text-muted uppercase">
                   {d.toLocaleDateString(undefined, { weekday: "short" })}
@@ -362,75 +392,66 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
                     {compactHour(slot.startTime)} to {compactHour(slot.endTime)}
                   </span>
                 )}
-              </div>
+              </button>
             );
           })}
         </div>
-        <button
-          type="button"
-          onClick={() => setCalendarOpen(true)}
-          className="btn-primary w-full text-sm py-2.5 mt-3"
-        >
-          Add availability
-        </button>
-      </div>
 
-      {calendarOpen && (
-        <div className="mb-4 md:shrink-0">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-sm font-medium text-muted flex items-center gap-1.5">
-              <CalendarIcon className="h-3.5 w-3.5" /> Full calendar
-            </h2>
-            <button
-              type="button"
-              onClick={() => setCalendarOpen(false)}
-              className="text-xs font-medium text-muted hover:text-accent-ink flex items-center gap-0.5"
-            >
-              Hide <ChevronDownIcon className="h-3.5 w-3.5 rotate-180" />
-            </button>
+        {!calendarOpen && (
+          <button
+            type="button"
+            onClick={() => setCalendarOpen(true)}
+            className="btn-primary w-full text-sm py-2.5 mt-3"
+          >
+            Add availability
+          </button>
+        )}
+
+        {calendarOpen && (
+          <div className="mt-3.5 pt-3.5 border-t border-border">
+            {loadState === "loading" && (
+              <div className="h-64 rounded-xl border border-border bg-surface animate-pulse" />
+            )}
+            {loadState === "error" && (
+              <div className="rounded-xl border border-border bg-surface p-6 text-sm text-accent">
+                Unable to load your availability. Please try again or contact HR.
+              </div>
+            )}
+            {/* CB, Sept 2026: "I don't want it to take over... even if it's a little bit
+                shorter... I still want to be able to see the month and the days." A fixed,
+                modest, self-scrolling panel rather than claiming the rest of the page's height —
+                the month grid and day-tap popup all still work exactly as before, just inside a
+                bounded box. */}
+            {loadState === "ready" && (
+              <div
+                className="rounded-2xl border border-border bg-surface p-3 overflow-y-auto"
+                style={{ maxHeight: "28rem" }}
+              >
+                <AvailabilityCalendar
+                  controls={{
+                    employeeId,
+                    submissions,
+                    onSubmit: handleSubmit,
+                    submitting,
+                    error,
+                    onCancel: handleCancel,
+                    cancellingId,
+                    onRemoveDate: handleRemoveDate,
+                    removingDateKey,
+                    onDeleteSubmission: handleDeleteSubmission,
+                    deletingSubmissionId,
+                    onSubmitTimeOff: handleSubmitTimeOff,
+                    submittingTimeOff,
+                    timeOffError,
+                    focusDate: focusDateKey,
+                    onFocusDateHandled: () => setFocusDateKey(null),
+                  }}
+                />
+              </div>
+            )}
           </div>
-          {loadState === "loading" && (
-            <div className="h-64 rounded-xl border border-border bg-surface animate-pulse" />
-          )}
-          {loadState === "error" && (
-            <div className="rounded-xl border border-border bg-surface p-6 text-sm text-accent">
-              Unable to load your availability. Please try again or contact HR.
-            </div>
-          )}
-          {/* CB, Sept 2026: "I don't want it to take over... even if it's a little bit shorter...
-              I still want to be able to see the month and the days." AvailabilityCalendar was
-              originally built to be the whole page's remaining height once opened (this page's
-              only accordion that ever claimed real vertical space) — here it's one widget among
-              several, so it gets a fixed, modest, self-scrolling panel instead: the month grid
-              and day-tap popup all still work exactly as before, just inside a bounded box rather
-              than pushing the rest of the page open-endedly down. */}
-          {loadState === "ready" && (
-            <div
-              className="rounded-2xl border border-border bg-surface p-3 overflow-y-auto"
-              style={{ maxHeight: "28rem" }}
-            >
-              <AvailabilityCalendar
-                controls={{
-                  employeeId,
-                  submissions,
-                  onSubmit: handleSubmit,
-                  submitting,
-                  error,
-                  onCancel: handleCancel,
-                  cancellingId,
-                  onRemoveDate: handleRemoveDate,
-                  removingDateKey,
-                  onDeleteSubmission: handleDeleteSubmission,
-                  deletingSubmissionId,
-                  onSubmitTimeOff: handleSubmitTimeOff,
-                  submittingTimeOff,
-                  timeOffError,
-                }}
-              />
-            </div>
-          )}
-        </div>
-      )}
+        )}
+      </div>
 
       {/* "Your submissions" — the same colored-card list CB already approved on
           MyAvailabilityPreview, now always shown here instead of behind a collapsed count. */}
