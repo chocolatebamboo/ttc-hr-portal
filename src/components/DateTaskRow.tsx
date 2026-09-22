@@ -248,3 +248,240 @@ export default function DateTaskRow({
               style={{ color: ink }}
             >
               {STATUS_LABEL[task.status]}
+                          </span>
+            {/* QA pass (Sept 2026): a simple priority flag — deliberately just this one badge,
+                shown only when URGENT, rather than a NORMAL badge nobody needs to see. Same
+                solid-white-pill treatment as the status badge, rose text stays constant
+                regardless of the card's own tone so "urgent" always reads the same. */}
+            {task.priority === "URGENT" && (
+              <span className="inline-flex items-center rounded-full bg-white px-2.5 py-0.5 text-[11px] font-semibold shrink-0 text-rose-700 shadow-sm">
+                Urgent
+              </span>
+            )}
+          </div>
+
+          {showDate && <p className="text-xs text-white/75 mt-0.5">{formatTaskDate(task.taskDate)}</p>}
+
+          {task.description && (
+            <p className="text-sm text-white/90 mt-1 whitespace-pre-wrap break-words">{task.description}</p>
+          )}
+
+          <p className="text-xs text-white/75 mt-1.5">
+            {task.status === "ASSIGNED" && `From ${task.createdByName}`}
+            {task.status === "IN_PROGRESS" && `In progress — from ${task.createdByName}`}
+            {task.status === "AWAITING_REVIEW" && "Submitted — awaiting review"}
+            {task.status === "APPROVED" && `Confirmed by ${task.approvedByName ?? "a reviewer"}`}
+            {task.status === "RETURNED" && `Sent back by ${task.returnedByName ?? "a reviewer"}`}
+          </p>
+
+          {task.status === "RETURNED" && task.returnNote && (
+            <div className="rounded-lg bg-white/95 px-3 py-2 text-sm text-rose-800 mt-2 shadow-sm">
+              {task.returnNote}
+            </div>
+          )}
+
+          {task.hasAttachment && (
+            <button
+              onClick={handleDownload}
+              disabled={downloading}
+              className="mt-1.5 flex items-center gap-1.5 text-xs font-medium text-white underline underline-offset-2 decoration-white/50 hover:decoration-white"
+            >
+              <DownloadIcon className="h-3.5 w-3.5" />
+              {task.attachmentName ?? "Attachment"}
+            </button>
+          )}
+
+          {actionError && <p className="text-xs font-medium text-white mt-1.5 bg-black/15 rounded px-2 py-1 inline-block">{actionError}</p>}
+
+          {isOwnTask && task.status === "ASSIGNED" && (
+            <button
+              onClick={() => runAction("start")}
+              disabled={busy}
+              className="mt-2 block text-xs font-semibold text-white underline underline-offset-2 decoration-white/50 hover:decoration-white disabled:opacity-50"
+            >
+              Start this task
+            </button>
+          )}
+        </div>
+
+        <div className="flex flex-col items-end gap-2 shrink-0">
+          {/* CB, Sept 2026: "a bubble or a circle or something like that to confirm that it's
+              complete would be appropriate" — replaces the old plain "Submit" text button. An
+              empty ring while there's still something to do, filled solid white with a check
+              once it's actually Approved; AWAITING_REVIEW sits in between (already turned in,
+              not yet confirmed) as a dimmer, non-interactive ring so it doesn't look tappable
+              while it's genuinely out of the team member's hands. */}
+          {canTapComplete && (
+            <button
+              type="button"
+              onClick={() => runAction("submit")}
+              disabled={busy}
+              aria-label="Mark this task complete"
+              title="Mark complete"
+              className="h-9 w-9 rounded-full border-2 border-white/70 hover:bg-white/15 active:bg-white/25 transition-colors disabled:opacity-50 shrink-0"
+            />
+          )}
+          {isOwnTask && task.status === "AWAITING_REVIEW" && (
+            <div
+              className="h-9 w-9 rounded-full border-2 border-white/40 flex items-center justify-center shrink-0"
+              aria-label="Awaiting review"
+              title="Awaiting review"
+            >
+              <span className="h-2 w-2 rounded-full bg-white/70" />
+            </div>
+          )}
+          {task.status === "APPROVED" && (
+            <div
+              className="h-9 w-9 rounded-full bg-white flex items-center justify-center shadow-sm shrink-0"
+              aria-label="Complete"
+              title="Complete"
+            >
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke={ink} strokeWidth="2.4">
+                <path d="m6 12.5 4 4 8-9" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+          )}
+          {canReview && task.status === "AWAITING_REVIEW" && (
+            <>
+              <button
+                onClick={() => runAction("approve")}
+                disabled={busy}
+                className="text-xs font-semibold text-white bg-white/20 hover:bg-white/30 rounded-full px-3 py-1 disabled:opacity-50 whitespace-nowrap"
+              >
+                Approve
+              </button>
+              <button
+                onClick={() => setReturning((v) => !v)}
+                disabled={busy}
+                className="text-xs font-medium text-white/85 hover:text-white disabled:opacity-50 whitespace-nowrap"
+              >
+                Send back
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {returning && (
+        <div className="mt-2.5 flex flex-col sm:flex-row gap-2">
+          <input
+            type="text"
+            value={returnNote}
+            onChange={(e) => setReturnNote(e.target.value)}
+            placeholder="What needs to change?"
+            className="flex-1 rounded-lg border border-white/40 bg-white/95 px-3 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-white"
+          />
+          <button
+            onClick={submitReturn}
+            disabled={busy || !returnNote.trim()}
+            className="text-xs font-semibold text-white bg-white/20 hover:bg-white/30 rounded-lg px-3 py-1.5 whitespace-nowrap disabled:opacity-50"
+          >
+            Send back
+          </button>
+        </div>
+      )}
+
+      {/* CB, round four: "I don't like how the comment is like above it. I want to be able to
+          make a comment under that specific task so that we have a conversation within that." —
+          this toggle and the thread it opens are pinned directly under THIS task's own content
+          (title/description/status/actions above, nothing else in between), and the copy says so
+          explicitly rather than just "Comment" so it never reads as a general/shared thread.
+          QA pass, CB: "I don't like how the icon looks for the comment on this task" — this is
+          the same real ChatIcon used everywhere else messaging shows up in this app (My Messages,
+          etc.), not a placeholder glyph. */}
+      <button
+        onClick={() => setCommentsOpen((v) => !v)}
+        className="mt-3 pt-3 border-t border-white/25 w-full flex items-center gap-1.5 text-xs font-medium text-white/90 hover:text-white"
+      >
+        <ChatIcon className="h-3.5 w-3.5" />
+        {task.commentCount > 0
+          ? `${task.commentCount} comment${task.commentCount === 1 ? "" : "s"} on this task`
+          : "Comment on this task"}
+        <ChevronDownIcon className={`h-3 w-3 transition-transform ${commentsOpen ? "rotate-180" : ""}`} />
+      </button>
+
+      {commentsOpen && (
+        <div className="mt-2 rounded-xl bg-white/15 overflow-hidden">
+          <div className="p-3 space-y-2.5 max-h-64 overflow-y-auto">
+            {commentLoadState === "loading" && <div className="h-8 rounded-lg bg-white/10 animate-pulse" />}
+            {commentLoadState === "error" && (
+              <p className="text-xs text-white">Unable to load comments. Please try again.</p>
+            )}
+            {commentLoadState === "ready" && comments.length === 0 && (
+              <p className="text-xs text-white/75">No comments yet — this is where the conversation about this task will show up.</p>
+            )}
+            {commentLoadState === "ready" &&
+              comments.map((c) => {
+                const mine = c.authorId === viewerId;
+                return (
+                  <div key={c.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+                    <div
+                      className={`max-w-[85%] rounded-xl px-3 py-2 ${mine ? "text-white" : "bg-white/95 text-foreground"}`}
+                      style={mine ? { background: "var(--ttc-blue)" } : undefined}
+                    >
+                      {!mine && <p className="text-[11px] font-semibold mb-0.5">{c.authorName}</p>}
+                      {c.body && <p className="text-sm whitespace-pre-wrap break-words">{c.body}</p>}
+                      {c.hasAttachment && (
+                        <button
+                          onClick={() => handleCommentDownload(c.id)}
+                          disabled={downloadingCommentId === c.id}
+                          className={`mt-1 flex items-center gap-1.5 text-xs font-medium underline ${mine ? "text-white/90" : "text-accent-ink"}`}
+                        >
+                          <DownloadIcon className="h-3.5 w-3.5" />
+                          {c.attachmentName ?? "Attachment"}
+                        </button>
+                      )}
+                      <p className={`text-[10px] mt-1 ${mine ? "text-white/70" : "text-muted"}`}>
+                        {formatCommentTime(c.createdAt)}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+
+          <form onSubmit={sendComment} className="border-t border-white/20 p-2.5 space-y-1.5">
+            <textarea
+              value={commentBody}
+              onChange={(e) => setCommentBody(e.target.value)}
+              placeholder="Reply about this task…"
+              rows={2}
+              className="w-full rounded-lg border border-white/30 bg-white/95 px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-white resize-none"
+            />
+            {commentError && <p className="text-xs text-white">{commentError}</p>}
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <input
+                  ref={commentFileInputRef}
+                  type="file"
+                  onChange={(e) => setCommentFile(e.target.files?.[0] ?? null)}
+                  className="text-xs text-white/80 max-w-[8rem]"
+                />
+                {commentFile && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCommentFile(null);
+                      if (commentFileInputRef.current) commentFileInputRef.current.value = "";
+                    }}
+                    className="text-xs text-white/80 hover:text-white shrink-0"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+              <button
+                type="submit"
+                disabled={sendingComment || (!commentBody.trim() && !commentFile)}
+                className="text-xs font-semibold shrink-0 rounded-full px-3 py-1.5 bg-white disabled:opacity-50"
+                style={{ color: ink }}
+              >
+                {sendingComment ? "Sending…" : "Send"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
