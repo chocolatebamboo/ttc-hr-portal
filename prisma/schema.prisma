@@ -204,10 +204,18 @@ enum TimeAuditAction {
   AUTO_CLOCK_OUT
 }
 
+// Append-only: prisma/rls.sql grants no UPDATE/DELETE policy on this table to anyone, so an
+// audit row can never be edited or removed on its own once written. `onDelete: Cascade` is the
+// one exception — when the entry itself is deleted wholesale (see deleteEmployeeTimeEntry in
+// src/lib/time-actions.ts), its audit rows go with it, the same way its TimeSession rows already
+// do. That's safe specifically because PostgreSQL's foreign-key referential actions always
+// bypass row security, so the cascade fires with no delete policy required (see the 2026-09-22
+// migration for the full reasoning) — the append-only guarantee still holds for every entry that
+// isn't being deleted.
 model TimeEntryAuditEvent {
   id          String           @id @default(uuid())
   timeEntryId String
-  timeEntry   TimeEntry        @relation(fields: [timeEntryId], references: [id])
+  timeEntry   TimeEntry        @relation(fields: [timeEntryId], references: [id], onDelete: Cascade)
 
   action      TimeAuditAction
   actorId     String?
