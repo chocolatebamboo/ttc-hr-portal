@@ -5,6 +5,7 @@ import { getSignedDownloadUrl, uploadDateTaskFile } from "@/lib/storage";
 import { writeAuditLog } from "@/lib/audit-log";
 import { writeNotification } from "@/lib/notifications";
 import { readDateDecisions } from "@/lib/availability";
+import { postMessage } from "@/lib/direct-messages";
 import type { AvailabilitySlot, CurrentEmployee, DateTaskCommentDTO, DateTaskDTO } from "@/types";
 
 /**
@@ -297,7 +298,7 @@ export async function getDateTaskAttachmentUrl(actor: CurrentEmployee, taskId: s
     throw new DateTaskNotFoundError();
   }
   await assertCanAccessEmployeeRecords(actor, row.employeeId);
-
+  
   return getSignedDownloadUrl(row.attachmentKey);
 }
 
@@ -503,7 +504,21 @@ export async function listDateTaskComments(actor: CurrentEmployee, taskId: strin
  *  posting — and the route layer doesn't know that id until this function resolves it. The
  *  employeeId lookup+authorization runs in its own short transaction, and the (potentially slow,
  *  external) storage upload happens between transactions rather than inside one — same reasoning
- *  as why every other uploader in this app runs before withRlsContext, not within it. */
+ *  as why every other uploader in this app runs before withRlsContext, not within it.
+ *
+ * CB, Sept 2026: "I should be able to kind of like reference within the conversation of my
+ * message with a specific team member" — every comment with real text also mirrors as a DM (see
+ * postMessage's own `ref` param in src/lib/direct-messages.ts) to whoever the OTHER side of this
+ * task's conversation is, so it shows up as a linked reference card in the normal My Messages
+ * thread with that person too, not only here. There's no stored participant list a task's thread
+ * is scoped to (access is still governed by assertCanAccessEmployeeRecords — self/supervisor/
+ * admin, same as reading it), so "the other side" is inferred: if the poster isn't the task's own
+ * employee, mirror to that employee (the common case — a supervisor commenting on someone's
+ * task); if the poster IS that employee, mirror to whoever else has already posted here, if
+ * anyone has. A brand-new task with no reply yet, or an attachment-only comment with no real
+ * text, simply doesn't mirror — nothing wrong with that, just nobody to send it to yet. Best-
+ * effort like every other secondary side effect in this app: a failed mirror never fails the
+ * comment post itself. */
 export async function addDateTaskComment(
   actor: CurrentEmployee,
   taskId: string,
@@ -513,16 +528,26 @@ export async function addDateTaskComment(
   const trimmed = body.trim();
   if (!trimmed && !file) throw new InvalidDateTaskError("Write a comment or attach a file.");
 
-  const task: { employeeId: string } | null = await withRlsContext(
+  const task: { employeeId: string; taskDate: string } | null = await withRlsContext(
     { employeeId: actor.id, role: actor.role },
-    async (tx) => tx.dateTask.findUnique({ where: { id: taskId }, select: { employeeId: true } })
+    async (tx) => tx.dateTask.findUnique({ where: { id: taskId }, select: { employeeId: true, taskDate: true } })
   );
   if (!task) throw new DateTaskNotFoundError();
   await assertCanAccessEmployeeRecords(actor, task.employeeId);
 
   const attachment = file ? { key: await uploadDateTaskFile(file, task.employeeId), name: file.name } : undefined;
 
-  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+  const { comment, counterpartId } = await withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    let counterpartId: string | null = task.employeeId !== actor.id ? task.employeeId : null;
+    if (!counterpartId) {
+      const priorReply = await tx.dateTaskComment.findFirst({
+        where: { taskId, authorId: { not: actor.id } },
+        orderBy: { createdAt: "desc" },
+        select: { authorId: true },
+      });
+      counterpartId = priorReply?.authorId ?? null;
+    }
+
     const row: CommentRow = await tx.dateTaskComment.create({
       data: {
         taskId,
@@ -533,8 +558,18 @@ export async function addDateTaskComment(
       },
       include: COMMENT_INCLUDE,
     });
-    return commentToDTO(row);
+    return { comment: commentToDTO(row), counterpartId };
   });
+
+  if (trimmed && counterpartId) {
+    try {
+      await postMessage(actor, counterpartId, trimmed, undefined, { type: "DATE_TASK", id: taskId, date: task.taskDate });
+    } catch {
+      // best-effort — see this function's own doc comment above
+    }
+  }
+
+  return comment;
 }
 
 /** A short-lived signed URL for one comment's attachment — same access rule as the comment
