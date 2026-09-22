@@ -1,7 +1,13 @@
 import { withRlsContext } from "@/lib/db";
 import { getSignedDownloadUrl } from "@/lib/storage";
 import { threadKeyForDirectMessage, markThreadRead, getLastReadMap, isUnread } from "@/lib/message-read-state";
-import type { CurrentEmployee, DirectConversationSummaryDTO, DirectMessageDTO } from "@/types";
+import type {
+  CurrentEmployee,
+  DirectConversationSummaryDTO,
+  DirectMessageDTO,
+  DirectMessageRefDTO,
+  DirectMessageRefType,
+} from "@/types";
 
 export class InvalidDirectMessageError extends Error {
   constructor(message: string) {
@@ -32,9 +38,26 @@ type MessageRow = {
   attachmentName: string | null;
   createdAt: Date;
   sender: NameFields;
+  refType: string | null;
+  refId: string | null;
+  refDate: string | null;
 };
 
-function toDTO(row: MessageRow): DirectMessageDTO {
+/** Turns a raw ref{Type,Id,Date} triple into the labeled DTO shape the client actually renders
+ *  — the reference card CB asked for ("I should be able to kind of like reference within the
+ *  conversation of my message with a specific team member"), first wired up for DATE_TASK:
+ *  every comment posted on a task now mirrors here (see addDateTaskComment's own doc comment in
+ *  src/lib/date-tasks.ts) so the conversation it came from is one tap away from the DM it shows
+ *  up in. `labels` is a pre-resolved id->label map (see resolveRefLabels below) — keeping the
+ *  actual lookup out of this function means toDTO stays a plain sync mapper, same as before. */
+function toDTO(row: MessageRow, labels: Map<string, string>): DirectMessageDTO {
+  let ref: DirectMessageRefDTO | null = null;
+  if (row.refType && row.refId) {
+    const label = labels.get(`${row.refType}:${row.refId}`);
+    if (label) {
+      ref = { type: row.refType as DirectMessageRefType, id: row.refId, date: row.refDate, label };
+    }
+  }
   return {
     id: row.id,
     senderId: row.senderId,
@@ -44,11 +67,27 @@ function toDTO(row: MessageRow): DirectMessageDTO {
     hasAttachment: row.attachmentKey !== null,
     attachmentName: row.attachmentName,
     createdAt: row.createdAt.toISOString(),
-    // Nothing can attach one yet — DirectMessage.refType/refId/refDate exist in the schema
-    // (see its doc comment in prisma/schema.prisma) so this doesn't need a second migration
-    // once the "attach a reference" UI ships as a follow-up.
-    ref: null,
+    ref,
   };
+}
+
+/** Batch-resolves every DATE_TASK ref among `rows` to its task's own title in one query, rather
+ *  than one lookup per message — same "fine at this company's size, one query beats N" tradeoff
+ *  this file already makes elsewhere (listConversationSummaries' own comment). AVAILABILITY_DATE
+ *  and PTO_REQUEST are declared on DirectMessageRefType (prisma/schema.prisma's own doc comment
+ *  reserved all three from the start) but nothing attaches those yet — only DATE_TASK actually
+ *  gets written today, so this only resolves that kind; an unresolvable ref just renders as a
+ *  plain message with no card, never an error. */
+async function resolveRefLabels(
+  tx: { dateTask: { findMany: (args: unknown) => Promise<{ id: string; title: string }[]> } },
+  rows: MessageRow[]
+): Promise<Map<string, string>> {
+  const taskIds = [...new Set(rows.filter((r) => r.refType === "DATE_TASK" && r.refId).map((r) => r.refId as string))];
+  const labels = new Map<string, string>();
+  if (taskIds.length === 0) return labels;
+  const tasks = await tx.dateTask.findMany({ where: { id: { in: taskIds } }, select: { id: true, title: true } });
+  for (const t of tasks) labels.set(`DATE_TASK:${t.id}`, t.title);
+  return labels;
 }
 
 /**
@@ -117,7 +156,7 @@ export async function listConversationSummaries(actor: CurrentEmployee): Promise
  */
 export async function listMessages(actor: CurrentEmployee, otherEmployeeId: string): Promise<DirectMessageDTO[]> {
   const messages = await withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
-    const rows = await tx.directMessage.findMany({
+    const rows: MessageRow[] = await tx.directMessage.findMany({
       where: {
         OR: [
           { senderId: actor.id, recipientId: otherEmployeeId },
@@ -127,7 +166,8 @@ export async function listMessages(actor: CurrentEmployee, otherEmployeeId: stri
       include: { sender: { select: { firstName: true, lastName: true, preferredName: true } } },
       orderBy: { createdAt: "asc" },
     });
-    return rows.map(toDTO);
+    const labels = await resolveRefLabels(tx, rows);
+    return rows.map((row) => toDTO(row, labels));
   });
 
   // Correction brief #1 — see listTeamNotes' matching comment in src/lib/team-notes.ts for why
@@ -143,12 +183,19 @@ export async function listMessages(actor: CurrentEmployee, otherEmployeeId: stri
  * `recipientId` is checked against a real Employee row rather than trusted outright — RLS would
  * still stop a bogus id from ever being readable back, but failing fast here gives a real error
  * message instead of a silently orphaned row.
+ *
+ * `ref` attaches the reference-card columns reserved on DirectMessage since the start (see its
+ * own doc comment in prisma/schema.prisma) — CB, Sept 2026: "I should be able to kind of like
+ * reference within the conversation of my message with a specific team member." Nothing in this
+ * app's own UI lets someone attach one directly yet; today the only caller is
+ * addDateTaskComment's mirror (src/lib/date-tasks.ts), which passes the task it was posted from.
  */
 export async function postMessage(
   actor: CurrentEmployee,
   recipientId: string,
   body: string,
-  attachment?: { key: string; name: string }
+  attachment?: { key: string; name: string },
+  ref?: { type: "DATE_TASK"; id: string; date: string | null }
 ): Promise<DirectMessageDTO> {
   if (recipientId === actor.id) {
     throw new InvalidDirectMessageError("You can't message yourself.");
@@ -164,17 +211,21 @@ export async function postMessage(
       throw new InvalidDirectMessageError("That person couldn't be found.");
     }
 
-    const row = await tx.directMessage.create({
+    const row: MessageRow = await tx.directMessage.create({
       data: {
         senderId: actor.id,
         recipientId,
         body: trimmedBody,
         attachmentKey: attachment?.key ?? null,
         attachmentName: attachment?.name ?? null,
+        refType: ref?.type ?? null,
+        refId: ref?.id ?? null,
+        refDate: ref?.date ?? null,
       },
       include: { sender: { select: { firstName: true, lastName: true, preferredName: true } } },
     });
-    return toDTO(row);
+    const labels = await resolveRefLabels(tx, [row]);
+    return toDTO(row, labels);
   });
 }
 
