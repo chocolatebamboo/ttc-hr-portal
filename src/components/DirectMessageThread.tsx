@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { DownloadIcon } from "@/components/icons";
+import { DownloadIcon, ChecklistIcon } from "@/components/icons";
 import type { DirectMessageDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
@@ -12,6 +12,14 @@ function formatMessageTime(iso: string): string {
   const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
   const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   return `${date}, ${time}`;
+}
+
+/** "Wed, Sep 24" from a "YYYY-MM-DD" ref date — same shape DateTaskRow's own formatTaskDate
+ *  uses, kept as a tiny local copy since this file has no reason to import a task-specific
+ *  helper otherwise. */
+function formatRefDate(dateKey: string): string {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
 /**
@@ -140,7 +148,23 @@ export default function DirectMessageThread({
           messages.map((m) => {
             const mine = m.senderId === viewerId;
             return (
-              <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+              <div key={m.id} className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
+                {/* CB, Sept 2026: "I should be able to kind of like reference within the
+                    conversation of my message with a specific team member" — a message that
+                    mirrored over from a task's own comment thread (addDateTaskComment, src/lib/
+                    date-tasks.ts) carries a small reference card above the bubble, same idea as
+                    a reply preview in a normal texting app: what this was actually about, and
+                    when. Sits outside the colored bubble (plain surface either way) so it reads
+                    the same regardless of which side sent it. */}
+                {m.ref && (
+                  <div className="max-w-[80%] mb-1 rounded-xl border border-border bg-surface px-3 py-2 shadow-sm">
+                    <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
+                      <ChecklistIcon className="h-3 w-3" />
+                      Task{m.ref.date ? ` · ${formatRefDate(m.ref.date)}` : ""}
+                    </div>
+                    <p className="text-xs font-semibold mt-0.5">{m.ref.label}</p>
+                  </div>
+                )}
                 <div
                   className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 ${mine ? "text-white" : "bg-black/[0.04]"}`}
                   style={mine ? { background: "var(--ttc-blue)" } : undefined}
