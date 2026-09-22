@@ -428,6 +428,14 @@ enum DateTaskStatus {
   RETURNED
 }
 
+// QA pass (Sept 2026), CB: a simple priority indicator on a task, so an urgent item catches the
+// reviewer's/employee's eye in the list without turning task assignment into a bigger
+// planning/estimation feature. Two levels only (NORMAL/URGENT).
+enum DateTaskPriority {
+  NORMAL
+  URGENT
+}
+
 model DateTask {
   id         String   @id @default(uuid())
   employeeId String
@@ -445,6 +453,11 @@ model DateTask {
   attachmentName String?
 
   status DateTaskStatus @default(ASSIGNED)
+
+  // QA pass (Sept 2026): a simple priority flag, set at assignment time by whoever creates the
+  // task (createDateTask) — never changes on its own afterward, same "set once, read many"
+  // shape as everything else recorded at creation on this model.
+  priority DateTaskPriority @default(NORMAL)
 
   startedAt   DateTime?
   submittedAt DateTime?
