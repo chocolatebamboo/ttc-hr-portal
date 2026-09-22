@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { DateTaskCommentDTO, DateTaskDTO } from "@/types";
 import { ChatIcon, ChevronDownIcon, DownloadIcon } from "@/components/icons";
+import { STATUS_TONE } from "@/lib/status-tone";
 
 type CommentLoadState = "idle" | "loading" | "ready" | "error";
 
@@ -20,12 +21,44 @@ function formatCommentTime(iso: string): string {
   return `${date}, ${time}`;
 }
 
-const STATUS_BADGE: Record<DateTaskDTO["status"], { label: string; className: string }> = {
-  ASSIGNED: { label: "Assigned", className: "bg-blue-100 text-blue-800" },
-  IN_PROGRESS: { label: "In progress", className: "bg-amber-100 text-amber-800" },
-  AWAITING_REVIEW: { label: "Awaiting review", className: "bg-amber-100 text-amber-800" },
-  APPROVED: { label: "Approved", className: "bg-emerald-100 text-emerald-800" },
-  RETURNED: { label: "Returned", className: "bg-rose-100 text-rose-800" },
+// QA pass (Sept 2026), CB: task status should follow the same brand color language the
+// availability cards already use (see src/lib/status-tone.ts) — amber for anything still
+// outstanding, the brand pink for a confirmed/approved outcome, rose for sent-back — rather than
+// its own separate blue/emerald scheme that reads as an unrelated feature.
+const STATUS_LABEL: Record<DateTaskDTO["status"], string> = {
+  ASSIGNED: "Assigned",
+  IN_PROGRESS: "In progress",
+  AWAITING_REVIEW: "Awaiting review",
+  APPROVED: "Approved",
+  RETURNED: "Returned",
+};
+
+// CB, Sept 2026: "I don't like how the white background and whatnot... it needs to be like an
+// appropriate colored background" — this row is now a full colored card, same gradient-per-
+// status treatment MyAvailabilityPreview's own cards already use, instead of a plain white row.
+// Outstanding work (anything short of a final outcome) reads amber; a confirmed Approved reads
+// the brand pink; a Returned task reads rose, same "needs attention again" tone Denied uses
+// elsewhere. Text/badges on top of this switch to the same solid-white-pill-plus-tone-text
+// treatment AvailabilityStatusPill's onColor prop already established for this exact problem —
+// a light tint badge (the old bg-amber-100 text-amber-800 etc.) would nearly vanish against a
+// same-hue gradient background.
+const TASK_TONE: Record<DateTaskDTO["status"], { from: string; to: string }> = {
+  ASSIGNED: STATUS_TONE.PENDING,
+  IN_PROGRESS: STATUS_TONE.PENDING,
+  AWAITING_REVIEW: STATUS_TONE.PENDING,
+  APPROVED: STATUS_TONE.APPROVED,
+  RETURNED: STATUS_TONE.DENIED,
+};
+
+// Same onColor text-color convention AvailabilityStatusPill's own ON_COLOR_TEXT map uses —
+// a solid-white pill with this as its text color, so the badge reads clearly against any of the
+// three card hues above instead of a light tint that would wash out against its own gradient.
+const STATUS_INK: Record<DateTaskDTO["status"], string> = {
+  ASSIGNED: "#b45309", // amber-700
+  IN_PROGRESS: "#b45309",
+  AWAITING_REVIEW: "#b45309",
+  APPROVED: "var(--ttc-pink-ink)",
+  RETURNED: "#be123c", // rose-700
 };
 
 /**
@@ -193,196 +226,25 @@ export default function DateTaskRow({
     }
   }
 
-  const badge = STATUS_BADGE[task.status];
+  const tone = TASK_TONE[task.status];
+  const ink = STATUS_INK[task.status];
+  // Own task, not yet a final outcome — the circle control below is tappable and its click
+  // submits the task, same action the old plain "Submit" button used to trigger.
+  const canTapComplete = isOwnTask && (task.status === "ASSIGNED" || task.status === "IN_PROGRESS" || task.status === "RETURNED");
 
   return (
-    <div className="px-3.5 py-3">
+    <div
+      className="rounded-2xl p-4 text-white shadow-sm"
+      style={{ background: `linear-gradient(150deg, ${tone.from} 0%, ${tone.to} 100%)` }}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <p className={`text-sm font-medium ${task.status === "APPROVED" ? "line-through text-muted" : ""}`}>
+            <p className={`text-sm font-semibold ${task.status === "APPROVED" ? "line-through text-white/70" : ""}`}>
               {task.title}
             </p>
-            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium shrink-0 ${badge.className}`}>
-              {badge.label}
-            </span>
-          </div>
-
-          {showDate && <p className="text-xs text-muted mt-0.5">{formatTaskDate(task.taskDate)}</p>}
-
-          {task.description && (
-            <p className="text-sm text-muted mt-1 whitespace-pre-wrap break-words">{task.description}</p>
-          )}
-
-          <p className="text-xs text-muted mt-1.5">
-            {task.status === "ASSIGNED" && `From ${task.createdByName}`}
-            {task.status === "IN_PROGRESS" && `In progress — from ${task.createdByName}`}
-            {task.status === "AWAITING_REVIEW" && "Submitted — awaiting review"}
-            {task.status === "APPROVED" && `Confirmed by ${task.approvedByName ?? "a reviewer"}`}
-            {task.status === "RETURNED" && `Sent back by ${task.returnedByName ?? "a reviewer"}`}
-          </p>
-
-          {task.status === "RETURNED" && task.returnNote && (
-            <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-sm text-rose-800 mt-2">
-              {task.returnNote}
-            </div>
-          )}
-
-          {task.hasAttachment && (
-            <button
-              onClick={handleDownload}
-              disabled={downloading}
-              className="mt-1.5 flex items-center gap-1.5 text-xs font-medium text-accent-ink underline"
+            <span
+              className="inline-flex items-center rounded-full bg-white px-2.5 py-0.5 text-[11px] font-semibold shrink-0 shadow-sm"
+              style={{ color: ink }}
             >
-              <DownloadIcon className="h-3.5 w-3.5" />
-              {task.attachmentName ?? "Attachment"}
-            </button>
-          )}
-
-          {actionError && <p className="text-xs text-accent mt-1.5">{actionError}</p>}
-        </div>
-
-        <div className="flex flex-col items-end gap-1.5 shrink-0">
-          {isOwnTask && task.status === "ASSIGNED" && (
-            <button onClick={() => runAction("start")} disabled={busy} className="btn-neutral text-xs px-2.5 py-1">
-              Start
-            </button>
-          )}
-          {isOwnTask && (task.status === "ASSIGNED" || task.status === "IN_PROGRESS" || task.status === "RETURNED") && (
-            <button onClick={() => runAction("submit")} disabled={busy} className="btn-primary text-xs px-2.5 py-1">
-              {busy ? "…" : "Submit"}
-            </button>
-          )}
-          {canReview && task.status === "AWAITING_REVIEW" && (
-            <>
-              <button
-                onClick={() => runAction("approve")}
-                disabled={busy}
-                className="text-xs font-semibold text-emerald-700 hover:underline disabled:opacity-50"
-              >
-                Approve
-              </button>
-              <button
-                onClick={() => setReturning((v) => !v)}
-                disabled={busy}
-                className="text-xs font-medium text-muted hover:text-accent-ink disabled:opacity-50"
-              >
-                Send back
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-
-      {returning && (
-        <div className="mt-2.5 flex flex-col sm:flex-row gap-2">
-          <input
-            type="text"
-            value={returnNote}
-            onChange={(e) => setReturnNote(e.target.value)}
-            placeholder="What needs to change?"
-            className="flex-1 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
-          />
-          <button
-            onClick={submitReturn}
-            disabled={busy || !returnNote.trim()}
-            className="btn-neutral text-xs px-3 py-1.5 whitespace-nowrap"
-          >
-            Send back
-          </button>
-        </div>
-      )}
-
-      <button
-        onClick={() => setCommentsOpen((v) => !v)}
-        className="mt-2.5 flex items-center gap-1.5 text-xs font-medium text-muted hover:text-accent-ink"
-      >
-        <ChatIcon className="h-3.5 w-3.5" />
-        {task.commentCount > 0 ? `${task.commentCount} comment${task.commentCount === 1 ? "" : "s"}` : "Comment"}
-        <ChevronDownIcon className={`h-3 w-3 transition-transform ${commentsOpen ? "rotate-180" : ""}`} />
-      </button>
-
-      {commentsOpen && (
-        <div className="mt-2 rounded-xl border border-border bg-background overflow-hidden">
-          <div className="p-3 space-y-2.5 max-h-64 overflow-y-auto">
-            {commentLoadState === "loading" && <div className="h-8 rounded-lg bg-black/[0.04] animate-pulse" />}
-            {commentLoadState === "error" && (
-              <p className="text-xs text-accent">Unable to load comments. Please try again.</p>
-            )}
-            {commentLoadState === "ready" && comments.length === 0 && (
-              <p className="text-xs text-muted">No comments yet.</p>
-            )}
-            {commentLoadState === "ready" &&
-              comments.map((c) => {
-                const mine = c.authorId === viewerId;
-                return (
-                  <div key={c.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
-                    <div
-                      className={`max-w-[85%] rounded-xl px-3 py-2 ${mine ? "text-white" : "bg-black/[0.04]"}`}
-                      style={mine ? { background: "var(--ttc-blue)" } : undefined}
-                    >
-                      {!mine && <p className="text-[11px] font-semibold mb-0.5">{c.authorName}</p>}
-                      {c.body && <p className="text-sm whitespace-pre-wrap break-words">{c.body}</p>}
-                      {c.hasAttachment && (
-                        <button
-                          onClick={() => handleCommentDownload(c.id)}
-                          disabled={downloadingCommentId === c.id}
-                          className={`mt-1 flex items-center gap-1.5 text-xs font-medium underline ${mine ? "text-white/90" : "text-accent-ink"}`}
-                        >
-                          <DownloadIcon className="h-3.5 w-3.5" />
-                          {c.attachmentName ?? "Attachment"}
-                        </button>
-                      )}
-                      <p className={`text-[10px] mt-1 ${mine ? "text-white/70" : "text-muted"}`}>
-                        {formatCommentTime(c.createdAt)}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
-          </div>
-
-          <form onSubmit={sendComment} className="border-t border-border p-2.5 space-y-1.5">
-            <textarea
-              value={commentBody}
-              onChange={(e) => setCommentBody(e.target.value)}
-              placeholder="Write a comment…"
-              rows={2}
-              className="w-full rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent resize-none"
-            />
-            {commentError && <p className="text-xs text-accent">{commentError}</p>}
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <input
-                  ref={commentFileInputRef}
-                  type="file"
-                  onChange={(e) => setCommentFile(e.target.files?.[0] ?? null)}
-                  className="text-xs text-muted max-w-[8rem]"
-                />
-                {commentFile && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCommentFile(null);
-                      if (commentFileInputRef.current) commentFileInputRef.current.value = "";
-                    }}
-                    className="text-xs text-muted hover:text-accent-ink shrink-0"
-                  >
-                    Remove
-                  </button>
-                )}
-              </div>
-              <button
-                type="submit"
-                disabled={sendingComment || (!commentBody.trim() && !commentFile)}
-                className="btn-primary text-xs px-3 py-1.5 shrink-0"
-              >
-                {sendingComment ? "Sending…" : "Send"}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-    </div>
-  );
-}
+              {STATUS_LABEL[task.status]}
