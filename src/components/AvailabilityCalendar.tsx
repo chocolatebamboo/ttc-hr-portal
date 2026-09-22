@@ -135,6 +135,16 @@ export interface AvailabilityCalendarControls {
   onSubmitTimeOff: (dates: string[], values: { type: PtoType; hours: number; reason?: string }) => Promise<boolean>;
   submittingTimeOff: boolean;
   timeOffError?: string;
+  /** Redesign follow-up (Sept 2026), CB: "I should be able to click within the days, within the
+   *  week and select... it's not giving me the flexibility to select from that view." AvailabilityView's
+   *  own "This week" strip drives this calendar directly through this pair — tapping a day there
+   *  sets `focusDate` to that date, and this calendar reacts exactly as if that date had been
+   *  tapped on its own month grid (opens its existing submission, or starts a fresh draft right
+   *  there). `onFocusDateHandled` clears it back to null once acted on, so the same date can be
+   *  tapped again later and still fire. Optional so a caller that never needs this (none today,
+   *  but nothing else requires it either) doesn't have to wire up two props it won't use. */
+  focusDate?: string | null;
+  onFocusDateHandled?: () => void;
 }
 
 /**
@@ -197,7 +207,7 @@ export interface AvailabilityCalendarControls {
  * Cancel button.
  */
 export default function AvailabilityCalendar({ controls }: { controls: AvailabilityCalendarControls }) {
-  const { submissions, employeeId } = controls;
+  const { submissions, employeeId, focusDate, onFocusDateHandled } = controls;
 
   // Ascending offset order (PAST_OFFSET .. MAX_FUTURE_OFFSET) so the array is already in
   // top-to-bottom render order with no reordering logic needed — past months first, current
@@ -357,6 +367,20 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
       return next;
     });
   }
+
+  // Reacts to a date tapped from outside this calendar (AvailabilityView's own "This week"
+  // strip) exactly as if it had been tapped right here, via the same handleDayClick — plus an
+  // explicit scroll, since a date from "This week" is always in the CURRENT month but this
+  // calendar might already be sitting scrolled somewhere else if it was left open from earlier.
+  // See AvailabilityCalendarControls.focusDate's own doc comment above for the full picture.
+  useEffect(() => {
+    if (!focusDate) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    handleDayClick(focusDate);
+    scrollToCurrentMonth();
+    onFocusDateHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusDate]);
 
   const draftDates = Object.keys(draft).sort();
   const viewingSubmission = viewingId ? submissions.find((s) => s.id === viewingId) : undefined;
