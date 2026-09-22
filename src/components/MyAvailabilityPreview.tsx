@@ -173,7 +173,7 @@ export default function MyAvailabilityPreview({
                     <span />
                   )}
                   <div className="flex items-center gap-2 shrink-0">
-                    <AvailabilityStatusPill status={s.status} awaitingTask={s.awaitingTask} />
+                    <AvailabilityStatusPill status={s.status} awaitingTask={s.awaitingTask} onColor={!plain} />
                     {/* CB, Sept 2026: "the deleting isn't working on these" — a Cancelled
                         submission has nothing left to act on, so it can go away for good; same
                         Cancelled-only rule as the Time Off list's own delete. */}
