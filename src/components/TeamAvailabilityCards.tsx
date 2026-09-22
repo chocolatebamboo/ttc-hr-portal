@@ -548,6 +548,7 @@ function DateDecisionDot({ status }: { status: AvailabilityDateDecision["status"
     />
   );
 }
+
 function Card({
   row: r,
   viewerId,
@@ -773,7 +774,7 @@ function Card({
                       setConfirmRemoveDate(c.date);
                     }}
                     aria-label={`Remove ${c.dateLabel}`}
-                    className="absolute -top-1.5 -left-1.5 h-4 w-4 rounded-full bg-rose-600 text-white text-xs leading-none flex items-center justify-center border-2 shadow-sm"
+                    className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-rose-600 text-white text-xs leading-none flex items-center justify-center border-2 shadow-sm"
                     style={{ borderColor: tone.to }}
                   >
                     &minus;
