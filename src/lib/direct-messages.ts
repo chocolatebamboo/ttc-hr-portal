@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { withRlsContext } from "@/lib/db";
 import { getSignedDownloadUrl } from "@/lib/storage";
+import { isStaff, ForbiddenError } from "@/lib/authorization";
 import {
   threadKeyForDirectMessage,
   markThreadRead,
@@ -12,6 +13,7 @@ import {
   QUICK_REACTION_EMOJIS,
   type CurrentEmployee,
   type DirectConversationSummaryDTO,
+  type DirectMessageCommentDTO,
   type DirectMessageDTO,
   type DirectMessageReactionSummaryDTO,
   type DirectMessageReplyPreviewDTO,
@@ -51,6 +53,8 @@ type ReplyTargetRow = {
 
 type ReactionRow = { emoji: string; employeeId: string };
 
+type CommentRow = { id: string; authorId: string; body: string; createdAt: Date; author: NameFields };
+
 type MessageRow = {
   id: string;
   senderId: string;
@@ -65,11 +69,16 @@ type MessageRow = {
   refDate: string | null;
   replyTo: ReplyTargetRow | null;
   reactions: ReactionRow[];
+  comments: CommentRow[];
 };
 
 /** The `include` shape every query in this file that returns a full MessageRow shares, so the
- *  reply-preview and reactions columns can't silently drift out of sync between listMessages,
- *  postMessage, etc. */
+ *  reply-preview, reactions, and comments columns can't silently drift out of sync between
+ *  listMessages, postMessage, etc. `comments` is included unconditionally here — RLS
+ *  (direct_message_comment_select in prisma/rls.sql) already returns nothing to a non-staff
+ *  actor at the database level, and toDTO below adds its own explicit `actorIsStaff` check on
+ *  top rather than just trusting that silently, same "app layer first, RLS as the independent
+ *  second check" division every other access rule in this codebase follows. */
 const MESSAGE_INCLUDE = {
   sender: { select: { firstName: true, lastName: true, preferredName: true } },
   replyTo: {
@@ -81,7 +90,21 @@ const MESSAGE_INCLUDE = {
     },
   },
   reactions: { select: { emoji: true, employeeId: true } },
+  comments: {
+    select: {
+      id: true,
+      authorId: true,
+      body: true,
+      createdAt: true,
+      author: { select: { firstName: true, lastName: true, preferredName: true } },
+    },
+    orderBy: { createdAt: "asc" },
+  },
 } as const;
+
+function toCommentDTO(c: CommentRow): DirectMessageCommentDTO {
+  return { id: c.id, authorId: c.authorId, authorName: nameOf(c.author), body: c.body, createdAt: c.createdAt.toISOString() };
+}
 
 /** Folds one message's raw reaction rows down to the display shape — CB, Sept 2026: "I should
  *  have the options to include emojis to react to other people's replies." Grouped by emoji
@@ -107,8 +130,11 @@ function summarizeReactions(reactions: ReactionRow[], actorId: string): DirectMe
  *  src/lib/date-tasks.ts) so the conversation it came from is one tap away from the DM it shows
  *  up in. `labels` is a pre-resolved id->label map (see resolveRefLabels below) — keeping the
  *  actual lookup out of this function means toDTO stays a plain sync mapper, same as before.
- *  `actorId` is only needed for the reactions summary's `reactedByMe` flag. */
-function toDTO(row: MessageRow, labels: Map<string, string>, actorId: string): DirectMessageDTO {
+ *  `actorId` is only needed for the reactions summary's `reactedByMe` flag. `actorIsStaff` gates
+ *  `comments` (Phase 5c, "hidden from the team member") — see DirectMessageCommentDTO's own doc
+ *  comment in src/types/index.ts for why this is an explicit empty-array here rather than just
+ *  relying on the include already having come back empty for a non-staff actor. */
+function toDTO(row: MessageRow, labels: Map<string, string>, actorId: string, actorIsStaff: boolean): DirectMessageDTO {
   let ref: DirectMessageRefDTO | null = null;
   if (row.refType && row.refId) {
     const label = labels.get(`${row.refType}:${row.refId}`);
@@ -136,6 +162,7 @@ function toDTO(row: MessageRow, labels: Map<string, string>, actorId: string): D
     ref,
     replyTo,
     reactions: summarizeReactions(row.reactions, actorId),
+    comments: actorIsStaff ? row.comments.map(toCommentDTO) : [],
   };
 }
 
@@ -241,7 +268,8 @@ export async function listMessages(actor: CurrentEmployee, otherEmployeeId: stri
       orderBy: { createdAt: "asc" },
     });
     const labels = await resolveRefLabels(tx, rows);
-    return rows.map((row) => toDTO(row, labels, actor.id));
+    const actorIsStaff = isStaff(actor);
+    return rows.map((row) => toDTO(row, labels, actor.id, actorIsStaff));
   });
 
   // Correction brief #1 — see listTeamNotes' matching comment in src/lib/team-notes.ts for why
@@ -325,7 +353,7 @@ export async function postMessage(
       include: MESSAGE_INCLUDE,
     });
     const labels = await resolveRefLabels(tx, [row]);
-    return toDTO(row, labels, actor.id);
+    return toDTO(row, labels, actor.id, isStaff(actor));
   });
 }
 
@@ -371,6 +399,53 @@ export async function toggleReaction(
       select: { emoji: true, employeeId: true },
     });
     return summarizeReactions(reactions, actor.id);
+  });
+}
+
+/**
+ * Phase 5c (CB, Sept 2026): "an option to add an internal comment," confirmed scope "hidden
+ * from the team member." Staff only (isStaff — SUPER_ADMIN/HR_ADMIN/SUPERVISOR; see
+ * src/lib/authorization.ts), enforced here AND independently by direct_message_comment_insert
+ * in prisma/rls.sql. Returns the message's full updated comment list (oldest first), same
+ * "return the whole updated collection, not just the new row" shape toggleReaction above uses
+ * for reactions, so the client can just replace that one message's `comments` array.
+ */
+export async function addComment(
+  actor: CurrentEmployee,
+  messageId: string,
+  body: string
+): Promise<DirectMessageCommentDTO[]> {
+  if (!isStaff(actor)) {
+    throw new ForbiddenError();
+  }
+  const trimmedBody = body.trim();
+  if (!trimmedBody) {
+    throw new InvalidDirectMessageError("Write something for the note.");
+  }
+
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const message = await tx.directMessage.findFirst({
+      where: { id: messageId, OR: [{ senderId: actor.id }, { recipientId: actor.id }] },
+      select: { id: true },
+    });
+    if (!message) {
+      throw new DirectMessageNotFoundError();
+    }
+
+    await tx.directMessageComment.create({ data: { messageId, authorId: actor.id, body: trimmedBody } });
+
+    const comments: CommentRow[] = await tx.directMessageComment.findMany({
+      where: { messageId },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        authorId: true,
+        body: true,
+        createdAt: true,
+        author: { select: { firstName: true, lastName: true, preferredName: true } },
+      },
+    });
+    return comments.map(toCommentDTO);
   });
 }
 
