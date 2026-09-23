@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { DownloadIcon, ChecklistIcon, ReplyIcon } from "@/components/icons";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { DownloadIcon, ChecklistIcon, ReplyIcon, LockIcon } from "@/components/icons";
 import { QUICK_REACTION_EMOJIS } from "@/types";
-import type { DirectMessageDTO, DirectMessageThreadDTO } from "@/types";
+import type { DirectMessageDTO, DirectMessageThreadDTO, DirectoryEntryDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -31,6 +31,45 @@ function previewText(m: { body: string; hasAttachment: boolean; attachmentName?:
   if (m.body) return m.body;
   if (m.hasAttachment) return m.attachmentName || "Attachment";
   return "";
+}
+
+/** Phase 5c (CB, Sept 2026): "mention a colleague by typing @ followed by their name." Splits a
+ *  message body into plain-text and mention segments for rendering, matching ONLY names that are
+ *  actually in `names` (the loaded directory) — free-typed "@something" that doesn't match a real
+ *  teammate just stays plain text rather than guessing, same "only render what can actually be
+ *  resolved" spirit as DirectMessageRefDTO's server-resolved `label`. Longest names sorted first
+ *  so "Jordan Rivera" wins over a shorter "Jordan" that might also be someone's name. */
+function splitMentions(body: string, names: string[]): { text: string; isMention: boolean }[] {
+  if (names.length === 0 || !body.includes("@")) return [{ text: body, isMention: false }];
+  const pattern = [...names]
+    .sort((a, b) => b.length - a.length)
+    .map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+  const re = new RegExp(`@(?:${pattern})\\b`, "g");
+  const parts: { text: string; isMention: boolean }[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(body))) {
+    if (match.index > lastIndex) parts.push({ text: body.slice(lastIndex, match.index), isMention: false });
+    parts.push({ text: match[0], isMention: true });
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < body.length) parts.push({ text: body.slice(lastIndex), isMention: false });
+  return parts.length > 0 ? parts : [{ text: body, isMention: false }];
+}
+
+/** The "@query" the compose box is currently mid-typing, if any — `start` is where the "@" sits
+ *  in `text` so a pick can splice it back out precisely. A space (or any whitespace) between the
+ *  "@" and the cursor ends the trigger, same as every other @mention composer's own convention,
+ *  so "check with @ Jordan" (a stray "@" with nothing following) or plain old "3 @ 5pm" never
+ *  opens the dropdown. */
+function detectMentionTrigger(text: string, cursor: number): { start: number; query: string } | null {
+  const upToCursor = text.slice(0, cursor);
+  const at = upToCursor.lastIndexOf("@");
+  if (at === -1) return null;
+  const query = upToCursor.slice(at + 1);
+  if (/\s/.test(query)) return null;
+  return { start: at, query };
 }
 
 /**
@@ -69,15 +108,34 @@ function previewText(m: { body: string; hasAttachment: boolean; attachmentName?:
  * on top via CSS (:group-hover), not a second piece of state. Internal-comment and create-task
  * actions are NOT in this toolbar yet — those land in their own later phases and slot into this
  * same pill once built, rather than shipping inert buttons now.
+ *
+ * Phase 5c (CB, Sept 2026): "hovering over a message should show quick emoji reactions and an
+ * option to add an internal comment. Team members should also be able to mention a colleague by
+ * typing @ followed by their name." Two independent additions on top of 5b: (1) a fourth toolbar
+ * action (lock icon), staff-only per `canUseInternalNotes` — opens a small note composer under
+ * that message; posted notes render in their own dashed staff-only panel, never inside the real
+ * bubble stream, and the whole action is simply absent from the toolbar for a plain team member
+ * rather than shown disabled (see addComment's own doc comment in src/lib/direct-messages.ts for
+ * why — the server never lets them learn a note exists either); (2) an @mention autocomplete in
+ * the compose box, backed by the same /api/directory list NewMessagePicker already uses for "New
+ * message." A mention is stored as plain `@Full Name` text (no structured id, no notification) —
+ * splitMentions above only highlights it in a sent bubble when it matches a real directory name,
+ * so this needed no DTO or schema change on the sending side at all.
  */
 export default function DirectMessageThread({
   otherEmployeeId,
   viewerId,
+  canUseInternalNotes,
   onMessagePosted,
   onRead,
 }: {
   otherEmployeeId: string;
   viewerId: string;
+  /** Phase 5c: whether the signed-in viewer may see/post internal notes on this thread's
+   *  messages — SUPER_ADMIN/HR_ADMIN/SUPERVISOR (isStaff(), src/lib/authorization.ts), passed
+   *  down from the page rather than re-derived here since this component never receives the
+   *  viewer's full role otherwise. */
+  canUseInternalNotes: boolean;
   /** Fires after a message is successfully sent — lets the inbox list above refresh its
    *  conversation summary (last message, counts) without waiting for the next full page load. */
   onMessagePosted?: () => void;
@@ -103,7 +161,18 @@ export default function DirectMessageThread({
   // Which message has a reaction toggle in flight — just disables that message's own pills/
   // picker while it's happening, same narrow busy-scoping every other list in this app uses.
   const [reactingId, setReactingId] = useState<string | null>(null);
+  // Phase 5c: which message's internal-note composer is open, and its in-progress text — at
+  // most one at a time, same "one draft slot" shape `replyingTo` already uses.
+  const [noteDraftId, setNoteDraftId] = useState<string | null>(null);
+  const [noteDraftBody, setNoteDraftBody] = useState("");
+  const [noteSubmitting, setNoteSubmitting] = useState(false);
+  // Phase 5c: the org directory, loaded once — backs both the @mention dropdown's suggestions
+  // and splitMentions' own highlight-matching (see that function's doc comment above).
+  const [directory, setDirectory] = useState<DirectoryEntryDTO[]>([]);
+  // The active "@query" mid-type in the compose box, if any — see detectMentionTrigger above.
+  const [mentionTrigger, setMentionTrigger] = useState<{ start: number; query: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   async function load() {
@@ -131,6 +200,33 @@ export default function DirectMessageThread({
     bottomRef.current?.scrollIntoView({ block: "nearest" });
   }, [messages.length]);
 
+  // Phase 5c: the org directory backing @mentions — loaded once per mount, same "this company's
+  // small enough, no server-side search needed" reasoning NewMessagePicker's own comment gives
+  // for reusing this same /api/directory list.
+  useEffect(() => {
+    async function loadDirectory() {
+      try {
+        const res = await fetch("/api/directory");
+        if (!res.ok) return;
+        const data: { directory: DirectoryEntryDTO[] } = await res.json();
+        setDirectory(data.directory.filter((e) => e.id !== viewerId));
+      } catch {
+        // A failed directory load just means no mention suggestions/highlighting this session —
+        // never worth surfacing as a thread-load error, the conversation itself still works.
+      }
+    }
+    loadDirectory();
+  }, [viewerId]);
+
+  const directoryNames = useMemo(() => directory.map((e) => e.name), [directory]);
+
+  const mentionSuggestions = useMemo(() => {
+    if (!mentionTrigger) return [];
+    const q = mentionTrigger.query.trim().toLowerCase();
+    const pool = q ? directory.filter((e) => e.name.toLowerCase().includes(q)) : directory;
+    return pool.slice(0, 5);
+  }, [mentionTrigger, directory]);
+
   async function handleSend(e: React.FormEvent) {
     e.preventDefault();
     if (!body.trim() && !file) return;
@@ -152,6 +248,7 @@ export default function DirectMessageThread({
       setBody("");
       setFile(null);
       setReplyingTo(null);
+      setMentionTrigger(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       load();
       onMessagePosted?.();
@@ -196,6 +293,54 @@ export default function DirectMessageThread({
   function startReply(m: DirectMessageDTO) {
     setReplyingTo(m);
     setActiveMessageId(null);
+  }
+
+  /** Splices the picked directory entry's name into the compose box in place of the "@query"
+   *  that triggered the dropdown, then puts the cursor right after it — same "insert and keep
+   *  typing" flow as every other @mention composer. */
+  function pickMention(entry: DirectoryEntryDTO) {
+    if (!mentionTrigger) return;
+    const before = body.slice(0, mentionTrigger.start);
+    const after = body.slice(mentionTrigger.start + 1 + mentionTrigger.query.length);
+    const inserted = `@${entry.name} `;
+    const next = `${before}${inserted}${after}`;
+    setBody(next);
+    setMentionTrigger(null);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      const cursor = before.length + inserted.length;
+      el.focus();
+      el.setSelectionRange(cursor, cursor);
+    });
+  }
+
+  // Phase 5c: opens/closes a message's internal-note composer — at most one open at a time,
+  // same one-draft-slot shape startReply uses for replies.
+  function toggleNoteDraft(m: DirectMessageDTO) {
+    setNoteDraftId(noteDraftId === m.id ? null : m.id);
+    setNoteDraftBody("");
+    setActiveMessageId(null);
+  }
+
+  async function submitNote(messageId: string) {
+    if (!noteDraftBody.trim()) return;
+    setNoteSubmitting(true);
+    try {
+      const res = await fetch(`/api/messages/dm/${otherEmployeeId}/${messageId}/comment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: noteDraftBody }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.comments) {
+        setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, comments: data.comments } : m)));
+        setNoteDraftBody("");
+        setNoteDraftId(null);
+      }
+    } finally {
+      setNoteSubmitting(false);
+    }
   }
 
   // The last message the viewer themselves sent — the one and only bubble a "Seen" mark can ever
@@ -284,7 +429,23 @@ export default function DirectMessageThread({
                     style={mine ? { background: "var(--ttc-blue)" } : undefined}
                   >
                     {!mine && <p className="text-xs font-semibold mb-0.5">{m.senderName}</p>}
-                    {m.body && <p className="text-sm whitespace-pre-wrap break-words">{m.body}</p>}
+                    {m.body && (
+                      <p className="text-sm whitespace-pre-wrap break-words">
+                        {splitMentions(m.body, directoryNames).map((part, i) =>
+                          part.isMention ? (
+                            <span
+                              key={i}
+                              className={`font-semibold ${mine ? "underline decoration-white/50 underline-offset-2" : ""}`}
+                              style={!mine ? { color: "var(--ttc-blue-ink)" } : undefined}
+                            >
+                              {part.text}
+                            </span>
+                          ) : (
+                            <span key={i}>{part.text}</span>
+                          )
+                        )}
+                      </p>
+                    )}
                     {m.hasAttachment && (
                       <button
                         onClick={(e) => {
@@ -335,6 +496,23 @@ export default function DirectMessageThread({
                     >
                       <ReplyIcon className="h-3.5 w-3.5" />
                     </button>
+                    {/* Phase 5c: staff-only — absent entirely for a plain team member, not
+                        shown disabled, same "the action doesn't exist for them" reasoning
+                        addComment's own doc comment gives server-side. */}
+                    {canUseInternalNotes && (
+                      <>
+                        <span className="w-px h-5 bg-white/20 mx-0.5" />
+                        <button
+                          type="button"
+                          onClick={() => toggleNoteDraft(m)}
+                          aria-label="Add internal note"
+                          title="Add internal note"
+                          className="h-7 w-7 rounded-full hover:bg-white/[0.14] flex items-center justify-center text-white/85"
+                        >
+                          <LockIcon className="h-3.5 w-3.5" />
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -359,6 +537,66 @@ export default function DirectMessageThread({
                         <span className="font-medium text-muted">{r.count}</span>
                       </button>
                     ))}
+                  </div>
+                )}
+
+                {/* Phase 5c: internal notes — staff-only (canUseInternalNotes), a dashed
+                    staff-only aside rather than a real bubble, deliberately NOT amber/pink/rose/
+                    blue (those already mean pending/approved/denied/"your own row" per this
+                    app's established status-color language). Renders when there's something to
+                    show OR the composer for this message is open; the composer itself lives
+                    inside this same panel so an in-progress note and any already-posted ones
+                    read as one staff-only block, not two separate UI pieces. */}
+                {canUseInternalNotes && (m.comments.length > 0 || noteDraftId === m.id) && (
+                  <div className="max-w-[86%] mt-1 rounded-xl border border-dashed border-border bg-black/[0.025] px-3 py-2">
+                    {m.comments.length > 0 && (
+                      <div className={`space-y-2 ${noteDraftId === m.id ? "mb-2" : ""}`}>
+                        {m.comments.map((c) => (
+                          <div key={c.id}>
+                            <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-muted">
+                              <LockIcon className="h-2.5 w-2.5" />
+                              Internal note
+                            </p>
+                            <p className="text-xs mt-0.5">{c.body}</p>
+                            <p className="text-[10px] text-muted mt-0.5">
+                              {c.authorName} · {formatMessageTime(c.createdAt)}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {noteDraftId === m.id && (
+                      <div className="space-y-1.5">
+                        <textarea
+                          autoFocus
+                          value={noteDraftBody}
+                          onChange={(e) => setNoteDraftBody(e.target.value)}
+                          placeholder="Note for staff only…"
+                          rows={2}
+                          className="w-full rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-accent resize-none"
+                        />
+                        <div className="flex items-center justify-end gap-3">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNoteDraftId(null);
+                              setNoteDraftBody("");
+                            }}
+                            className="text-xs text-muted hover:text-accent-ink"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => submitNote(m.id)}
+                            disabled={noteSubmitting || !noteDraftBody.trim()}
+                            className="btn-primary text-xs px-3 py-1.5"
+                          >
+                            {noteSubmitting ? "Posting…" : "Post note"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -393,13 +631,59 @@ export default function DirectMessageThread({
             </button>
           </div>
         )}
-        <textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          placeholder="Text message…"
-          rows={2}
-          className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent resize-none"
-        />
+        <div className="relative">
+          {/* Phase 5c: @mention dropdown — CB, "team members should also be able to mention a
+              colleague by typing @ followed by their name." Floats above the compose box (same
+              place a mention dropdown always sits, so it can open even on the very first line)
+              rather than trying to track on-screen caret coordinates inside a plain textarea,
+              which would need a much heavier composer than this app has anywhere else. Closed
+              on blur with a short delay so a click on a suggestion still registers first. */}
+          {mentionTrigger && mentionSuggestions.length > 0 && (
+            <div className="absolute left-1 bottom-full mb-1.5 w-64 max-w-[90vw] rounded-xl border border-border bg-surface shadow-lg p-1.5 z-20">
+              {mentionSuggestions.map((entry) => (
+                <button
+                  key={entry.id}
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => pickMention(entry)}
+                  className="w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-black/[0.04]"
+                >
+                  <span
+                    className="h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0"
+                    style={{ background: "rgba(1,105,240,0.12)", color: "var(--ttc-blue-ink)" }}
+                  >
+                    {entry.name
+                      .split(" ")
+                      .map((p) => p[0])
+                      .slice(0, 2)
+                      .join("")}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-xs font-semibold truncate">{entry.name}</span>
+                    <span className="block text-[10px] text-muted truncate">{entry.jobTitle}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+          <textarea
+            ref={textareaRef}
+            value={body}
+            onChange={(e) => {
+              const value = e.target.value;
+              setBody(value);
+              setMentionTrigger(detectMentionTrigger(value, e.target.selectionStart ?? value.length));
+            }}
+            onBlur={() => {
+              // A click on a suggestion is a mousedown-prevented button (above), so this timeout
+              // only ever fires for a REAL blur — clicking away, tabbing off, etc.
+              setTimeout(() => setMentionTrigger(null), 150);
+            }}
+            placeholder="Text message…"
+            rows={2}
+            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent resize-none"
+          />
+        </div>
         {sendError && <p className="text-xs text-accent">{sendError}</p>}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
