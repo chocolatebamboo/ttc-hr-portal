@@ -62,11 +62,16 @@ export default function MessagesInboxView({
   viewerName,
   topicCounts,
   directConversations,
+  canUseInternalNotes,
 }: {
   viewerId: string;
   viewerName: string;
   topicCounts: TeamNoteTopicCountDTO[];
   directConversations: DirectConversationSummaryDTO[];
+  /** Phase 5c (CB, Sept 2026): "an option to add an internal comment," confirmed scope "hidden
+   *  from the team member" — passed straight through to every DirectMessageThread below; see
+   *  that prop's own doc comment there for what it actually gates. */
+  canUseInternalNotes: boolean;
 }) {
   const router = useRouter();
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -201,7 +206,12 @@ export default function MessagesInboxView({
                 />
               )}
               {row.kind === "dm" && (
-                <DirectMessageThread otherEmployeeId={row.employeeId} viewerId={viewerId} onRead={() => router.refresh()} />
+                <DirectMessageThread
+                  otherEmployeeId={row.employeeId}
+                  viewerId={viewerId}
+                  canUseInternalNotes={canUseInternalNotes}
+                  onRead={() => router.refresh()}
+                />
               )}
             </div>
           )}
