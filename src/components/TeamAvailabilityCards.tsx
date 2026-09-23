@@ -13,7 +13,11 @@ import type { AdminAvailabilityDTO, AdminShiftDTO, AvailabilityDateDecision, Ava
 
 type LoadState = "loading" | "ready" | "error";
 
-function initialsOf(name: string): string {
+/** Exported (redesign follow-up, Sept 2026) alongside useTeamAvailabilityQueue and Card below so
+ *  TeamAvailabilityRequestsSection's own compact dashboard rows can show the same two-letter
+ *  avatar badge as the full card, instead of a slightly different one drifting in from a second
+ *  copy of this one-liner. */
+export function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/);
   return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
 }
@@ -34,64 +38,27 @@ function isInPerDateMode(decisions: AvailabilityDateDecision[]): boolean {
 }
 
 /**
- * The HR-wide availability roster's actual card list — fetch, Approve/Deny/Undo,
- * Pending/Decided sections, and a per-date task list on each card — extracted from
- * AvailabilityAdminView (Sept 2026) so it can be dropped straight onto the dashboard's own
- * Availability widget page for admins, not just the standalone /admin/availability page.
+ * All the fetch/decide/deny/remove/undo state and handlers a card list needs — pulled out of
+ * TeamAvailabilityCards itself (redesign follow-up, Sept 2026, CB: "it should be able to expand
+ * so we could see and approve from the homepage as well. Basically the same experience that you
+ * would have done in the availability tab") so TeamAvailabilityRequestsSection (the dashboard's
+ * compact preview widget) can drive the exact same Card component with the exact same behavior,
+ * instead of a second, drifting implementation of "what does approving a request actually do."
+ * Same "extract the interaction into a hook, export it, let a second caller reuse it" shape
+ * useAvailabilityPanel already established in AvailabilityCalendar.tsx.
  *
- * Round two (Sept 2026): CB, on the first version — "I see approved... but each scheduled day
- * may have different requests. I wanted to make comments under each day that was selected."
- * Tapping the card header no longer opens one shared thread for the whole submission; tapping
- * a specific date chip opens that date's own task list (DateTasksPanel), since a four-date
- * submission can need four different sets of tasks. At most one date is open per card at a time
- * (`openDate`).
- *
- * Correction brief #2 (Sept 2026): "Remove the large standalone 'Conversation' section currently
- * underneath the tasks... Communication should instead be contextual to each task." The
- * per-date TeamNotesThread that used to sit below DateTasksPanel here (topicType=
- * "AVAILABILITY_DATE") — and the per-chip message-count badge that existed only to flag activity
- * in that now-removed thread — are both gone; every task opened via DateTasksPanel now carries
- * its own comment thread instead (see DateTaskRow).
- *
- * `viewerId` is the signed-in admin/supervisor viewing this list — passed down to DateTasksPanel
- * so its own task rows know which side of a comment they're rendering. Not used for any access
- * decision here; the API routes each card talks to re-check authorization themselves.
- *
- * Correction brief #10 (Sept 2026): every card here — Pending or Decided — now also swipes to
- * reveal an administrative "Remove" action, distinct from Deny (see removeSubmission below and
- * removeAvailabilitySubmission's own comment in src/lib/availability.ts for exactly how). A
- * Decided card's swipe therefore reveals two actions side by side: "Clear" (Correction brief #9's
- * local dismiss, unchanged) and "Remove" (this round's real, permanent removal) — SwipeReveal's
- * new secondaryAction prop makes that one swipe instead of two different gestures.
- *
- * Correction brief #11 (Sept 2026): "The chat bubble on an availability request should take the
- * user into My Messages... open the relevant conversation/thread for that specific team member/
- * request rather than only opening the generic Messages landing page." This is a direct message,
- * not a revival of the old AVAILABILITY_DATE topic thread Correction brief #2 already removed
- * from this card — per-request communication now lives on each task's own comment thread
- * (DateTaskRow), so "message this team member about their availability" means the same
- * peer-to-peer DM every other person-to-person conversation in this app uses
- * (src/lib/direct-messages.ts). One bubble per card, not per date, since a DM isn't scoped to a
- * single date the way a task is. See openChat below and MessagesInboxView's own doc comment for
- * the other half of this (reading `dm`/`name` off the URL on mount).
- *
- * Correction round (Sept 2026), CB: "each scheduled day may have different requests... you have
- * to approve each thing, like each date one at a time, or I have the option to approve everything
- * at one time." Approve/Deny is now the same either/or as the backend (see
- * AvailabilitySubmission.dateDecisions' doc comment in prisma/schema.prisma): the Pending/Decided
- * bulk buttons stay available for a submission nothing's been decided on yet; opening a date chip
- * whose own decision is still Pending shows that date's own Approve/Deny (and — CB: "click on the
- * date that I want to adjust and... change the date and the time from there" — a "Propose new
- * date/time" control scoped to that one date, letting the date itself move, not just its time)
- * and the moment any date is decided that way
- * the bulk buttons step aside so the rest get finished one at a time. Each chip now also carries
- * a small tone dot showing that date's own decision at a glance.
+ * `initialPending` (dashboard widget only): dashboard/page.tsx already fetches this admin's
+ * pending queue server-side for the page's very first paint — seeding state from it here means
+ * the widget shows real rows immediately instead of a loading skeleton flash while this hook's
+ * own client-side `load()` catches up in the background. TeamAvailabilityCards itself (the full
+ * /availability page) doesn't have anything to seed from, so it just omits this and starts from
+ * the same "loading" state it always has.
  */
-export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }) {
+function useTeamAvailabilityQueue(opts?: { initialPending?: AdminAvailabilityDTO[] }) {
   const router = useRouter();
-  const [pending, setPending] = useState<AdminAvailabilityDTO[]>([]);
+  const [pending, setPending] = useState<AdminAvailabilityDTO[]>(opts?.initialPending ?? []);
   const [decided, setDecided] = useState<AdminAvailabilityDTO[]>([]);
-  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [loadState, setLoadState] = useState<LoadState>(opts?.initialPending ? "ready" : "loading");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [denyingId, setDenyingId] = useState<string | null>(null);
   const [denyComment, setDenyComment] = useState("");
@@ -161,6 +128,15 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
     } catch {
       // ignored — see comment above
     }
+  }
+
+  // Correction brief #9's swipe-to-clear on a Decided card — removes the row from view instantly
+  // and persists the dismissal in the background. Named for what a caller is doing (clearing a
+  // decided card off the list), not for the two things it happens to do underneath — same
+  // behavior as the inline onAction this replaces on the original TeamAvailabilityCards render.
+  function clearDecided(submissionId: string) {
+    setDecided((prev) => prev.filter((x) => x.id !== submissionId));
+    dismissDecided(submissionId);
   }
 
   // Correction brief #10 (Sept 2026): the actual removal, only ever called from the "Remove
@@ -399,7 +375,104 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
     }
   }
 
-  if (loadState === "loading") {
+  return {
+    pending,
+    decided,
+    loadState,
+    busyId,
+    denyingId,
+    setDenyingId,
+    denyComment,
+    setDenyComment,
+    openDate,
+    setOpenDate,
+    decideError,
+    decideErrorId,
+    shiftsByDate,
+    dmCounts,
+    removingId,
+    setRemovingId,
+    removeError,
+    removeErrorId,
+    cancelRemove,
+    clearDecided,
+    removeSubmission,
+    openChat,
+    decide,
+    decideDate,
+    removeDate,
+    undo,
+    undoDate,
+    requestAdjustment,
+  };
+}
+
+export type TeamAvailabilityQueue = ReturnType<typeof useTeamAvailabilityQueue>;
+export { useTeamAvailabilityQueue };
+
+/**
+ * The HR-wide availability roster's actual card list — fetch, Approve/Deny/Undo,
+ * Pending/Decided sections, and a per-date task list on each card — extracted from
+ * AvailabilityAdminView (Sept 2026) so it can be dropped straight onto the dashboard's own
+ * Availability widget page for admins, not just the standalone /admin/availability page.
+ *
+ * Round two (Sept 2026): CB, on the first version — "I see approved... but each scheduled day
+ * may have different requests. I wanted to make comments under each day that was selected."
+ * Tapping the card header no longer opens one shared thread for the whole submission; tapping
+ * a specific date chip opens that date's own task list (DateTasksPanel), since a four-date
+ * submission can need four different sets of tasks. At most one date is open per card at a time
+ * (`openDate`).
+ *
+ * Correction brief #2 (Sept 2026): "Remove the large standalone 'Conversation' section currently
+ * underneath the tasks... Communication should instead be contextual to each task." The
+ * per-date TeamNotesThread that used to sit below DateTasksPanel here (topicType=
+ * "AVAILABILITY_DATE") — and the per-chip message-count badge that existed only to flag activity
+ * in that now-removed thread — are both gone; every task opened via DateTasksPanel now carries
+ * its own comment thread instead (see DateTaskRow).
+ *
+ * `viewerId` is the signed-in admin/supervisor viewing this list — passed down to DateTasksPanel
+ * so its own task rows know which side of a comment they're rendering. Not used for any access
+ * decision here; the API routes each card talks to re-check authorization themselves.
+ *
+ * Correction brief #10 (Sept 2026): every card here — Pending or Decided — now also swipes to
+ * reveal an administrative "Remove" action, distinct from Deny (see removeSubmission below and
+ * removeAvailabilitySubmission's own comment in src/lib/availability.ts for exactly how). A
+ * Decided card's swipe therefore reveals two actions side by side: "Clear" (Correction brief #9's
+ * local dismiss, unchanged) and "Remove" (this round's real, permanent removal) — SwipeReveal's
+ * new secondaryAction prop makes that one swipe instead of two different gestures.
+ *
+ * Correction brief #11 (Sept 2026): "The chat bubble on an availability request should take the
+ * user into My Messages... open the relevant conversation/thread for that specific team member/
+ * request rather than only opening the generic Messages landing page." This is a direct message,
+ * not a revival of the old AVAILABILITY_DATE topic thread Correction brief #2 already removed
+ * from this card — per-request communication now lives on each task's own comment thread
+ * (DateTaskRow), so "message this team member about their availability" means the same
+ * peer-to-peer DM every other person-to-person conversation in this app uses
+ * (src/lib/direct-messages.ts). One bubble per card, not per date, since a DM isn't scoped to a
+ * single date the way a task is. See openChat below and MessagesInboxView's own doc comment for
+ * the other half of this (reading `dm`/`name` off the URL on mount).
+ *
+ * Correction round (Sept 2026), CB: "each scheduled day may have different requests... you have
+ * to approve each thing, like each date one at a time, or I have the option to approve everything
+ * at one time." Approve/Deny is now the same either/or as the backend (see
+ * AvailabilitySubmission.dateDecisions' doc comment in prisma/schema.prisma): the Pending/Decided
+ * bulk buttons stay available for a submission nothing's been decided on yet; opening a date chip
+ * whose own decision is still Pending shows that date's own Approve/Deny (and — CB: "click on the
+ * date that I want to adjust and... change the date and the time from there" — a "Propose new
+ * date/time" control scoped to that one date, letting the date itself move, not just its time)
+ * and the moment any date is decided that way
+ * the bulk buttons step aside so the rest get finished one at a time. Each chip now also carries
+ * a small tone dot showing that date's own decision at a glance.
+ *
+ * Redesign follow-up (Sept 2026): the state/fetch/decide machinery this component used to own
+ * directly now lives in useTeamAvailabilityQueue above — this component is a thin renderer over
+ * that hook, unchanged in behavior, so the dashboard's own TeamAvailabilityRequestsSection can
+ * drive the exact same Card component off the exact same hook instead of duplicating any of it.
+ */
+export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }) {
+  const q = useTeamAvailabilityQueue();
+
+  if (q.loadState === "loading") {
     return (
       <div className="space-y-2.5">
         {[0, 1, 2].map((i) => (
@@ -409,7 +482,7 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
     );
   }
 
-  if (loadState === "error") {
+  if (q.loadState === "error") {
     return (
       <div className="rounded-xl border border-border bg-surface p-6 text-sm text-accent">
         Unable to load availability. Please try again or contact support.
@@ -424,47 +497,47 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
           — heading and all — now disappears entirely once its own count hits zero, rather than
           showing an empty "(0)" heading plus a "Nothing pending/decided" placeholder; if both are
           empty, this whole queue just renders nothing. */}
-      {pending.length > 0 && (
+      {q.pending.length > 0 && (
         <section className="mb-8">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted mb-2.5">
-            Pending ({pending.length})
+            Pending ({q.pending.length})
           </h2>
           <div className="space-y-3">
-            {pending.map((r) => (
+            {q.pending.map((r) => (
               <SwipeReveal
                 key={r.id}
                 actionSide="right"
                 actionLabel="Remove"
                 actionIcon={<TrashIcon className="h-4 w-4" />}
                 actionClassName="bg-rose-600 text-white rounded-3xl"
-                onAction={() => setRemovingId(r.id)}
+                onAction={() => q.setRemovingId(r.id)}
               >
                 <Card
                   row={r}
                   viewerId={viewerId}
-                  busy={busyId === r.id}
-                  denying={denyingId === r.id}
-                  denyComment={denyComment}
-                  decideError={decideErrorId === r.id ? decideError : undefined}
-                  removing={removingId === r.id}
-                  removeError={removeErrorId === r.id ? removeError : undefined}
-                  openDate={openDate?.submissionId === r.id ? openDate.date : null}
-                  shiftsByDate={shiftsByDate}
-                  dmCounts={dmCounts}
+                  busy={q.busyId === r.id}
+                  denying={q.denyingId === r.id}
+                  denyComment={q.denyComment}
+                  decideError={q.decideErrorId === r.id ? q.decideError : undefined}
+                  removing={q.removingId === r.id}
+                  removeError={q.removeErrorId === r.id ? q.removeError : undefined}
+                  openDate={q.openDate?.submissionId === r.id ? q.openDate.date : null}
+                  shiftsByDate={q.shiftsByDate}
+                  dmCounts={q.dmCounts}
                   onToggleDate={(date) =>
-                    setOpenDate(openDate?.submissionId === r.id && openDate.date === date ? null : { submissionId: r.id, date })
+                    q.setOpenDate(q.openDate?.submissionId === r.id && q.openDate.date === date ? null : { submissionId: r.id, date })
                   }
-                  onDenyToggle={() => setDenyingId(denyingId === r.id ? null : r.id)}
-                  onDenyCommentChange={setDenyComment}
-                  onDecide={decide}
-                  onDecideDate={decideDate}
-                  onUndo={undo}
-                  onUndoDate={undoDate}
-                  onRequestAdjustment={requestAdjustment}
-                  onRemoveConfirm={removeSubmission}
-                  onRemoveCancel={cancelRemove}
-                  onOpenChat={openChat}
-                  onRemoveDate={removeDate}
+                  onDenyToggle={() => q.setDenyingId(q.denyingId === r.id ? null : r.id)}
+                  onDenyCommentChange={q.setDenyComment}
+                  onDecide={q.decide}
+                  onDecideDate={q.decideDate}
+                  onUndo={q.undo}
+                  onUndoDate={q.undoDate}
+                  onRequestAdjustment={q.requestAdjustment}
+                  onRemoveConfirm={q.removeSubmission}
+                  onRemoveCancel={q.cancelRemove}
+                  onOpenChat={q.openChat}
+                  onRemoveDate={q.removeDate}
                 />
               </SwipeReveal>
             ))}
@@ -472,56 +545,53 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
         </section>
       )}
 
-      {decided.length > 0 && (
+      {q.decided.length > 0 && (
         <section>
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted mb-2.5">
-            Decided ({decided.length})
+            Decided ({q.decided.length})
           </h2>
           <div className="space-y-3">
-            {decided.map((r) => (
+            {q.decided.map((r) => (
               <SwipeReveal
                 key={r.id}
                 actionSide="right"
                 actionLabel="Clear"
                 actionIcon={<CheckCircleIcon className="h-4 w-4" />}
                 actionClassName="bg-black/[0.06] text-accent-ink rounded-3xl"
-                onAction={() => {
-                  setDecided((prev) => prev.filter((x) => x.id !== r.id));
-                  dismissDecided(r.id);
-                }}
+                onAction={() => q.clearDecided(r.id)}
                 secondaryAction={{
                   label: "Remove",
                   icon: <TrashIcon className="h-4 w-4" />,
                   className: "bg-rose-600 text-white rounded-3xl",
-                  onAction: () => setRemovingId(r.id),
+                  onAction: () => q.setRemovingId(r.id),
                 }}
               >
                 <Card
                   row={r}
                   viewerId={viewerId}
-                  busy={busyId === r.id}
+                  busy={q.busyId === r.id}
                   denying={false}
                   denyComment=""
                   decideError={undefined}
-                  removing={removingId === r.id}
-                  removeError={removeErrorId === r.id ? removeError : undefined}
-                  openDate={openDate?.submissionId === r.id ? openDate.date : null}
-                  shiftsByDate={shiftsByDate}
-                  dmCounts={dmCounts}
+                  removing={q.removingId === r.id}
+                  removeError={q.removeErrorId === r.id ? q.removeError : undefined}
+                  openDate={q.openDate?.submissionId === r.id ? q.openDate.date : null}
+                  shiftsByDate={q.shiftsByDate}
+                  dmCounts={q.dmCounts}
                   onToggleDate={(date) =>
-                    setOpenDate(openDate?.submissionId === r.id && openDate.date === date ? null : { submissionId: r.id, date })
+                    q.setOpenDate(q.openDate?.submissionId === r.id && q.openDate.date === date ? null : { submissionId: r.id, date })
                   }
                   onDenyToggle={() => {}}
                   onDenyCommentChange={() => {}}
                   onDecide={() => {}}
                   onDecideDate={() => {}}
-                  onUndo={undo}
-                  onUndoDate={undoDate}
+                  onUndo={q.undo}
+                  onUndoDate={q.undoDate}
                   onRequestAdjustment={() => {}}
-                  onRemoveConfirm={removeSubmission}
-                  onRemoveCancel={cancelRemove}
-                  onOpenChat={openChat}
-                  onRemoveDate={removeDate}
+                  onRemoveConfirm={q.removeSubmission}
+                  onRemoveCancel={q.cancelRemove}
+                  onOpenChat={q.openChat}
+                  onRemoveDate={q.removeDate}
                 />
               </SwipeReveal>
             ))}
@@ -546,7 +616,13 @@ function DateDecisionDot({ status }: { status: AvailabilityDateDecision["status"
   );
 }
 
-function Card({
+/**
+ * One request's full colored card — Approve/Deny, per-date decisions, Edit/remove-date, the chat
+ * bubble, and each date's own task list. Exported (redesign follow-up, Sept 2026) alongside
+ * useTeamAvailabilityQueue above so TeamAvailabilityRequestsSection can render this exact same
+ * component when a dashboard-widget row is expanded — see that file's own doc comment.
+ */
+export function Card({
   row: r,
   viewerId,
   busy,
