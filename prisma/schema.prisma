@@ -116,6 +116,7 @@ model Employee {
   directMessagesSent      DirectMessage[]           @relation("DirectMessageSender")
   directMessagesReceived  DirectMessage[]           @relation("DirectMessageRecipient")
   directMessageReactions  DirectMessageReaction[]
+  directMessageCommentsWritten DirectMessageComment[] @relation("DirectMessageCommentAuthor")
   dateTasksAsSubject      DateTask[]                @relation("DateTaskSubject")
   dateTasksCreated        DateTask[]                @relation("DateTaskCreatedBy")
   dateTasksApproved       DateTask[]                @relation("DateTaskApprovedBy")
@@ -436,6 +437,10 @@ model DirectMessage {
   // rather than columns here.
   reactions DirectMessageReaction[]
 
+  /** Phase 5c (CB, Sept 2026): "an option to add an internal comment" — see
+   *  DirectMessageComment's own doc comment just below for the full scope. */
+  comments DirectMessageComment[]
+
   createdAt DateTime @default(now())
 
   @@index([senderId, recipientId, createdAt])
@@ -468,6 +473,30 @@ model DirectMessageReaction {
 
   @@unique([messageId, employeeId, emoji])
   @@index([messageId])
+}
+
+/** Phase 5c (CB, Sept 2026): "hovering over a message should show quick emoji reactions and an
+ *  option to add an internal comment" — confirmed scope: "hidden from the team member." A staff-
+ *  only aside on one DM, never visible to (or postable by) whichever side of that conversation
+ *  holds plain EMPLOYEE role — see isStaff() in src/lib/authorization.ts for the exact cut
+ *  (SUPER_ADMIN/HR_ADMIN/SUPERVISOR all count as staff here, same three roles canAccessReports
+ *  already draws the line at) and direct_message_comment_select/_insert in prisma/rls.sql for
+ *  the database-level backstop. Deliberately flat (no reply-to-a-comment, no reactions-on-a-
+ *  comment) and delete-less, same shape DateTaskComment already uses for a task's own comment
+ *  thread — this is a note, not a second chat. Cascades with its message like every other DM
+ *  child row (reactions, above). */
+model DirectMessageComment {
+  id        String        @id @default(uuid())
+  messageId String
+  message   DirectMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    Employee      @relation("DirectMessageCommentAuthor", fields: [authorId], references: [id])
+
+  body String
+
+  createdAt DateTime @default(now())
+
+  @@index([messageId, createdAt])
 }
 
 enum DateTaskStatus {
