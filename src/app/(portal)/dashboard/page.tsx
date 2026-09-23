@@ -150,7 +150,11 @@ export default async function DashboardPage() {
           pendingAcknowledgments={pendingAcknowledgments}
         />
         <DateTasksSection className="animate-in animate-in-4" employeeId={employee.id} />
-        <TeamAvailabilityRequestsSection className="animate-in animate-in-4" pending={pendingTeamAvailability} />
+        <TeamAvailabilityRequestsSection
+          className="animate-in animate-in-4"
+          initialPending={pendingTeamAvailability}
+          viewerId={employee.id}
+        />
         <AnnouncementsSection
           className="animate-in animate-in-5"
           featuredAnnouncement={featuredAnnouncement}
@@ -182,7 +186,11 @@ export default async function DashboardPage() {
             pendingAcknowledgments={pendingAcknowledgments}
           />
           <DateTasksSection className="animate-in animate-in-2" employeeId={employee.id} />
-          <TeamAvailabilityRequestsSection className="animate-in animate-in-3" pending={pendingTeamAvailability} />
+          <TeamAvailabilityRequestsSection
+            className="animate-in animate-in-3"
+            initialPending={pendingTeamAvailability}
+            viewerId={employee.id}
+          />
           <AnnouncementsSection
             className="animate-in animate-in-3"
             featuredAnnouncement={featuredAnnouncement}
