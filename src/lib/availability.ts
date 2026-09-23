@@ -1,3 +1,4 @@
+import type { PrismaClient } from "@prisma/client";
 import { withRlsContext } from "@/lib/db";
 import { isAdmin, ForbiddenError } from "@/lib/authorization";
 import { todayDateKey } from "@/lib/time";
@@ -25,9 +26,41 @@ type AvailabilityRow = {
   submittedAt: Date;
   reviewComment: string | null;
   reviewedAt: Date | null;
+  reviewedById: string | null;
   adjustedSlots: unknown;
   dateDecisions: unknown;
 };
+
+type NameFields = { firstName: string; lastName: string; preferredName: string | null };
+
+function nameOf(p: NameFields): string {
+  return `${p.preferredName || p.firstName} ${p.lastName}`;
+}
+
+/**
+ * CB, Sept 2026: "we need to also know who approved the request." Batch-resolves every
+ * reviewedById (whole-submission) and decidedById (per-date) referenced across `rows` to a
+ * display name in one query — same "one query beats N" batching shape resolveRefLabels uses in
+ * src/lib/direct-messages.ts, rather than a name lookup per row. A submission still sitting fully
+ * Pending contributes nothing to the id set, so the common case (a fresh Pending queue) costs no
+ * extra query at all.
+ */
+async function resolveReviewerNames(tx: PrismaClient, rows: AvailabilityRow[]): Promise<Map<string, string>> {
+  const ids = new Set<string>();
+  for (const row of rows) {
+    if (row.reviewedById) ids.add(row.reviewedById);
+    const slots = row.slots as unknown as AvailabilitySlot[];
+    for (const d of readDateDecisions(slots, row.dateDecisions)) {
+      if (d.decidedById) ids.add(d.decidedById);
+    }
+  }
+  if (ids.size === 0) return new Map();
+  const employees = await tx.employee.findMany({
+    where: { id: { in: [...ids] } },
+    select: { id: true, firstName: true, lastName: true, preferredName: true },
+  });
+  return new Map(employees.map((e) => [e.id, nameOf(e)] as const));
+}
 
 /** Every entry in `slots`, defaulted to PENDING — what a brand-new submission's dateDecisions
  *  starts as (submitAvailability), and the fallback for any row created before this column
@@ -120,8 +153,16 @@ export function assertValidSlots(slots: unknown): asserts slots is AvailabilityS
   }
 }
 
-function toDTO(row: AvailabilityRow): AvailabilityDTO {
+/** `names` is a pre-resolved employeeId->display-name map (see resolveReviewerNames above) —
+ *  defaults to empty so every existing single-row call site keeps compiling unchanged; those
+ *  either have nothing to resolve (reviewedById/decidedById just got cleared to null) or pass a
+ *  small one-off map built straight from the reviewer/actor already in scope, no query needed. */
+function toDTO(row: AvailabilityRow, names: Map<string, string> = new Map()): AvailabilityDTO {
   const slots = row.slots as unknown as AvailabilitySlot[];
+  const dateDecisions = readDateDecisions(slots, row.dateDecisions).map((d) => ({
+    ...d,
+    decidedByName: d.decidedById ? (names.get(d.decidedById) ?? null) : null,
+  }));
   return {
     id: row.id,
     slots,
@@ -130,8 +171,9 @@ function toDTO(row: AvailabilityRow): AvailabilityDTO {
     submittedAt: row.submittedAt.toISOString(),
     reviewComment: row.reviewComment,
     reviewedAt: row.reviewedAt ? row.reviewedAt.toISOString() : null,
+    reviewedByName: row.reviewedById ? (names.get(row.reviewedById) ?? null) : null,
     adjustedSlots: row.adjustedSlots ? (row.adjustedSlots as unknown as AvailabilitySlot[]) : null,
-    dateDecisions: readDateDecisions(slots, row.dateDecisions),
+    dateDecisions,
   };
 }
 
@@ -173,8 +215,9 @@ export async function listMyAvailability(actor: CurrentEmployee): Promise<Availa
           ).map((s) => s.date)
     );
 
+    const names = await resolveReviewerNames(tx, rows);
     return rows.map((row) => {
-      const dto = toDTO(row);
+      const dto = toDTO(row, names);
       if (row.status === "APPROVED") {
         dto.awaitingTask = dto.dateDecisions.some(
           (d) => d.status === "APPROVED" && !shiftedDates.has(d.date)
@@ -198,7 +241,8 @@ export async function listAvailabilityForEmployee(actor: CurrentEmployee, employ
       where: { employeeId, status: { not: "REMOVED" } },
       orderBy: { submittedAt: "desc" },
     });
-    return rows.map(toDTO);
+    const names = await resolveReviewerNames(tx, rows);
+    return rows.map((row) => toDTO(row, names));
   });
 }
 
@@ -444,7 +488,7 @@ export async function decideAvailability(
       targetType: "AvailabilitySubmission",
       targetId: row.id,
     });
-    return toDTO(row);
+    return toDTO(row, new Map([[reviewer.id, nameOf(reviewer)]]));
   });
 }
 
@@ -523,7 +567,7 @@ export async function decideAvailabilityDate(
       targetType: "AvailabilitySubmission",
       targetId: row.id,
     });
-    return toDTO(row);
+    return toDTO(row, new Map([[reviewer.id, nameOf(reviewer)]]));
   });
 }
 
@@ -705,7 +749,7 @@ export async function requestAvailabilityAdjustment(
       targetType: "AvailabilitySubmission",
       targetId: row.id,
     });
-    return toDTO(row);
+    return toDTO(row, new Map([[reviewer.id, nameOf(reviewer)]]));
   });
 }
 
@@ -768,7 +812,7 @@ export async function respondToAvailabilityAdjustment(
       oldValue: "ADJUSTMENT_REQUESTED",
       newValue: row.status,
     });
-    return toDTO(row);
+    return toDTO(row, new Map([[actor.id, nameOf(actor)]]));
   });
 }
 
@@ -830,8 +874,9 @@ export async function listAdminAvailability(
       }),
     ]);
 
+    const names = await resolveReviewerNames(tx, [...pending, ...decided]);
     const toAdminDTO = (r: (typeof pending)[number]): AdminAvailabilityDTO => ({
-      ...toDTO(r),
+      ...toDTO(r, names),
       employeeId: r.employeeId,
       employeeName: `${r.employee.preferredName || r.employee.firstName} ${r.employee.lastName}`,
     });
