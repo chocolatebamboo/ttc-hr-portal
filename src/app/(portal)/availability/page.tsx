@@ -32,7 +32,7 @@ export default async function AvailabilityPage() {
       <div className="max-w-3xl">
         <AvailabilityView employeeId={employee.id} />
         <div className="mt-6">
-          <h2 className="text-sm font-medium text-muted mb-2">Availability requests</h2>
+          <h2 className="text-sm font-medium text-muted mb-2">Team availability requests</h2>
           <TeamAvailabilityCards viewerId={employee.id} />
         </div>
         <div className="mt-6">
