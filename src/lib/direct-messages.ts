@@ -1,13 +1,23 @@
 import type { PrismaClient } from "@prisma/client";
 import { withRlsContext } from "@/lib/db";
 import { getSignedDownloadUrl } from "@/lib/storage";
-import { threadKeyForDirectMessage, markThreadRead, getLastReadMap, isUnread } from "@/lib/message-read-state";
-import type {
-  CurrentEmployee,
-  DirectConversationSummaryDTO,
-  DirectMessageDTO,
-  DirectMessageRefDTO,
-  DirectMessageRefType,
+import {
+  threadKeyForDirectMessage,
+  markThreadRead,
+  getLastReadMap,
+  getPeerLastRead,
+  isUnread,
+} from "@/lib/message-read-state";
+import {
+  QUICK_REACTION_EMOJIS,
+  type CurrentEmployee,
+  type DirectConversationSummaryDTO,
+  type DirectMessageDTO,
+  type DirectMessageReactionSummaryDTO,
+  type DirectMessageReplyPreviewDTO,
+  type DirectMessageRefDTO,
+  type DirectMessageRefType,
+  type DirectMessageThreadDTO,
 } from "@/types";
 
 export class InvalidDirectMessageError extends Error {
@@ -30,6 +40,17 @@ function nameOf(p: NameFields): string {
   return `${p.preferredName || p.firstName} ${p.lastName}`;
 }
 
+/** The columns a reply preview needs from its target message — deliberately thin, matching
+ *  DirectMessageReplyPreviewDTO itself (see that type's own comment in src/types/index.ts). */
+type ReplyTargetRow = {
+  id: string;
+  body: string;
+  attachmentKey: string | null;
+  sender: NameFields;
+};
+
+type ReactionRow = { emoji: string; employeeId: string };
+
 type MessageRow = {
   id: string;
   senderId: string;
@@ -42,7 +63,42 @@ type MessageRow = {
   refType: string | null;
   refId: string | null;
   refDate: string | null;
+  replyTo: ReplyTargetRow | null;
+  reactions: ReactionRow[];
 };
+
+/** The `include` shape every query in this file that returns a full MessageRow shares, so the
+ *  reply-preview and reactions columns can't silently drift out of sync between listMessages,
+ *  postMessage, etc. */
+const MESSAGE_INCLUDE = {
+  sender: { select: { firstName: true, lastName: true, preferredName: true } },
+  replyTo: {
+    select: {
+      id: true,
+      body: true,
+      attachmentKey: true,
+      sender: { select: { firstName: true, lastName: true, preferredName: true } },
+    },
+  },
+  reactions: { select: { emoji: true, employeeId: true } },
+} as const;
+
+/** Folds one message's raw reaction rows down to the display shape — CB, Sept 2026: "I should
+ *  have the options to include emojis to react to other people's replies." Grouped by emoji
+ *  (each person can hold more than one different reaction on the same message, see
+ *  DirectMessageReaction's own doc comment in prisma/schema.prisma) and ordered to match
+ *  QUICK_REACTION_EMOJIS rather than insertion order, so the row of pills under a message doesn't
+ *  reshuffle as different people react. */
+function summarizeReactions(reactions: ReactionRow[], actorId: string): DirectMessageReactionSummaryDTO[] {
+  const byEmoji = new Map<string, { count: number; reactedByMe: boolean }>();
+  for (const r of reactions) {
+    const entry = byEmoji.get(r.emoji) ?? { count: 0, reactedByMe: false };
+    entry.count += 1;
+    if (r.employeeId === actorId) entry.reactedByMe = true;
+    byEmoji.set(r.emoji, entry);
+  }
+  return QUICK_REACTION_EMOJIS.filter((e) => byEmoji.has(e)).map((emoji) => ({ emoji, ...byEmoji.get(emoji)! }));
+}
 
 /** Turns a raw ref{Type,Id,Date} triple into the labeled DTO shape the client actually renders
  *  — the reference card CB asked for ("I should be able to kind of like reference within the
@@ -50,8 +106,9 @@ type MessageRow = {
  *  every comment posted on a task now mirrors here (see addDateTaskComment's own doc comment in
  *  src/lib/date-tasks.ts) so the conversation it came from is one tap away from the DM it shows
  *  up in. `labels` is a pre-resolved id->label map (see resolveRefLabels below) — keeping the
- *  actual lookup out of this function means toDTO stays a plain sync mapper, same as before. */
-function toDTO(row: MessageRow, labels: Map<string, string>): DirectMessageDTO {
+ *  actual lookup out of this function means toDTO stays a plain sync mapper, same as before.
+ *  `actorId` is only needed for the reactions summary's `reactedByMe` flag. */
+function toDTO(row: MessageRow, labels: Map<string, string>, actorId: string): DirectMessageDTO {
   let ref: DirectMessageRefDTO | null = null;
   if (row.refType && row.refId) {
     const label = labels.get(`${row.refType}:${row.refId}`);
@@ -59,6 +116,14 @@ function toDTO(row: MessageRow, labels: Map<string, string>): DirectMessageDTO {
       ref = { type: row.refType as DirectMessageRefType, id: row.refId, date: row.refDate, label };
     }
   }
+  const replyTo: DirectMessageReplyPreviewDTO | null = row.replyTo
+    ? {
+        id: row.replyTo.id,
+        senderName: nameOf(row.replyTo.sender),
+        body: row.replyTo.body,
+        hasAttachment: row.replyTo.attachmentKey !== null,
+      }
+    : null;
   return {
     id: row.id,
     senderId: row.senderId,
@@ -69,6 +134,8 @@ function toDTO(row: MessageRow, labels: Map<string, string>): DirectMessageDTO {
     attachmentName: row.attachmentName,
     createdAt: row.createdAt.toISOString(),
     ref,
+    replyTo,
+    reactions: summarizeReactions(row.reactions, actorId),
   };
 }
 
@@ -154,8 +221,14 @@ export async function listConversationSummaries(actor: CurrentEmployee): Promise
  * isn't about whose HR record this is, it's just "did I send or receive it," which the where
  * clause below already expresses and prisma/rls.sql's direct_message_select backs up
  * independently.
+ *
+ * Also returns `otherLastReadAt` (CB, Sept 2026: "I should be able to see also when they read
+ * the message on their side") — fetched after markThreadRead below runs, not before: reading
+ * this thread is itself what the OTHER person will eventually see reflected back as their own
+ * "Seen" mark, but fetching their timestamp first-vs-last here makes no difference to what THIS
+ * call returns (only actor's own read state changes below, never the peer's).
  */
-export async function listMessages(actor: CurrentEmployee, otherEmployeeId: string): Promise<DirectMessageDTO[]> {
+export async function listMessages(actor: CurrentEmployee, otherEmployeeId: string): Promise<DirectMessageThreadDTO> {
   const messages = await withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const rows: MessageRow[] = await tx.directMessage.findMany({
       where: {
@@ -164,18 +237,19 @@ export async function listMessages(actor: CurrentEmployee, otherEmployeeId: stri
           { senderId: otherEmployeeId, recipientId: actor.id },
         ],
       },
-      include: { sender: { select: { firstName: true, lastName: true, preferredName: true } } },
+      include: MESSAGE_INCLUDE,
       orderBy: { createdAt: "asc" },
     });
     const labels = await resolveRefLabels(tx, rows);
-    return rows.map((row) => toDTO(row, labels));
+    return rows.map((row) => toDTO(row, labels, actor.id));
   });
 
   // Correction brief #1 — see listTeamNotes' matching comment in src/lib/team-notes.ts for why
   // this lives here rather than a separate "mark read" call the client has to remember to make.
   await markThreadRead(actor, threadKeyForDirectMessage(actor.id, otherEmployeeId));
 
-  return messages;
+  const otherLastReadAtDate = await getPeerLastRead(actor, otherEmployeeId);
+  return { messages, otherLastReadAt: otherLastReadAtDate ? otherLastReadAtDate.toISOString() : null };
 }
 
 /**
@@ -190,13 +264,19 @@ export async function listMessages(actor: CurrentEmployee, otherEmployeeId: stri
  * reference within the conversation of my message with a specific team member." Nothing in this
  * app's own UI lets someone attach one directly yet; today the only caller is
  * addDateTaskComment's mirror (src/lib/date-tasks.ts), which passes the task it was posted from.
+ *
+ * `replyToId` is CB's "reply to a specific message within the message thread" (Sept 2026) — the
+ * id of an existing message to quote. Re-checked against this same thread (not just any message
+ * the actor can read) so a reply can't point at some OTHER conversation's message; a bad or
+ * cross-thread id fails the whole post rather than silently dropping the reply.
  */
 export async function postMessage(
   actor: CurrentEmployee,
   recipientId: string,
   body: string,
   attachment?: { key: string; name: string },
-  ref?: { type: "DATE_TASK"; id: string; date: string | null }
+  ref?: { type: "DATE_TASK"; id: string; date: string | null },
+  replyToId?: string | null
 ): Promise<DirectMessageDTO> {
   if (recipientId === actor.id) {
     throw new InvalidDirectMessageError("You can't message yourself.");
@@ -212,6 +292,24 @@ export async function postMessage(
       throw new InvalidDirectMessageError("That person couldn't be found.");
     }
 
+    let resolvedReplyToId: string | null = null;
+    if (replyToId) {
+      const target = await tx.directMessage.findFirst({
+        where: {
+          id: replyToId,
+          OR: [
+            { senderId: actor.id, recipientId },
+            { senderId: recipientId, recipientId: actor.id },
+          ],
+        },
+        select: { id: true },
+      });
+      if (!target) {
+        throw new InvalidDirectMessageError("That message can't be replied to.");
+      }
+      resolvedReplyToId = target.id;
+    }
+
     const row: MessageRow = await tx.directMessage.create({
       data: {
         senderId: actor.id,
@@ -222,11 +320,57 @@ export async function postMessage(
         refType: ref?.type ?? null,
         refId: ref?.id ?? null,
         refDate: ref?.date ?? null,
+        replyToId: resolvedReplyToId,
       },
-      include: { sender: { select: { firstName: true, lastName: true, preferredName: true } } },
+      include: MESSAGE_INCLUDE,
     });
     const labels = await resolveRefLabels(tx, [row]);
-    return toDTO(row, labels);
+    return toDTO(row, labels, actor.id);
+  });
+}
+
+/**
+ * Toggles one quick-reaction from `actor` on `messageId` — CB, Sept 2026: "I should have the
+ * options to include emojis to react to other people's replies." A second call with the same
+ * emoji removes it (tap-to-toggle, same as iMessage's own tapback UI); a call with a different
+ * emoji ADDS a second reaction rather than replacing the first (see DirectMessageReaction's own
+ * doc comment in prisma/schema.prisma for why). Returns the message's full updated reaction
+ * summary so the client can just replace that one message's `reactions` array, rather than
+ * re-fetching the whole thread.
+ */
+export async function toggleReaction(
+  actor: CurrentEmployee,
+  messageId: string,
+  emoji: string
+): Promise<DirectMessageReactionSummaryDTO[]> {
+  if (!(QUICK_REACTION_EMOJIS as readonly string[]).includes(emoji)) {
+    throw new InvalidDirectMessageError("That's not a reaction you can use here.");
+  }
+
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const message = await tx.directMessage.findFirst({
+      where: { id: messageId, OR: [{ senderId: actor.id }, { recipientId: actor.id }] },
+      select: { id: true },
+    });
+    if (!message) {
+      throw new DirectMessageNotFoundError();
+    }
+
+    const existing = await tx.directMessageReaction.findUnique({
+      where: { messageId_employeeId_emoji: { messageId, employeeId: actor.id, emoji } },
+      select: { id: true },
+    });
+    if (existing) {
+      await tx.directMessageReaction.delete({ where: { id: existing.id } });
+    } else {
+      await tx.directMessageReaction.create({ data: { messageId, employeeId: actor.id, emoji } });
+    }
+
+    const reactions: ReactionRow[] = await tx.directMessageReaction.findMany({
+      where: { messageId },
+      select: { emoji: true, employeeId: true },
+    });
+    return summarizeReactions(reactions, actor.id);
   });
 }
 
