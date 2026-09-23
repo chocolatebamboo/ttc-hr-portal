@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { BellIcon } from "@/components/icons";
+import { BellIcon, TrashIcon } from "@/components/icons";
+import SwipeReveal from "@/components/SwipeReveal";
 import type { NotificationDTO, NotificationType } from "@/types";
 
 /**
@@ -17,6 +18,16 @@ import type { NotificationDTO, NotificationType } from "@/types";
  * has no websocket/SSE infrastructure anywhere else, and a 45s poll is more than enough freshness
  * for "someone approved your shift change" to feel prompt without adding new infrastructure for
  * just this one feature.
+ *
+ * Phase 5a (CB, Sept 2026): "we should be able to swipe left to clear notifications one at a
+ * time, with a separate option to clear all notifications." Each row is wrapped in the same
+ * SwipeReveal component the rest of the app already uses for this exact gesture (Time Off, PTO,
+ * Messages), so the interaction is familiar; the revealed action button itself is a smaller
+ * rounded-square floating button rather than the app's usual edge-to-edge swipe action (CB's own
+ * call on this one) via actionClassName's own margin/rounding rather than a new SwipeReveal
+ * variant, so every other swipe-to-delete row in this app is unaffected. "Clear all" is a real
+ * delete (deleteAllNotifications), kept separate from the existing "Mark all read" (renamed from
+ * this file's old, confusingly-named handleClearAll) which only changes read state.
  */
 const POLL_MS = 45_000;
 
@@ -73,6 +84,10 @@ export default function NotificationBell() {
   const [notifications, setNotifications] = useState<NotificationDTO[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loaded, setLoaded] = useState(false);
+  // Which single notification's swipe-delete is in flight — narrows the busy state to just that
+  // row's own revealed button, same scoping every other per-row busy flag in this app uses.
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [clearingAll, setClearingAll] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
@@ -126,10 +141,36 @@ export default function NotificationBell() {
     router.push(targetHref(n));
   }
 
-  async function handleClearAll() {
+  async function handleMarkAllRead() {
     setNotifications((prev) => prev.map((row) => ({ ...row, read: true })));
     setUnreadCount(0);
     await fetch("/api/notifications/read-all", { method: "POST" }).catch(() => {});
+  }
+
+  async function handleDeleteOne(n: NotificationDTO) {
+    setDeletingId(n.id);
+    try {
+      const res = await fetch(`/api/notifications/${n.id}`, { method: "DELETE" });
+      if (res.ok) {
+        setNotifications((prev) => prev.filter((row) => row.id !== n.id));
+        if (!n.read) setUnreadCount((c) => Math.max(0, c - 1));
+      }
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  async function handleClearAll() {
+    setClearingAll(true);
+    try {
+      const res = await fetch("/api/notifications/clear-all", { method: "POST" });
+      if (res.ok) {
+        setNotifications([]);
+        setUnreadCount(0);
+      }
+    } finally {
+      setClearingAll(false);
+    }
   }
 
   return (
@@ -155,15 +196,27 @@ export default function NotificationBell() {
         >
           <div className="flex items-center justify-between px-3.5 py-2">
             <p className="text-sm font-medium">Notifications</p>
-            {unreadCount > 0 && (
-              <button
-                type="button"
-                onClick={handleClearAll}
-                className="text-xs font-medium text-muted hover:text-accent-ink"
-              >
-                Mark all read
-              </button>
-            )}
+            <div className="flex items-center gap-2.5">
+              {unreadCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleMarkAllRead}
+                  className="text-xs font-medium text-muted hover:text-accent-ink"
+                >
+                  Mark all read
+                </button>
+              )}
+              {notifications.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearAll}
+                  disabled={clearingAll}
+                  className="text-xs font-medium text-accent-ink hover:text-accent disabled:opacity-60"
+                >
+                  {clearingAll ? "Clearing…" : "Clear all"}
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="my-1 border-t border-border" />
@@ -173,24 +226,34 @@ export default function NotificationBell() {
               <p className="px-3.5 py-6 text-sm text-muted text-center">You&apos;re all caught up.</p>
             ) : (
               notifications.map((n) => (
-                <button
+                <SwipeReveal
                   key={n.id}
-                  type="button"
-                  role="menuitem"
-                  onClick={() => handleClick(n)}
-                  className={`w-full flex items-start gap-2.5 px-3.5 py-2.5 text-left hover:bg-black/[0.03] ${
-                    n.read ? "" : "bg-accent/[0.04]"
-                  }`}
+                  actionSide="right"
+                  actionLabel="Delete"
+                  actionIcon={<TrashIcon className="h-4 w-4" />}
+                  actionClassName="bg-rose-600 text-white rounded-2xl my-2 mr-2 ml-1"
+                  actionWidth={72}
+                  busy={deletingId === n.id}
+                  onAction={() => handleDeleteOne(n)}
                 >
-                  <Dot tone={TYPE_TONE[n.type]} />
-                  <div className="min-w-0 flex-1">
-                    <p className={`text-sm ${n.read ? "text-foreground" : "font-medium text-foreground"}`}>
-                      {n.title}
-                    </p>
-                    {n.body && <p className="text-xs text-muted mt-0.5 line-clamp-2">{n.body}</p>}
-                    <p className="text-[11px] text-muted mt-1">{relativeTime(n.createdAt)}</p>
-                  </div>
-                </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => handleClick(n)}
+                    className={`w-full flex items-start gap-2.5 px-3.5 py-2.5 text-left hover:bg-black/[0.03] ${
+                      n.read ? "" : "bg-accent/[0.04]"
+                    }`}
+                  >
+                    <Dot tone={TYPE_TONE[n.type]} />
+                    <div className="min-w-0 flex-1">
+                      <p className={`text-sm ${n.read ? "text-foreground" : "font-medium text-foreground"}`}>
+                        {n.title}
+                      </p>
+                      {n.body && <p className="text-xs text-muted mt-0.5 line-clamp-2">{n.body}</p>}
+                      <p className="text-[11px] text-muted mt-1">{relativeTime(n.createdAt)}</p>
+                    </div>
+                  </button>
+                </SwipeReveal>
               ))
             )}
           </div>
