@@ -279,19 +279,19 @@ export { useAvailabilityPanel };
  * calendars no longer share a scroll direction, but they never shared past-month behavior
  * either (My Time paginates lazily; this one loads its whole ±window eagerly).
  *
- * The three-region desktop layout below (fixed nav/header from the portal shell, a calendar
- * column with its own independent overflow-y-auto, and a non-scrolling detail panel beside it)
- * replaces an earlier version that relied on `position: sticky` to keep the panel in place
- * while the month list scrolled past it underneath. CB, after that still looked wrong: "Do not
- * solve this with one giant sticky container... if position: sticky is currently failing
- * because an ancestor has overflow, transform, or an unconstrained height, restructure the
- * layout rather than simply adding more position: sticky rules." Sticky positioning ties a
- * panel's position to whatever ancestor happens to scroll, which is exactly the kind of
- * containment-chain fragility that caused the sidebar-blank bug in (portal)/layout.tsx — this
- * uses the same fix here (an explicit md:min-h-0 height chain, md: to match the portal shell's
- * own desktop breakpoint) so the calendar column is the ONLY thing that scrolls, and the panel
- * is a normal, independently-sized flex sibling that simply never moves, with its own
- * overflow-y-auto only for when its own content (many selected dates) is taller than it.
+ * Redesign follow-up (Sept 2026), CB, on this calendar's date-tap experience versus the "This
+ * week" strip's own: "when we go to the full calendar and we click one of the dates, it's not
+ * having that same experience when we click on a date... I need you to make sure that is
+ * fixed." This calendar used to render its own two-region desktop layout (a scrolling month
+ * column beside a non-scrolling detail sidebar) plus a floating bottom sheet on mobile — a
+ * treatment built back when this was a full standalone page. Since the redesign it's ONLY ever
+ * embedded inside AvailabilityView's own compact, already-bounded "Full calendar" card (see
+ * that file's own doc comment), so that two-region/sheet treatment no longer served a real
+ * layout need — it just meant tapping a date here opened a differently-positioned panel than
+ * tapping one in the strip a few inches above it. This now always renders a single stacked
+ * column, and Panel itself (see its own doc comment below) no longer branches on a presentation
+ * variant at all — so wherever you tap a date on this page, the exact same panel opens the exact
+ * same way, right underneath what you tapped.
  *
  * A DENIED submission's detail isn't a dead end (CB, Sept 2026: "it's like it's not giving you
  * the option to even adjust... almost like a permanent statement") — its "Submit different
@@ -417,25 +417,18 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
   } = panel;
 
   return (
-    // md:flex-1 md:min-h-0: this row fills whatever height AvailabilityView's own md:h-full
-    // wrapper hands it (itself the remaining height under the portal shell's fixed header —
-    // see (portal)/layout.tsx), rather than sizing to its own content the way a plain flex row
-    // would by default. That's what lets its two children below stretch to a real, bounded
-    // height (the default `items-stretch` applies since nothing overrides it) instead of each
-    // just being as tall as its own content — the same "give every nested flex level an actual
-    // height, not just the outermost one" fix as (portal)/layout.tsx's own md:min-h-0 chain.
-    // md: (not sm:) deliberately matches the portal shell's own desktop breakpoint, so this
-    // fixed three-region layout only ever turns on exactly when RoleNav also switches into its
-    // own fixed desktop treatment — no in-between width where one has and the other hasn't.
-    <div className="flex flex-col md:flex-row md:flex-1 md:min-h-0 gap-4">
-      {/* The ONLY scrollable region on desktop — md:min-h-0 is what lets md:overflow-y-auto
-          actually engage instead of this column just growing to fit all ~10 months of content
-          and pushing the row (and the panel beside it) taller than the viewport.
-          scrollbar-hide (CB, Sept 2026, right after this became the region that actually
-          scrolls instead of the whole page): "I don't want that... where the scroll bar is" —
-          hides the native track/thumb only; the region still scrolls the same way (wheel,
-          trackpad, touch, keyboard) either way. */}
-      <div className="flex-1 min-w-0 space-y-6 md:min-h-0 md:overflow-y-auto md:pr-1 scrollbar-hide">
+    // A single stacked column at every width — see this component's own doc comment above for
+    // why the old md:flex-row two-region desktop split was dropped. AvailabilityView's own
+    // "Full calendar" card already owns the one real scroll region here (a fixed max-height with
+    // overflow-y-auto around this whole component), so this just needs to flow normally inside
+    // it — no independent scrolling column of its own to manage.
+    <div className="flex flex-col gap-4">
+      {/* scrollbar-hide (CB, Sept 2026, back when this column scrolled independently): "I don't
+          want that... where the scroll bar is" — kept even though the scrolling itself moved up
+          to AvailabilityView's wrapper, since a long month list can still occasionally exceed
+          that wrapper on very old/narrow browsers where scrollbar-gutter behaves differently;
+          harmless either way. */}
+      <div className="space-y-6 scrollbar-hide">
         {/* CB, round five: the auto-updating month header from her Airbnb-calendar reference
             video — tapping it, like that reference's own chevron, jumps straight back to today. */}
         <button
@@ -634,7 +627,6 @@ export function Panel({
   removingDateKey,
   onDeleteSubmission,
   deleting,
-  variant = "sheet",
 }: {
   viewingSubmission: AvailabilityDTO | undefined;
   employeeId: string;
@@ -667,14 +659,6 @@ export function Panel({
    *  see AvailabilityCalendarControls.onDeleteSubmission's doc comment above. */
   onDeleteSubmission?: () => void;
   deleting?: boolean;
-  /** "sheet" (default): the full calendar's own floating bottom-sheet-on-mobile /
-   *  static-sidebar-on-desktop presentation, unchanged from before this was extracted into a
-   *  shared component. "inline" (redesign follow-up, Sept 2026 — CB: "I don't necessarily want
-   *  to pull up the full calendar every single time"): a plain block that flows in place inside
-   *  whatever card it's rendered in — AvailabilityView's compact "This week" strip uses this so
-   *  the exact same add/view/cancel/delete/time-off UI opens right there instead of the full
-   *  month calendar. */
-  variant?: "sheet" | "inline";
 }) {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -694,25 +678,19 @@ export function Panel({
 
   return (
     <div
-      // On desktop this is a normal (non-sticky, non-absolute) flex sibling of the calendar
-      // column, stretched by the row's own `items-stretch` default to that row's real,
-      // md:min-h-0-bounded height — so it simply never moves while the calendar scrolls next to
-      // it, rather than tracking scroll position the way `sticky` does. `overflow-y-auto` (in
-      // the unconditional classes below) is what gives IT an independent scrollbar if enough
-      // dates are selected to make its own content taller than that fixed height — see this
-      // component's doc comment above for why sticky was replaced rather than added to.
-      //
-      // "inline" drops the fixed/sheet positioning entirely — it's rendered by a caller that
-      // already owns its own card (AvailabilityView's "This week" strip), so this just needs to
-      // be a normal block in that flow, capped and scrollable only if its own content (many
-      // selected dates, a long task list) actually runs long.
-      className={
-        variant === "inline"
-          ? "bg-neutral-900 text-white rounded-2xl p-4 max-h-[26rem] overflow-y-auto"
-          : `fixed z-50 bg-neutral-900 text-white shadow-2xl overflow-y-auto p-4
-        inset-x-3 bottom-24 max-h-[75vh] rounded-3xl
-        md:static md:inset-auto md:z-auto md:h-full md:max-h-full md:min-h-0 md:w-[320px] md:shrink-0 md:rounded-2xl`
-      }
+      // Redesign follow-up (Sept 2026), CB: "I need [the full calendar] to be fixed" so it opens
+      // the exact same way the "This week" strip's own date tap does — this used to branch on a
+      // `variant` prop between this plain in-flow block and a second, fixed-bottom-sheet-on-
+      // mobile/static-sidebar-on-desktop presentation, back when the full calendar rendered as a
+      // standalone page with a scrolling column of its own to dock a sidebar panel against. Now
+      // that both callers (this component, and AvailabilityView's own "This week" strip) render
+      // this same plain block, there's only ever one presentation, so the branch — and the prop
+      // — are gone rather than left as dead code nobody will remember to keep in sync. Rendered
+      // by a caller that already owns its own card (either AvailabilityView's "This week" strip,
+      // or its "Full calendar" section), so this just needs to be a normal block in that flow,
+      // capped and scrollable only if its own content (many selected dates, a long task list)
+      // actually runs long.
+      className="bg-neutral-900 text-white rounded-2xl p-4 max-h-[26rem] overflow-y-auto"
     >
       <div className="flex items-center justify-between gap-3 mb-3">
         <p className="text-sm font-medium">{headerLabel}</p>
