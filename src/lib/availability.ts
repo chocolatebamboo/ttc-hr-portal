@@ -345,14 +345,24 @@ export async function removeAvailabilityDateForReview(
 }
 
 /**
- * Employee permanently removes one of their own CANCELLED submissions — CB, Sept 2026: "the
- * deleting isn't working on these," pointing at old Cancelled entries piling up in the
- * submissions preview next to the calendar. Same Cancelled-only rule as deletePtoRequest
- * (src/lib/pto-actions.ts): a Pending, Denied, or Approved record still means something (still
- * awaiting a decision, or a real decision that was made), so only a status the employee
- * themselves already withdrew is ever eligible to disappear for good. No related rows worth
- * preserving for a submission nobody's acting on anymore — its own shift-reminder rows cascade
- * per the schema.
+ * Employee permanently removes one of their own CANCELLED or APPROVED submissions — CB, Sept
+ * 2026: "the deleting isn't working on these," pointing at old Cancelled entries piling up in
+ * the submissions preview next to the calendar. Same Cancelled-only rule as deletePtoRequest
+ * (src/lib/pto-actions.ts) originally, on the reasoning that a Pending, Denied, or Approved
+ * record still means something — still awaiting a decision, or a real decision that was made.
+ *
+ * CB, Sept 2026 (redesign follow-up), pointing at an Approved submission on her own "Your
+ * submissions" list: "I need to be able to delete it and knock it off the schedule." Confirmed
+ * scope: Approved joins Cancelled as directly deletable by the employee themselves — no Cancel
+ * step first (there isn't one for Approved; cancelAvailabilitySubmission is still Pending/Denied-
+ * only, unchanged). Pending and Denied stay NOT directly deletable — those still go through
+ * Cancel first, same as before, so there's still a record of something that was actually
+ * withdrawn rather than just made to disappear.
+ *
+ * If a Shift was already created from this submission (convertAvailabilityDateToShift), that
+ * Shift is untouched — Shift.sourceAvailabilitySubmissionId is ON DELETE SET NULL, so the
+ * already-scheduled shift just loses its pointer back to the submission that produced it, same
+ * as any other source-record cleanup in this app. Nothing about the actual schedule changes.
  */
 export async function deleteAvailabilitySubmission(actor: CurrentEmployee, submissionId: string): Promise<void> {
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
@@ -360,8 +370,10 @@ export async function deleteAvailabilitySubmission(actor: CurrentEmployee, submi
     if (!existing || existing.employeeId !== actor.id) {
       throw new InvalidAvailabilityError("Submission not found.");
     }
-    if (existing.status !== "CANCELLED") {
-      throw new InvalidAvailabilityError('Only a "Cancelled" submission can be deleted.');
+    if (existing.status !== "CANCELLED" && existing.status !== "APPROVED") {
+      throw new InvalidAvailabilityError(
+        'Only a "Cancelled" or "Approved" submission can be deleted — clear a Pending or Denied one first.'
+      );
     }
     await tx.availabilitySubmission.delete({ where: { id: submissionId } });
   });
