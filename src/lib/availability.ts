@@ -68,7 +68,14 @@ async function resolveReviewerNames(tx: PrismaClient, rows: AvailabilityRow[]): 
  *  an old row behaves exactly like a fresh one: nothing decided per-date yet, bulk actions still
  *  fully available. */
 function defaultDateDecisions(slots: AvailabilitySlot[]): AvailabilityDateDecision[] {
-  return slots.map((s) => ({ date: s.date, status: "PENDING" as const, decidedAt: null, decidedById: null, comment: null }));
+  return slots.map((s) => ({
+    date: s.date,
+    status: "PENDING" as const,
+    decidedAt: null,
+    decidedById: null,
+    decidedByName: null,
+    comment: null,
+  }));
 }
 
 /** Reads a row's dateDecisions back as real entries, falling back to defaultDateDecisions for a
@@ -660,7 +667,14 @@ export async function undecideAvailabilityDate(
     }
 
     const nextDecisions = decisions.slice();
-    nextDecisions[index] = { date, status: "PENDING", decidedAt: null, decidedById: null, comment: null };
+    nextDecisions[index] = {
+      date,
+      status: "PENDING",
+      decidedAt: null,
+      decidedById: null,
+      decidedByName: null,
+      comment: null,
+    };
 
     const row = await tx.availabilitySubmission.update({
       where: { id: submissionId },
