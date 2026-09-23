@@ -4,8 +4,8 @@ import { deleteAvailabilitySubmission } from "@/lib/availability";
 import { toErrorResponse } from "@/lib/api-errors";
 
 /** DELETE /api/availability/[submissionId] — permanently remove one of the signed-in team
- *  member's own CANCELLED submissions (see deleteAvailabilitySubmission's doc comment for why
- *  it's limited to that status). Mirrors DELETE /api/pto/requests/[id] exactly. */
+ *  member's own CANCELLED or APPROVED submissions (see deleteAvailabilitySubmission's doc
+ *  comment for why it's limited to those two statuses). Mirrors DELETE /api/pto/requests/[id]. */
 export async function DELETE(_request: Request, ctx: RouteContext<"/api/availability/[submissionId]">) {
   try {
     const employee = await requireEmployee();
