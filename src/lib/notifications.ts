@@ -37,18 +37,6 @@ function toDTO(row: NotificationRow): NotificationDTO {
  * should never have existed either. Same "write it inside the same tx as the audit log" shape
  * writeShiftAuditLog already uses in src/lib/shifts.ts, just for the newer recipient-facing
  * table instead of (or, at the four new call sites in phase 4, alongside) AuditLog.
- *
- * Hotfix (Sept 2026): this used to call tx.notification.create(), which is Prisma's shorthand
- * for `INSERT ... RETURNING *`. Under this table's RLS (prisma/rls.sql: notification_select is
- * `recipientId = current_employee_id()`, with no admin override — see that policy's own
- * comment), Postgres checks a just-inserted row against the SELECT policy before it can be
- * handed back via RETURNING, and a notification is by definition addressed to someone OTHER
- * than whoever's running this transaction — so that check failed on literally every call,
- * rolling back the entire decide/approve/deny action around it ("new row violates row-level
- * security policy for table \"Notification\""). createMany() below issues a plain INSERT with
- * no RETURNING clause, so only notification_insert's `with check (true)` applies — same row,
- * same privacy (still nobody but the recipient can ever SELECT it back out), just without
- * Postgres trying to hand back a row this caller isn't allowed to read.
  */
 export async function writeNotification(
   tx: PrismaClient,
@@ -61,17 +49,15 @@ export async function writeNotification(
     targetId: string;
   }
 ): Promise<void> {
-  await tx.notification.createMany({
-    data: [
-      {
-        recipientId: params.recipientId,
-        type: params.type,
-        title: params.title,
-        body: params.body ?? null,
-        targetType: params.targetType,
-        targetId: params.targetId,
-      },
-    ],
+  await tx.notification.create({
+    data: {
+      recipientId: params.recipientId,
+      type: params.type,
+      title: params.title,
+      body: params.body ?? null,
+      targetType: params.targetType,
+      targetId: params.targetId,
+    },
   });
 }
 
@@ -114,14 +100,39 @@ export async function markNotificationRead(actor: CurrentEmployee, notificationI
   });
 }
 
-/** "Clear all" — marks every currently-unread notification read in one call, same convenience
+/** Marks every currently-unread notification read in one call, same convenience
  *  markAllNotificationsRead-shaped actions elsewhere in this app (e.g. TeamNote's own read
- *  tracking) already offer rather than requiring one click per row. */
+ *  tracking) already offer rather than requiring one click per row. This is "Mark all read" on
+ *  the header bell — leaves every row in place, just changes its read state. See
+ *  deleteAllNotifications below for the separate, permanent "Clear all." */
 export async function markAllNotificationsRead(actor: CurrentEmployee): Promise<void> {
   await withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     await tx.notification.updateMany({
       where: { recipientId: actor.id, readAt: null },
       data: { readAt: new Date() },
     });
+  });
+}
+
+/** Phase 5a (CB, Sept 2026): "we should be able to swipe left to clear notifications one at a
+ *  time." A real delete — the row is gone, not just marked read (that's markNotificationRead
+ *  above; this is a different, permanent action). Silently a no-op if the id doesn't exist or
+ *  isn't theirs (a deleteMany with a where clause, not findUnique-then-delete) — same reasoning
+ *  as markNotificationRead: whoever's swiping a notification in their own feed already has the
+ *  right id, so there's nothing meaningful to report back beyond "it's gone now."
+ *  notification_delete's own RLS policy is the real backstop either way. */
+export async function deleteNotification(actor: CurrentEmployee, notificationId: string): Promise<void> {
+  await withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    await tx.notification.deleteMany({ where: { id: notificationId, recipientId: actor.id } });
+  });
+}
+
+/** "Clear all" — CB, Sept 2026: "a separate option to clear all notifications," distinct from
+ *  the existing "Mark all read" above, which only changes read state and leaves every row in
+ *  place. This permanently removes every one of the signed-in employee's own notifications,
+ *  read or unread. */
+export async function deleteAllNotifications(actor: CurrentEmployee): Promise<void> {
+  await withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    await tx.notification.deleteMany({ where: { recipientId: actor.id } });
   });
 }
