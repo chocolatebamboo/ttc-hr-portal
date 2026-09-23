@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getCurrentEmployee } from "@/lib/auth";
-import { isAdmin } from "@/lib/authorization";
+import { isAdmin, isStaff } from "@/lib/authorization";
 import { listTeamNoteTopicCounts, listAllTeamNoteTopicCounts } from "@/lib/team-notes";
 import { listConversationSummaries } from "@/lib/direct-messages";
 import MessagesInboxView from "./MessagesInboxView";
@@ -30,6 +30,11 @@ export default async function MessagesPage() {
       viewerName={employee.preferredName || employee.firstName}
       topicCounts={topicCounts}
       directConversations={directConversations}
+      // Phase 5c (CB, Sept 2026): "an option to add an internal comment," confirmed scope
+      // "hidden from the team member." Same three-role staff cut everywhere else in this
+      // feature uses (src/lib/authorization.ts). Threaded down to DirectMessageThread, which
+      // decides per-message whether the internal-note toolbar icon even renders.
+      canUseInternalNotes={isStaff(employee)}
     />
   );
 }
