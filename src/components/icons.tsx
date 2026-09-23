@@ -309,3 +309,15 @@ export function WarningIcon({ className = base }: IconProps) {
     </svg>
   );
 }
+
+// Phase 5b (client spec, Sept 2026): a reply arrow — the hover/tap toolbar's own reply action on
+// a direct message (DirectMessageThread.tsx) and the small elbow connector rendered next to a
+// reply's quoted-preview card, pointing back at whichever message it's answering.
+export function ReplyIcon({ className = base }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+      <path d="M9 17 4 12l5-5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4 12h11a4 4 0 0 1 4 4v2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
