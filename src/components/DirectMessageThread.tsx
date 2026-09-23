@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { DownloadIcon, ChecklistIcon } from "@/components/icons";
+import { DownloadIcon, ChecklistIcon, ReplyIcon } from "@/components/icons";
 import { QUICK_REACTION_EMOJIS } from "@/types";
 import type { DirectMessageDTO, DirectMessageThreadDTO } from "@/types";
 
@@ -56,6 +56,19 @@ function previewText(m: { body: string; hasAttachment: boolean; attachmentName?:
  * DirectMessageThreadDTO's own doc comment in src/types/index.ts) drives a "Seen" mark under the
  * last message the viewer sent that the other person has already read — iMessage's own read-
  * receipt convention, not a mark on every message.
+ *
+ * Phase 5b (CB, Sept 2026): "replies should appear within the relevant message thread... show a
+ * visible connecting line between the messages, so the conversation is easy to follow" and
+ * "hovering over a message should show quick emoji reactions." Two changes on top of the above,
+ * both purely presentational — no new endpoints, no DTO changes: (1) a small elbow connector
+ * renders next to a reply's existing quoted-preview card, pointing back at what it's answering,
+ * rather than the card standing alone; (2) the react/reply row (still the same six
+ * QUICK_REACTION_EMOJIS + reply) now floats above the bubble as its own pill, shown on hover for
+ * desktop pointer users and still reachable by tapping the bubble on touch devices, where hover
+ * doesn't apply — `activeMessageId` drives that tap-open state exactly as before, hover is added
+ * on top via CSS (:group-hover), not a second piece of state. Internal-comment and create-task
+ * actions are NOT in this toolbar yet — those land in their own later phases and slot into this
+ * same pill once built, rather than shipping inert buttons now.
  */
 export default function DirectMessageThread({
   otherEmployeeId,
@@ -230,53 +243,99 @@ export default function DirectMessageThread({
                   </div>
                 )}
                 {/* CB, Sept 2026: "I should be able to reply to a specific message within the
-                    message thread" — the quoted-preview card a reply renders above itself,
-                    pointing back at whichever message it was answering. Same plain-surface
-                    styling as the task reference card above, just quoting a message instead of
-                    an external record. */}
+                    message thread"; Phase 5b: "show a visible connecting line between the
+                    messages, so the conversation is easy to follow." The quoted-preview card a
+                    reply renders above itself, pointing back at whichever message it was
+                    answering — same plain-surface styling as the task reference card above, just
+                    quoting a message instead of an external record — now paired with a small
+                    elbow connector to its left, since the text label alone didn't read as
+                    "linked to" the original the way a real line does. Indented (pl-5) to leave
+                    room for the connector regardless of which side sent it. */}
                 {m.replyTo && (
-                  <div className="max-w-[80%] mb-1 rounded-xl border border-border bg-surface px-3 py-2 shadow-sm">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">
-                      {/* DirectMessageReplyPreviewDTO only carries senderName, not senderId (it's
-                          a lightweight preview, not a full message row) — the quoted message is
-                          still sitting right in this same thread's already-loaded `messages`, so
-                          look it up locally for the "You" label rather than growing the DTO. */}
-                      {messages.find((msg) => msg.id === m.replyTo!.id)?.senderId === viewerId
-                        ? "You"
-                        : m.replyTo.senderName}
-                    </p>
-                    <p className="text-xs text-muted truncate">{previewText(m.replyTo)}</p>
+                  <div className="relative max-w-[80%] mb-1 pl-5">
+                    <ReplyIcon aria-hidden="true" className="absolute left-0 top-1 h-3.5 w-3.5 text-muted" />
+                    <div className="rounded-xl border border-border bg-surface px-3 py-2 shadow-sm">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+                        {/* DirectMessageReplyPreviewDTO only carries senderName, not senderId
+                            (it's a lightweight preview, not a full message row) — the quoted
+                            message is still sitting right in this same thread's already-loaded
+                            `messages`, so look it up locally for the "You" label rather than
+                            growing the DTO. */}
+                        {messages.find((msg) => msg.id === m.replyTo!.id)?.senderId === viewerId
+                          ? "You"
+                          : m.replyTo.senderName}
+                      </p>
+                      <p className="text-xs text-muted truncate">{previewText(m.replyTo)}</p>
+                    </div>
                   </div>
                 )}
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setActiveMessageId(activeMessageId === m.id ? null : m.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      setActiveMessageId(activeMessageId === m.id ? null : m.id);
-                    }
-                  }}
-                  className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 cursor-pointer ${mine ? "text-white" : "bg-black/[0.04]"}`}
-                  style={mine ? { background: "var(--ttc-blue)" } : undefined}
-                >
-                  {!mine && <p className="text-xs font-semibold mb-0.5">{m.senderName}</p>}
-                  {m.body && <p className="text-sm whitespace-pre-wrap break-words">{m.body}</p>}
-                  {m.hasAttachment && (
+                <div className="group/msg relative">
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setActiveMessageId(activeMessageId === m.id ? null : m.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setActiveMessageId(activeMessageId === m.id ? null : m.id);
+                      }
+                    }}
+                    className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 cursor-pointer ${mine ? "text-white" : "bg-black/[0.04]"}`}
+                    style={mine ? { background: "var(--ttc-blue)" } : undefined}
+                  >
+                    {!mine && <p className="text-xs font-semibold mb-0.5">{m.senderName}</p>}
+                    {m.body && <p className="text-sm whitespace-pre-wrap break-words">{m.body}</p>}
+                    {m.hasAttachment && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDownload(m.id);
+                        }}
+                        disabled={downloadingId === m.id}
+                        className={`mt-1.5 flex items-center gap-1.5 text-xs font-medium underline ${mine ? "text-white/90" : "text-accent-ink"}`}
+                      >
+                        <DownloadIcon className="h-3.5 w-3.5" />
+                        {m.attachmentName ?? "Attachment"}
+                      </button>
+                    )}
+                    <p className={`text-[11px] mt-1 ${mine ? "text-white/70" : "text-muted"}`}>{formatMessageTime(m.createdAt)}</p>
+                  </div>
+
+                  {/* Phase 5b: the react/reply toolbar — was an inline row below the bubble,
+                      opened only by tapping it; now floats above the bubble and also opens on
+                      hover for desktop pointer users (touch keeps the original tap behavior,
+                      since there's no hover to rely on there). `group/msg` scopes the hover to
+                      just this one bubble, not the whole message block below it. */}
+                  <div
+                    className={`absolute -top-11 ${mine ? "right-0" : "left-0"} z-10 flex items-center gap-0.5 rounded-full px-1.5 py-1 shadow-lg transition-opacity ${
+                      activeMessageId === m.id
+                        ? "opacity-100"
+                        : "opacity-0 pointer-events-none group-hover/msg:opacity-100 group-hover/msg:pointer-events-auto"
+                    }`}
+                    style={{ background: "var(--foreground)" }}
+                  >
+                    {QUICK_REACTION_EMOJIS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => toggleReaction(m.id, emoji)}
+                        disabled={reactingId === m.id}
+                        className="h-7 w-7 rounded-full hover:bg-white/[0.14] flex items-center justify-center text-sm disabled:opacity-60"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                    <span className="w-px h-5 bg-white/20 mx-0.5" />
                     <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDownload(m.id);
-                      }}
-                      disabled={downloadingId === m.id}
-                      className={`mt-1.5 flex items-center gap-1.5 text-xs font-medium underline ${mine ? "text-white/90" : "text-accent-ink"}`}
+                      type="button"
+                      onClick={() => startReply(m)}
+                      aria-label="Reply"
+                      title="Reply"
+                      className="h-7 w-7 rounded-full hover:bg-white/[0.14] flex items-center justify-center text-white/85"
                     >
-                      <DownloadIcon className="h-3.5 w-3.5" />
-                      {m.attachmentName ?? "Attachment"}
+                      <ReplyIcon className="h-3.5 w-3.5" />
                     </button>
-                  )}
-                  <p className={`text-[11px] mt-1 ${mine ? "text-white/70" : "text-muted"}`}>{formatMessageTime(m.createdAt)}</p>
+                  </div>
                 </div>
 
                 {/* Quick-reaction pills — CB, Sept 2026: "I should have the options to include
@@ -300,31 +359,6 @@ export default function DirectMessageThread({
                         <span className="font-medium text-muted">{r.count}</span>
                       </button>
                     ))}
-                  </div>
-                )}
-
-                {/* The react/reply action row — opened by tapping the bubble itself, closed again
-                    the moment either action fires. */}
-                {activeMessageId === m.id && (
-                  <div className={`flex items-center gap-1 mt-1.5 ${mine ? "justify-end" : "justify-start"}`}>
-                    {QUICK_REACTION_EMOJIS.map((emoji) => (
-                      <button
-                        key={emoji}
-                        type="button"
-                        onClick={() => toggleReaction(m.id, emoji)}
-                        disabled={reactingId === m.id}
-                        className="h-7 w-7 rounded-full bg-black/[0.04] hover:bg-black/[0.08] flex items-center justify-center text-sm disabled:opacity-60"
-                      >
-                        {emoji}
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => startReply(m)}
-                      className="h-7 px-2.5 rounded-full bg-black/[0.04] hover:bg-black/[0.08] text-xs font-medium text-muted"
-                    >
-                      Reply
-                    </button>
                   </div>
                 )}
 
