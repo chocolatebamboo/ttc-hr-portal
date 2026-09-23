@@ -65,3 +65,23 @@ export function isUnread(lastRead: Map<string, Date>, threadKey: string, created
   const read = lastRead.get(threadKey);
   return !read || createdAt > read;
 }
+
+/** The OTHER participant's own lastReadAt for one specific DM thread — CB, Sept 2026: "I should
+ *  be able to see also when they read the message on their side." Every other function in this
+ *  file only ever reads the CALLER's own rows (see the module doc comment on why
+ *  MessageReadState is normally strictly own-rows-only); this is the one deliberate, narrow
+ *  exception, backed by message_read_state_select_dm_peer in prisma/rls.sql, which widens the
+ *  select policy to this one shared thread only — never any other employee's read state on any
+ *  other thread. Returns null if they've never opened this thread (no row), same "never opened,
+ *  nothing's been seen" meaning getLastReadMap's per-viewer map already carries for the caller's
+ *  own side. */
+export async function getPeerLastRead(actor: CurrentEmployee, otherEmployeeId: string): Promise<Date | null> {
+  const threadKey = threadKeyForDirectMessage(actor.id, otherEmployeeId);
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const row = await tx.messageReadState.findUnique({
+      where: { employeeId_threadKey: { employeeId: otherEmployeeId, threadKey } },
+      select: { lastReadAt: true },
+    });
+    return row?.lastReadAt ?? null;
+  });
+}
