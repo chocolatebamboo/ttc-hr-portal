@@ -240,6 +240,11 @@ export interface AvailabilityDateDecision {
   status: "PENDING" | "APPROVED" | "DENIED";
   decidedAt: string | null;
   decidedById: string | null;
+  /** CB, Sept 2026: "we need to also know who approved the request" — resolved server-side
+   *  (resolveReviewerNames in src/lib/availability.ts) from decidedById, same "pre-resolve so the
+   *  client never looks anyone up itself" convention DirectMessageRefDTO's own `label` uses. Null
+   *  exactly when decidedById is null (still PENDING, or reopened via Undo). */
+  decidedByName: string | null;
   comment: string | null;
 }
 
@@ -254,6 +259,12 @@ export interface AvailabilityDTO {
   submittedAt: string;
   reviewComment: string | null;
   reviewedAt: string | null;
+  /** CB, Sept 2026: "we need to also know who approved the request" — the whole-submission
+   *  reviewer's name (bulk decide, or whichever per-date decide most recently completed every
+   *  date). Null until reviewedAt is set, same as reviewComment. See AvailabilityDateDecision's
+   *  own decidedByName for the per-date counterpart, which is the one that matters while a
+   *  multi-date request is still being finished one date at a time. */
+  reviewedByName: string | null;
   /** Set only alongside status ADJUSTMENT_REQUESTED — the reviewer's counter-proposed times for
    *  each date in `slots` above (client spec, phase 2: "Adjust the proposed time and send it to
    *  the team member for confirmation"). See AvailabilitySubmission.adjustedSlots's own doc
@@ -421,6 +432,35 @@ export interface DirectMessageRefDTO {
   label: string;
 }
 
+/** CB, Sept 2026: "I should have the options to include emojis to react to other people's
+ *  replies" — confirmed scope: a fixed quick-react set rather than a full emoji picker. Order
+ *  here is also the display order of a message's reaction pills (see summarizeReactions in
+ *  src/lib/direct-messages.ts), so it's deliberately NOT alphabetical — roughly "positive → ...
+ *  → negative", the same rough shape iMessage's own tapback set uses. */
+export const QUICK_REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"] as const;
+export type QuickReactionEmoji = (typeof QUICK_REACTION_EMOJIS)[number];
+
+/** One emoji's tally on one message — CB, Sept 2026: "include the options to include emojis to
+ *  react to other people's replies." `reactedByMe` is precomputed server-side (same reasoning as
+ *  every other viewer-relative flag in this file, e.g. DateTaskDTO's own status fields) so the
+ *  client never has to cross-reference its own employeeId against a raw list of reactor ids. */
+export interface DirectMessageReactionSummaryDTO {
+  emoji: string;
+  count: number;
+  reactedByMe: boolean;
+}
+
+/** The small quoted-preview card a reply renders above itself — CB, Sept 2026: "I should be able
+ *  to reply to a specific message within the message thread." Deliberately thin (no full
+ *  DirectMessageDTO, no reactions-on-the-reply-target) since this is only ever rendered as a
+ *  glance-back preview, same spirit as DirectMessageRefDTO's own pre-resolved `label`. */
+export interface DirectMessageReplyPreviewDTO {
+  id: string;
+  senderName: string;
+  body: string;
+  hasAttachment: boolean;
+}
+
 /**
  * One message in a peer-to-peer conversation — CB, Sept 2026: "instead of notes, I want it to
  * be messages... I should be able to look up members and send them individual messages." Unlike
@@ -437,6 +477,23 @@ export interface DirectMessageDTO {
   attachmentName: string | null;
   createdAt: string; // ISO
   ref: DirectMessageRefDTO | null;
+  /** The message this one is quoting, if any — CB's "reply to a specific message" (Sept 2026). */
+  replyTo: DirectMessageReplyPreviewDTO | null;
+  /** Quick-reaction tallies on this message, one entry per emoji actually used — never all six,
+   *  never zero-count placeholders. Empty array, not null, when nobody's reacted. */
+  reactions: DirectMessageReactionSummaryDTO[];
+}
+
+/** The GET /api/messages/dm/[employeeId] response shape — CB, Sept 2026: "I should be able to
+ *  see also when they read the message on their side." `otherLastReadAt` is the OTHER
+ *  participant's own lastReadAt for this one thread (null if they've never opened it), enabled by
+ *  message_read_state_select_dm_peer's narrow RLS widening (see prisma/rls.sql) — never any
+ *  other thread's read state, and never the viewer's own (that's implicit in having just loaded
+ *  the thread). The client uses it to show a "Seen" mark under the last message the viewer sent
+ *  that's at or before that timestamp, same idea as iMessage's own read receipt. */
+export interface DirectMessageThreadDTO {
+  messages: DirectMessageDTO[];
+  otherLastReadAt: string | null; // ISO
 }
 
 /** One row per DM conversation, most-recent-activity-first — same total/fromOthers/unread shape
