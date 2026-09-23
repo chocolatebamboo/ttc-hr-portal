@@ -1,9 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { DownloadIcon, ChecklistIcon, ReplyIcon, LockIcon } from "@/components/icons";
+import { DownloadIcon, ChecklistIcon, CalendarIcon, ReplyIcon, LockIcon } from "@/components/icons";
 import { QUICK_REACTION_EMOJIS } from "@/types";
 import type { DirectMessageDTO, DirectMessageThreadDTO, DirectoryEntryDTO } from "@/types";
+
+/** What a "Message about this date" link (Phase 5d) or an already-sent message's own `ref`
+ *  actually is today — only ever AVAILABILITY_DATE from the client side (see postMessage's own
+ *  doc comment in src/lib/direct-messages.ts for why DATE_TASK stays server-only). */
+type AttachedRef = { type: "AVAILABILITY_DATE"; id: string; date: string };
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -121,11 +126,22 @@ function detectMentionTrigger(text: string, cursor: number): { start: number; qu
  * message." A mention is stored as plain `@Full Name` text (no structured id, no notification) —
  * splitMentions above only highlights it in a sent bubble when it matches a real directory name,
  * so this needed no DTO or schema change on the sending side at all.
+ *
+ * Phase 5d (CB, Sept 2026): "chat icons on availability requests linked to specific dates" — a
+ * date-scoped chat button (TeamAvailabilityCards' openChatForDate) can open this thread with a
+ * reference already attached, seeded from `initialRef` into the same `attachedRef` state a
+ * message-scoped reply already uses for `replyingTo` — an attach-chip renders above the compose
+ * box showing what's about to go out, clearable before sending, and rides along on the next send
+ * as `refType`/`refId`/`refDate`. `onInitialRefConsumed` tells the parent (which owns the actual
+ * URL-derived value) that it's been captured, so it can clear its own copy and a later reopen of
+ * this or any other thread never inherits a stale reference from an earlier date-chat click.
  */
 export default function DirectMessageThread({
   otherEmployeeId,
   viewerId,
   canUseInternalNotes,
+  initialRef,
+  onInitialRefConsumed,
   onMessagePosted,
   onRead,
 }: {
@@ -136,6 +152,14 @@ export default function DirectMessageThread({
    *  down from the page rather than re-derived here since this component never receives the
    *  viewer's full role otherwise. */
   canUseInternalNotes: boolean;
+  /** Phase 5d: a reference to pre-attach on mount, or null/undefined for none — see this
+   *  component's own doc comment above. Only ever read once, at mount (matching how `dm`/`name`
+   *  already seed a fresh thread) — a later change to this prop while the thread stays open does
+   *  NOT re-seed `attachedRef`. */
+  initialRef?: AttachedRef | null;
+  /** Fires once, right after `initialRef` has been captured into local state — lets the parent
+   *  clear its own copy so it isn't handed to some other thread later. */
+  onInitialRefConsumed?: () => void;
   /** Fires after a message is successfully sent — lets the inbox list above refresh its
    *  conversation summary (last message, counts) without waiting for the next full page load. */
   onMessagePosted?: () => void;
@@ -158,6 +182,9 @@ export default function DirectMessageThread({
   // The message currently being replied to, if any — seeds the draft banner above the compose
   // box and rides along on the next send as `replyToId`.
   const [replyingTo, setReplyingTo] = useState<DirectMessageDTO | null>(null);
+  // Phase 5d: the reference about to ride along on the next send, if any — seeded once from
+  // `initialRef` below, cleared on send (or manually via the attach-chip's own Cancel).
+  const [attachedRef, setAttachedRef] = useState<AttachedRef | null>(initialRef ?? null);
   // Which message has a reaction toggle in flight — just disables that message's own pills/
   // picker while it's happening, same narrow busy-scoping every other list in this app uses.
   const [reactingId, setReactingId] = useState<string | null>(null);
@@ -195,6 +222,14 @@ export default function DirectMessageThread({
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [otherEmployeeId]);
+
+  // Phase 5d: tells the parent its `initialRef` has been captured (into `attachedRef` above, via
+  // useState's initializer) so it can clear its own copy — mount-only, same "consume once" shape
+  // the `dm`/`name`/`refType`… URL params already follow one level up.
+  useEffect(() => {
+    if (initialRef) onInitialRefConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "nearest" });
@@ -238,6 +273,11 @@ export default function DirectMessageThread({
       form.set("body", body);
       if (file) form.set("file", file);
       if (replyingTo) form.set("replyToId", replyingTo.id);
+      if (attachedRef) {
+        form.set("refType", attachedRef.type);
+        form.set("refId", attachedRef.id);
+        form.set("refDate", attachedRef.date);
+      }
 
       const res = await fetch(`/api/messages/dm/${otherEmployeeId}`, { method: "POST", body: form });
       const data = await res.json().catch(() => ({}));
@@ -248,6 +288,7 @@ export default function DirectMessageThread({
       setBody("");
       setFile(null);
       setReplyingTo(null);
+      setAttachedRef(null);
       setMentionTrigger(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       load();
@@ -378,15 +419,24 @@ export default function DirectMessageThread({
                     a reply preview in a normal texting app: what this was actually about, and
                     when. Sits outside the colored bubble (plain surface either way) so it reads
                     the same regardless of which side sent it. */}
-                {m.ref && (
-                  <div className="max-w-[80%] mb-1 rounded-xl border border-border bg-surface px-3 py-2 shadow-sm">
-                    <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
-                      <ChecklistIcon className="h-3 w-3" />
-                      Task{m.ref.date ? ` · ${formatRefDate(m.ref.date)}` : ""}
-                    </div>
-                    <p className="text-xs font-semibold mt-0.5">{m.ref.label}</p>
-                  </div>
-                )}
+                {m.ref &&
+                  (() => {
+                    // Phase 5d: same card, now branching on ref type — AVAILABILITY_DATE reads
+                    // "Availability · <date>" with a calendar glyph, same shape DATE_TASK's own
+                    // "Task · <date>" already used, just not hardcoded to it anymore.
+                    const RefIcon = m.ref.type === "AVAILABILITY_DATE" ? CalendarIcon : ChecklistIcon;
+                    const refKind = m.ref.type === "AVAILABILITY_DATE" ? "Availability" : "Task";
+                    return (
+                      <div className="max-w-[80%] mb-1 rounded-xl border border-border bg-surface px-3 py-2 shadow-sm">
+                        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
+                          <RefIcon className="h-3 w-3" />
+                          {refKind}
+                          {m.ref.date ? ` · ${formatRefDate(m.ref.date)}` : ""}
+                        </div>
+                        <p className="text-xs font-semibold mt-0.5">{m.ref.label}</p>
+                      </div>
+                    );
+                  })()}
                 {/* CB, Sept 2026: "I should be able to reply to a specific message within the
                     message thread"; Phase 5b: "show a visible connecting line between the
                     messages, so the conversation is easy to follow." The quoted-preview card a
@@ -614,6 +664,28 @@ export default function DirectMessageThread({
       </div>
 
       <form onSubmit={handleSend} className="border-t border-border p-3 space-y-2">
+        {/* Phase 5d: what's about to go out, from a "Message about this date" link — cleared by
+            its own Cancel, or automatically once the message that carries it actually sends. */}
+        {attachedRef && (
+          <div
+            className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2"
+            style={{ background: "rgba(1,105,240,0.07)", borderColor: "rgba(1,105,240,0.25)" }}
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <CalendarIcon className="h-3.5 w-3.5 shrink-0 text-brand-ink" />
+              <p className="text-xs truncate">
+                Attached: <span className="font-semibold text-brand-ink">{formatRefDate(attachedRef.date)}</span> availability
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAttachedRef(null)}
+              className="text-xs text-muted hover:text-accent-ink shrink-0"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
         {replyingTo && (
           <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-black/[0.02] px-3 py-2">
             <div className="min-w-0">
