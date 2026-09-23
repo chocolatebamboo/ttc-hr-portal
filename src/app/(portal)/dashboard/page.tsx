@@ -6,11 +6,12 @@ import { withRlsContext } from "@/lib/db";
 import { listDocumentsForEmployee } from "@/lib/documents";
 import { listAnnouncementsForEmployee } from "@/lib/announcements";
 import { getOnboardingAttention } from "@/lib/onboarding";
-import { listMyAvailability } from "@/lib/availability";
+import { listMyAvailability, listAdminAvailability } from "@/lib/availability";
 import { getDashboardNotificationsSummary } from "@/lib/dashboard-notifications";
 import TimeClockCard from "@/components/TimeClockCard";
 import TimeOffSection from "@/components/TimeOffSection";
 import AvailabilityStatusSection from "@/components/AvailabilityStatusSection";
+import TeamAvailabilityRequestsSection from "@/components/TeamAvailabilityRequestsSection";
 import DateTasksSection from "@/components/DateTasksSection";
 import QuickActionsCard from "@/components/QuickActionsCard";
 import DashboardNotifications, { MessagesBadgeLink } from "@/components/DashboardNotifications";
@@ -46,6 +47,16 @@ export default async function DashboardPage() {
   const onboardingAttention = await getOnboardingAttention(employee);
   const announcements = (await listAnnouncementsForEmployee(employee)).slice(0, 3);
   const [featuredAnnouncement, ...otherAnnouncements] = announcements;
+
+  // CB, Sept 2026 (redesign follow-up): "I want [team availability requests] to be like where
+  // the announcements are... for the admin, that would be covering schedules and stuff like
+  // that." Same admin-only pending queue TeamAvailabilityCards shows in full on /availability
+  // (heading there renamed to match — "Team availability requests"), just the compact summary
+  // for this Home sidebar slot — see TeamAvailabilityRequestsSection's own doc comment for why
+  // this stays a read-only list rather than the full interactive card. Non-admins never call
+  // listAdminAvailability at all (it throws ForbiddenError for them) — isAdmin gates the fetch
+  // itself, not just the render.
+  const pendingTeamAvailability = isAdmin(employee) ? (await listAdminAvailability(employee)).pending : [];
 
   // One transaction, four reads: recent PTO history (existing), plus the numbers the mobile
   // stat row needs (Sept 2026 aesthetic pass) that nothing on this page fetched before.
@@ -139,6 +150,7 @@ export default async function DashboardPage() {
           pendingAcknowledgments={pendingAcknowledgments}
         />
         <DateTasksSection className="animate-in animate-in-4" employeeId={employee.id} />
+        <TeamAvailabilityRequestsSection className="animate-in animate-in-4" pending={pendingTeamAvailability} />
         <AnnouncementsSection
           className="animate-in animate-in-5"
           featuredAnnouncement={featuredAnnouncement}
@@ -170,6 +182,7 @@ export default async function DashboardPage() {
             pendingAcknowledgments={pendingAcknowledgments}
           />
           <DateTasksSection className="animate-in animate-in-2" employeeId={employee.id} />
+          <TeamAvailabilityRequestsSection className="animate-in animate-in-3" pending={pendingTeamAvailability} />
           <AnnouncementsSection
             className="animate-in animate-in-3"
             featuredAnnouncement={featuredAnnouncement}
