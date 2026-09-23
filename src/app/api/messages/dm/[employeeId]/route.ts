@@ -22,10 +22,18 @@ export async function GET(_request: Request, ctx: RouteContext<"/api/messages/dm
 }
 
 /** POST /api/messages/dm/[employeeId] — send one message to that employee. Multipart: `body`
- *  (text, may be empty if a file is attached), an optional `file`, and an optional `replyToId`
+ *  (text, may be empty if a file is attached), an optional `file`, an optional `replyToId`
  *  (CB, Sept 2026: "I should be able to reply to a specific message within the message thread") —
- *  the id of an earlier message in this same thread to quote. Same shape as
- *  POST /api/team-notes/[employeeId], minus the topic fields (a DM has no topic to scope to). */
+ *  the id of an earlier message in this same thread to quote — and, as of Phase 5d, an optional
+ *  `refType`/`refId`/`refDate` trio (CB: "chat icons on availability requests linked to specific
+ *  dates") for a message started from a date's own "Message about this date" button. Only
+ *  AVAILABILITY_DATE is accepted here — see postMessage's own doc comment in
+ *  src/lib/direct-messages.ts for why DATE_TASK stays server-only. All three ref fields are
+ *  required together or not sent at all; postMessage itself doesn't re-verify the caller can
+ *  access that submissionId (the resulting message is still only ever readable by its own
+ *  sender/recipient, same as any other DM), so a bogus id just fails to resolve a label rather
+ *  than exposing anything. Same shape as POST /api/team-notes/[employeeId], minus the topic
+ *  fields (a DM has no topic to scope to). */
 export async function POST(request: Request, ctx: RouteContext<"/api/messages/dm/[employeeId]">) {
   try {
     const employee = await requireEmployee();
@@ -35,6 +43,9 @@ export async function POST(request: Request, ctx: RouteContext<"/api/messages/dm
     const body = String(form.get("body") ?? "");
     const file = form.get("file");
     const replyToId = form.get("replyToId");
+    const refType = form.get("refType");
+    const refId = form.get("refId");
+    const refDate = form.get("refDate");
 
     if (file !== null && !(file instanceof File)) {
       throw new InvalidDirectMessageError("That file couldn't be read — please try attaching it again.");
@@ -43,12 +54,20 @@ export async function POST(request: Request, ctx: RouteContext<"/api/messages/dm
       throw new InvalidDirectMessageError("That message can't be replied to.");
     }
 
+    let ref: { type: "AVAILABILITY_DATE"; id: string; date: string | null } | undefined;
+    if (refType !== null || refId !== null || refDate !== null) {
+      if (refType !== "AVAILABILITY_DATE" || typeof refId !== "string" || !refId || typeof refDate !== "string" || !refDate) {
+        throw new InvalidDirectMessageError("That reference can't be attached.");
+      }
+      ref = { type: "AVAILABILITY_DATE", id: refId, date: refDate };
+    }
+
     const attachment =
       file instanceof File && file.size > 0
         ? { key: await uploadDirectMessageFile(file, employee.id, employeeId), name: file.name }
         : undefined;
 
-    const message = await postMessage(employee, employeeId, body, attachment, undefined, replyToId || null);
+    const message = await postMessage(employee, employeeId, body, attachment, ref, replyToId || null);
     return NextResponse.json({ message }, { status: 201 });
   } catch (err) {
     return toErrorResponse(err);
