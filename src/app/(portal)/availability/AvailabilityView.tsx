@@ -451,7 +451,17 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
           <div
             ref={stripScrollRef}
             onScroll={handleStripScroll}
-            className="flex-1 min-w-0 flex overflow-x-auto snap-x snap-mandatory scrollbar-hide"
+            // CB, Sept 2026: "that pink outline that's on like Wednesday, it's like getting
+            // clipped off for some reason" — the isToday ring below (`ring-2 ring-accent`) is a
+            // box-shadow that paints OUTSIDE the button's own box, and setting overflow-x here
+            // forces the browser to resolve overflow-y to "auto" too (per the CSS overflow spec,
+            // an axis left at its "visible" default can't stay that way once the other axis
+            // isn't), so a today cell sitting flush against this container's edge had its own
+            // ring sheared off on whichever side touched the edge. `p-1` gives the ring's full
+            // 2px a clear margin to paint into before hitting that clip boundary — the scroll-
+            // snap math in the effects above measures off `clientWidth`, which already accounts
+            // for this container's own padding, so the swipe/snap behavior is unaffected.
+            className="flex-1 min-w-0 flex overflow-x-auto snap-x snap-mandatory scrollbar-hide p-1"
           >
             {(["prev", "current", "next"] as const).map((pos) => {
               const offset = weekOffset + (pos === "prev" ? -1 : pos === "next" ? 1 : 0);
@@ -505,7 +515,6 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
         {stripPanel.showPanel ? (
           <div className="mt-3.5">
             <AvailabilityPanel
-              variant="inline"
               key={stripPanel.viewingSubmission?.id ?? "draft"}
               viewingSubmission={stripPanel.viewingSubmission}
               employeeId={employeeId}
