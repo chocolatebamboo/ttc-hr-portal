@@ -221,6 +221,18 @@ function useTeamAvailabilityQueue(opts?: { initialPending?: AdminAvailabilityDTO
     router.push(`/messages?dm=${employeeId}&name=${encodeURIComponent(employeeName)}`);
   }
 
+  // Phase 5d (CB, Sept 2026): "chat icons on availability requests linked to specific dates" —
+  // same navigation as openChat above, but pre-attaches a reference to this one date (see
+  // DirectMessageThread's own initialRef prop) so the first message sent from there carries an
+  // "Availability · <date>" reference card, same reference-card system a task comment already
+  // mirrors into Messages (see addDateTaskComment's own doc comment in src/lib/date-tasks.ts) —
+  // just started from the date's own side instead of arriving there from a comment.
+  function openChatForDate(employeeId: string, employeeName: string, submissionId: string, date: string) {
+    router.push(
+      `/messages?dm=${employeeId}&name=${encodeURIComponent(employeeName)}&refType=AVAILABILITY_DATE&refId=${submissionId}&refDate=${date}`
+    );
+  }
+
   // Bulk decide — "I have the option to approve everything at one time." Only ever called while
   // nothing on the submission has been decided individually yet (the button row that calls this
   // is itself hidden once isInPerDateMode is true — see Card below), but the server enforces the
@@ -398,6 +410,7 @@ function useTeamAvailabilityQueue(opts?: { initialPending?: AdminAvailabilityDTO
     clearDecided,
     removeSubmission,
     openChat,
+    openChatForDate,
     decide,
     decideDate,
     removeDate,
@@ -537,6 +550,7 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                   onRemoveConfirm={q.removeSubmission}
                   onRemoveCancel={q.cancelRemove}
                   onOpenChat={q.openChat}
+                  onMessageAboutDate={q.openChatForDate}
                   onRemoveDate={q.removeDate}
                 />
               </SwipeReveal>
@@ -591,6 +605,7 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                   onRemoveConfirm={q.removeSubmission}
                   onRemoveCancel={q.cancelRemove}
                   onOpenChat={q.openChat}
+                  onMessageAboutDate={q.openChatForDate}
                   onRemoveDate={q.removeDate}
                 />
               </SwipeReveal>
@@ -645,6 +660,7 @@ export function Card({
   onRemoveConfirm,
   onRemoveCancel,
   onOpenChat,
+  onMessageAboutDate,
   onRemoveDate,
 }: {
   row: AdminAvailabilityDTO;
@@ -669,6 +685,9 @@ export function Card({
   onRemoveConfirm: (submissionId: string) => void;
   onRemoveCancel: () => void;
   onOpenChat: (employeeId: string, employeeName: string) => void;
+  /** Phase 5d: same navigation as onOpenChat, scoped to one date — see openChatForDate's own
+   *  doc comment above for what it pre-attaches. */
+  onMessageAboutDate: (employeeId: string, employeeName: string, submissionId: string, date: string) => void;
   onRemoveDate: (submissionId: string, date: string) => void;
 }) {
   const chips = slotChips(r.slots);
@@ -774,6 +793,17 @@ export function Card({
                 </>
               )}
             </div>
+            {/* CB, Sept 2026: "I need to see that directly on the card itself once it's
+                approved... so I don't have to go all the way to the reports in order for me to
+                find that." reviewedByName was already resolved server-side for Activity History
+                — see its own doc comment in src/types/index.ts — just never surfaced here. Only
+                set once decide() actually runs (APPROVED/DENIED), so this naturally stays hidden
+                for CANCELLED/ADJUSTMENT_REQUESTED without a separate status check. */}
+            {r.reviewedByName && (
+              <p className="text-xs text-white/75 mt-0.5">
+                {r.status === "APPROVED" ? "Approved" : "Denied"} by {r.reviewedByName}
+              </p>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
@@ -1097,12 +1127,35 @@ export function Card({
                         Propose new date/time
                       </button>
                     )}
+                    {/* Phase 5d (CB, Sept 2026): "chat icons on availability requests linked to
+                        specific dates" — opens My Messages with this date already attached as a
+                        reference (openChatForDate's own doc comment above). Not shown on the
+                        viewer's own card, same reasoning the card-level chat button above already
+                        gives — messaging yourself isn't a real conversation. */}
+                    {!isSelf && (
+                      <button
+                        type="button"
+                        onClick={() => onMessageAboutDate(r.employeeId, r.employeeName, r.id, openChip.date)}
+                        className="flex items-center gap-1.5 rounded-full bg-white/15 border border-white/35 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-white/25"
+                      >
+                        <ChatIcon className="h-3.5 w-3.5" />
+                        Message about this date
+                      </button>
+                    )}
                   </div>
                 )
               ) : (
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <p className="text-xs font-medium text-white/90">
                     {openDecision.status === "APPROVED" ? "This date is approved." : "This date is denied."}
+                    {/* CB, Sept 2026: "I need to see that directly on the card itself once it's
+                        approved" — same reviewer-name surfacing as the card-level status above,
+                        just the per-date counterpart (decidedByName, src/types/index.ts). */}
+                    {openDecision.decidedByName && (
+                      <span className="block text-white/75 mt-0.5 font-normal">
+                        {openDecision.status === "APPROVED" ? "Approved" : "Denied"} by {openDecision.decidedByName}
+                      </span>
+                    )}
                     {openDecision.comment && <span className="block italic text-white/80 mt-1">&ldquo;{openDecision.comment}&rdquo;</span>}
                   </p>
                   {/* CB, Sept 2026: "even if it's approved, I should still be able to make
