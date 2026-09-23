@@ -74,9 +74,8 @@ export default function MyAvailabilityPreview({
     load();
   }, []);
 
-  // Cancelled-only, same rule as the Time Off list's own delete (see
-  // deleteAvailabilitySubmission's doc comment in src/lib/availability.ts) — a Pending, Denied,
-  // or Approved submission still means something, so this never touches those.
+  // Cancelled or Approved — see deleteAvailabilitySubmission's doc comment in
+  // src/lib/availability.ts. Pending/Denied still go through Cancel first (handleCancel below).
   async function handleDelete(id: string) {
     setDeletingId(id);
     try {
@@ -183,12 +182,13 @@ export default function MyAvailabilityPreview({
             // Redesign follow-up (Sept 2026), CB: "I'm still not able to slide to the left and
             // delete for the submissions... there's no way for me to cancel that." Same swipe-
             // reveal pattern used everywhere else in this app (TeamAvailabilityCards, Messages) —
-            // a Pending or Denied submission swipes to reveal Cancel; an already-Cancelled one
-            // swipes to reveal the real, permanent Delete that used to be a plain always-visible
-            // icon button. Approved/Adjustment-requested submissions get neither: nothing here is
-            // the employee's to unwind unilaterally once a supervisor's acted on it.
+            // a Pending or Denied submission swipes to reveal Cancel; an already-Cancelled OR
+            // already-Approved one swipes to reveal the real, permanent Delete (see
+            // deleteAvailabilitySubmission's doc comment for the Approved addition). Only
+            // Adjustment-requested gets neither: that one needs an Accept/Decline first (below),
+            // not a delete.
             const canCancel = s.status === "PENDING" || s.status === "DENIED";
-            const canDelete = s.status === "CANCELLED";
+            const canDelete = s.status === "CANCELLED" || s.status === "APPROVED";
             const card = (
               <div
                 className={`rounded-2xl p-4 ${plain ? "border border-border bg-surface" : ""}`}
