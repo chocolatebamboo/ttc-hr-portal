@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import AvailabilityCalendar from "@/components/AvailabilityCalendar";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import AvailabilityCalendar, { Panel as AvailabilityPanel, useAvailabilityPanel } from "@/components/AvailabilityCalendar";
 import LoggedHoursSection from "@/components/LoggedHoursSection";
 import MyAvailabilityPreview from "@/components/MyAvailabilityPreview";
 import TimeOffRequests from "@/components/TimeOffRequests";
@@ -38,6 +38,21 @@ function compactHour(time24: string): string {
   const [h, m] = time24.split(":").map(Number);
   const hour12 = h % 12 === 0 ? 12 : h % 12;
   return m === 0 ? `${hour12}` : `${hour12}:${String(m).padStart(2, "0")}`;
+}
+
+/** Redesign follow-up (Sept 2026), CB: "I should be able to slide to see the other dates either
+ *  in the future or the past. And then this week will update to... the prior or future
+ *  [week]." Once the strip isn't showing the actual current week anymore, "This week" no longer
+ *  reads true — this is what it shows instead, e.g. "Sep 28 – Oct 4" (or "Sep 28 – Oct 4, 2027"
+ *  once it's not even the current year, so a far swipe never reads as ambiguous). */
+function weekRangeLabel(start: Date): string {
+  const end = addDays(start, 6);
+  const thisYear = new Date().getFullYear();
+  const yearSuffix = start.getFullYear() !== thisYear || end.getFullYear() !== thisYear ? ", " + end.getFullYear() : "";
+  const sameMonth = start.getMonth() === end.getMonth();
+  const startLabel = start.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const endLabel = end.toLocaleDateString(undefined, sameMonth ? { day: "numeric" } : { month: "short", day: "numeric" });
+  return `${startLabel} – ${endLabel}${yearSuffix}`;
 }
 
 /**
@@ -98,13 +113,15 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
   // established, just reached a different way now.
   const [calendarOpen, setCalendarOpen] = useState(false);
   // Redesign follow-up (Sept 2026), CB: "I should be able to click within the days, within the
-  // week and select... it's not giving me the flexibility to select from that view." Tapping a
-  // day in the "This week" strip below sets this to that date and opens the calendar; the
-  // calendar reacts to it exactly as if that date had been tapped on its own month grid (opens
-  // its existing submission, or starts a fresh draft right on that date) — see AvailabilityCalendar's
-  // own focusDate handling. Cleared back to null once the calendar's acted on it, via
-  // onFocusDateHandled, so tapping the same day again later still fires.
-  const [focusDateKey, setFocusDateKey] = useState<string | null>(null);
+  // week and select... I don't necessarily want to pull up the full calendar every single time."
+  // Which week the "This week" strip below is currently showing, relative to the real current
+  // week (0) — CB: "I should be able to slide to see the other dates either in the future or
+  // the past." Tapping a date in the strip no longer opens this full calendar at all; it opens
+  // its own compact inline panel instead (see the strip's own render below and
+  // useAvailabilityPanel), reusing the exact same add/view/cancel/delete/time-off UI as this
+  // calendar's panel, just anchored right there in the strip's own card. "Full calendar" (the
+  // toggle right below) stays for browsing further out than one week at a time.
+  const [weekOffset, setWeekOffset] = useState(0);
   // Same "opened from a summary, not always-open" treatment for the two stat tiles' own detail
   // views — tapping "Logged hours" or "Time off" (or "Request time off" inside that tile) reveals
   // the exact same LoggedHoursSection / TimeOffRequests this page always had, corrections and
@@ -134,9 +151,73 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
   // everywhere else time-off shows up in this app (TimeOffSection's own dashboard list).
   const [upcomingPtoCount, setUpcomingPtoCount] = useState<number | null>(null);
 
+  // The REAL current calendar week — deliberately independent of weekOffset below (the
+  // "Logged hours" stat tile always reflects the actual current pay period, regardless of
+  // which week the "This week" strip happens to be scrolled to at the moment).
   const weekStart = startOfWeek(new Date());
-  const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const todayKey = toDateKey(new Date());
+
+  // Which week the "This week" strip is currently showing (see weekOffset's own doc comment
+  // above) — a plain function rather than a memoized value since it's cheap and weekOffset is
+  // its only real input.
+  function stripWeekDays(offset: number): Date[] {
+    const start = startOfWeek(addDays(new Date(), offset * 7));
+    return Array.from({ length: 7 }, (_, i) => addDays(start, i));
+  }
+
+  // The strip's own day-tap interaction — same hook AvailabilityCalendar's full month grid uses
+  // (see useAvailabilityPanel's own doc comment for why this is a separate instance rather than
+  // a shared one), so tapping a date here opens the identical add/view/cancel/delete/time-off
+  // panel, just inline in this card instead of the full calendar below.
+  const stripPanel = useAvailabilityPanel({
+    submissions,
+    onCancel: handleCancel,
+    onDeleteSubmission: handleDeleteSubmission,
+    onSubmitTimeOff: handleSubmitTimeOff,
+  });
+
+  // Redesign follow-up (Sept 2026), CB: "I should be able to slide to see the other dates
+  // either in the future or the past." Native CSS scroll-snap rather than hand-rolled touch/
+  // pointer math (same reasoning SwipeReveal's own doc comment gives — there's no browser in
+  // this sandbox to verify touch math against) — three week-panels (prev/current/next) sit
+  // side by side, scrolled to the middle one; once the browser's own snap settles on the left
+  // or right panel, weekOffset shifts by one and the recenter effect below instantly (no
+  // animation — a plain `scrollLeft` assignment, not `scrollTo`) jumps back to the middle
+  // position, which is now showing the new set of three weeks. The visible result reads as an
+  // endless strip, without this component ever tracking a raw drag delta itself.
+  const stripScrollRef = useRef<HTMLDivElement | null>(null);
+  const stripScrollTimeout = useRef<number | null>(null);
+
+  useLayoutEffect(() => {
+    const el = stripScrollRef.current;
+    if (!el) return;
+    el.scrollLeft = el.clientWidth;
+  }, [weekOffset]);
+
+  useEffect(() => {
+    return () => {
+      if (stripScrollTimeout.current !== null) window.clearTimeout(stripScrollTimeout.current);
+    };
+  }, []);
+
+  function handleStripScroll() {
+    if (stripScrollTimeout.current !== null) window.clearTimeout(stripScrollTimeout.current);
+    stripScrollTimeout.current = window.setTimeout(() => {
+      const el = stripScrollRef.current;
+      if (!el || el.clientWidth === 0) return;
+      const ratio = el.scrollLeft / el.clientWidth;
+      if (ratio < 0.5) setWeekOffset((o) => o - 1);
+      else if (ratio > 1.5) setWeekOffset((o) => o + 1);
+    }, 80);
+  }
+
+  // Whether tapping this date would show some highlight in the strip (CB: "if we select, it
+  // should... have some level of that highlight") — mid-draft, or part of the submission
+  // currently open in the strip's own inline panel.
+  function isStripDateSelected(dateKey: string): boolean {
+    if (dateKey in stripPanel.draft) return true;
+    return !!stripPanel.viewingSubmission?.slots.some((s) => s.date === dateKey);
+  }
 
   // CB, Sept 2026: "it needs to live within that pop up" — same POST /api/pto/requests the
   // shared TimeOffRequests widget's own form uses, just called directly from here since this
@@ -306,18 +387,6 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
     }
   }
 
-  // For the "This week" strip: the first active (non-Removed/Cancelled) submission slot that
-  // falls on a given date, if any — a date only ever has one real slot across someone's own
-  // submissions in practice, so "first match" is exactly "the" match, not an arbitrary pick.
-  function activeSlotFor(dateKey: string): AvailabilitySlot | undefined {
-    for (const s of submissions) {
-      if (s.status === "REMOVED" || s.status === "CANCELLED") continue;
-      const slot = s.slots.find((sl) => sl.date === dateKey);
-      if (slot) return slot;
-    }
-    return undefined;
-  }
-
   return (
     <div className="md:h-full md:flex md:flex-col md:min-h-0 md:overflow-y-auto">
       <h1 className="page-title text-2xl mb-1 md:shrink-0">Availability</h1>
@@ -337,19 +406,22 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
       {/* "This week" — always visible, no tap required to see it. Each day that has an active
           submitted slot shows amber-filled with its compact hour range; today gets its own ring
           regardless of whether it's also submitted, so "today" and "submitted" read as two
-          separate, layerable facts rather than one color doing double duty.
+          separate, layerable facts rather than one color doing double duty. A selected date (mid-
+          draft, or whichever submission's detail is open below) gets the same solid accent fill
+          the full calendar already uses for the same thing, so the two calendars agree on what
+          "selected" looks like.
           Redesign follow-up (Sept 2026), CB: "I should be able to click within the days... and
-          select" plus "the drop down for the calendar... needs to be a little bit more
-          integrated... it's still kind of clunky." Two changes from the first version: (1) every
-          day cell is now a real button — tapping one opens the full calendar already focused on
-          that exact date (see focusDateKey above and AvailabilityCalendar's own focusDate
-          handling), not just a generic "go find it yourself" expand; (2) the full calendar no
-          longer lives in its own separate bordered card below this one — it now opens INSIDE this
-          same card, right under the day strip, so the whole thing reads as one widget that
-          expands rather than two stacked cards that happen to be related. */}
+          select" plus "I don't necessarily want to pull up the full calendar every single time"
+          plus "I should be able to slide to see the other dates either in the future or the
+          past." Tapping a day now opens a compact panel right in this card (stripPanel below,
+          via useAvailabilityPanel) instead of the full calendar; the day grid itself is a
+          three-week swipeable strip (see stripScrollRef's own doc comment above) with arrow
+          buttons for anyone not on touch. "Full calendar" is still here, unchanged, for browsing
+          further out than one week — it opens INSIDE this same card, right under the strip, so
+          the whole thing still reads as one widget that expands rather than stacked cards. */}
       <div className="mb-4 md:shrink-0 rounded-2xl border border-border bg-surface p-4">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold">This week</h2>
+          <h2 className="text-sm font-semibold">{weekOffset === 0 ? "This week" : weekRangeLabel(stripWeekDays(weekOffset)[0])}</h2>
           <button
             type="button"
             onClick={() => setCalendarOpen((v) => !v)}
@@ -366,41 +438,114 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
             )}
           </button>
         </div>
-        <div className="grid grid-cols-7 gap-1.5">
-          {weekDays.map((d) => {
-            const dateKey = toDateKey(d);
-            const slot = activeSlotFor(dateKey);
-            const isToday = dateKey === todayKey;
-            return (
-              <button
-                type="button"
-                key={dateKey}
-                onClick={() => {
-                  setCalendarOpen(true);
-                  setFocusDateKey(dateKey);
-                }}
-                className={`flex flex-col items-center rounded-xl py-2 transition-colors ${
-                  slot ? "bg-amber-100 hover:bg-amber-200" : "bg-black/[0.03] hover:bg-black/[0.06]"
-                } ${isToday ? "ring-2 ring-accent" : ""}`}
-              >
-                <span className="text-[10px] font-medium text-muted uppercase">
-                  {d.toLocaleDateString(undefined, { weekday: "short" })}
-                </span>
-                <span className="text-sm font-semibold mt-0.5">{d.getDate()}</span>
-                {slot && (
-                  <span className="text-[10px] text-amber-800 font-medium mt-0.5">
-                    {compactHour(slot.startTime)} to {compactHour(slot.endTime)}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
 
-        {!calendarOpen && (
+        <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={() => setCalendarOpen(true)}
+            onClick={() => setWeekOffset((o) => o - 1)}
+            aria-label="Previous week"
+            className="shrink-0 h-14 w-5 flex items-center justify-center rounded-lg text-muted hover:text-foreground hover:bg-black/[0.04]"
+          >
+            ‹
+          </button>
+          <div
+            ref={stripScrollRef}
+            onScroll={handleStripScroll}
+            className="flex-1 min-w-0 flex overflow-x-auto snap-x snap-mandatory scrollbar-hide"
+          >
+            {(["prev", "current", "next"] as const).map((pos) => {
+              const offset = weekOffset + (pos === "prev" ? -1 : pos === "next" ? 1 : 0);
+              return (
+                <div key={pos} className="shrink-0 w-full snap-center grid grid-cols-7 gap-1.5">
+                  {stripWeekDays(offset).map((d) => {
+                    const dateKey = toDateKey(d);
+                    const slot = stripPanel.byDate.get(dateKey)?.slots.find((s) => s.date === dateKey);
+                    const isToday = dateKey === todayKey;
+                    const isSelected = isStripDateSelected(dateKey);
+                    return (
+                      <button
+                        type="button"
+                        key={dateKey}
+                        onClick={() => stripPanel.handleDayClick(dateKey)}
+                        className={`flex flex-col items-center rounded-xl py-2 transition-colors ${
+                          isSelected
+                            ? "bg-accent-ink text-white"
+                            : slot
+                              ? "bg-amber-100 hover:bg-amber-200"
+                              : "bg-black/[0.03] hover:bg-black/[0.06]"
+                        } ${isToday ? "ring-2 ring-accent" : ""}`}
+                      >
+                        <span className={`text-[10px] font-medium uppercase ${isSelected ? "text-white/80" : "text-muted"}`}>
+                          {d.toLocaleDateString(undefined, { weekday: "short" })}
+                        </span>
+                        <span className="text-sm font-semibold mt-0.5">{d.getDate()}</span>
+                        {slot && !isSelected && (
+                          <span className="text-[10px] text-amber-800 font-medium mt-0.5">
+                            {compactHour(slot.startTime)} to {compactHour(slot.endTime)}
+                          </span>
+                        )}
+                        {isSelected && <span className="text-[10px] font-medium mt-0.5">Selected</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            onClick={() => setWeekOffset((o) => o + 1)}
+            aria-label="Next week"
+            className="shrink-0 h-14 w-5 flex items-center justify-center rounded-lg text-muted hover:text-foreground hover:bg-black/[0.04]"
+          >
+            ›
+          </button>
+        </div>
+
+        {stripPanel.showPanel ? (
+          <div className="mt-3.5">
+            <AvailabilityPanel
+              variant="inline"
+              key={stripPanel.viewingSubmission?.id ?? "draft"}
+              viewingSubmission={stripPanel.viewingSubmission}
+              employeeId={employeeId}
+              draftDates={stripPanel.draftDates}
+              draft={stripPanel.draft}
+              onUpdateTime={(dateKey, field, value) =>
+                stripPanel.setDraft((d) => ({ ...d, [dateKey]: { ...d[dateKey], [field]: value } }))
+              }
+              onRemoveDate={(dateKey) =>
+                stripPanel.setDraft((d) => {
+                  const next = { ...d };
+                  delete next[dateKey];
+                  return next;
+                })
+              }
+              onClearDraft={() => stripPanel.setDraft({})}
+              onSubmitTimeOff={(values) => stripPanel.handleSubmitTimeOff(stripPanel.draftDates, values)}
+              submittingTimeOff={submittingTimeOff}
+              timeOffError={timeOffError}
+              onSubmit={(note) => handleSubmit(stripPanel.draftDates.map((date) => ({ date, ...stripPanel.draft[date] })), note)}
+              submitting={submitting}
+              error={error}
+              onClose={() => stripPanel.setViewingId(null)}
+              onResubmit={stripPanel.viewingSubmission ? () => stripPanel.startResubmit(stripPanel.viewingSubmission!) : undefined}
+              onCancel={stripPanel.viewingSubmission ? () => stripPanel.handleCancel(stripPanel.viewingSubmission!.id) : undefined}
+              cancelling={!!stripPanel.viewingSubmission && cancellingId === stripPanel.viewingSubmission.id}
+              onRemoveSubmissionDate={
+                stripPanel.viewingSubmission ? (date) => handleRemoveDate(stripPanel.viewingSubmission!.id, date) : undefined
+              }
+              removingDateKey={removingDateKey}
+              onDeleteSubmission={
+                stripPanel.viewingSubmission ? () => stripPanel.handleDeleteSubmission(stripPanel.viewingSubmission!.id) : undefined
+              }
+              deleting={!!stripPanel.viewingSubmission && deletingSubmissionId === stripPanel.viewingSubmission.id}
+            />
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => stripPanel.handleDayClick(todayKey)}
             className="btn-primary w-full text-sm py-2.5 mt-3"
           >
             Add availability
@@ -443,8 +588,6 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
                     onSubmitTimeOff: handleSubmitTimeOff,
                     submittingTimeOff,
                     timeOffError,
-                    focusDate: focusDateKey,
-                    onFocusDateHandled: () => setFocusDateKey(null),
                   }}
                 />
               </div>
@@ -454,12 +597,21 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
       </div>
 
       {/* "Your submissions" — the same colored-card list CB already approved on
-          MyAvailabilityPreview, now always shown here instead of behind a collapsed count. */}
+          MyAvailabilityPreview, now always shown here instead of behind a collapsed count.
+          Redesign follow-up (Sept 2026), CB: "I don't know who is that for... I don't know who
+          it's coming from" — this list is always the SIGNED-IN person's own submissions (GET
+          /api/availability defaults to the caller; see that route's own doc comment), the same
+          way My Time only ever shows your own hours. There's no page here that mixes in a
+          teammate's — Team → Availability is the admin-facing one for that. This line makes that
+          explicit instead of assuming it's obvious. */}
       {loadState === "ready" && (
         <div className="mb-4 md:shrink-0">
-          <h2 className="text-sm font-semibold mb-2">
+          <h2 className="text-sm font-semibold mb-0.5">
             Your submissions <span className="text-muted font-normal">({submissions.length})</span>
           </h2>
+          <p className="text-xs text-muted mb-2">
+            Your own submitted availability — teammates&apos; is under Team → Availability.
+          </p>
           <MyAvailabilityPreview title="Your submissions" showLink={false} showHeading={false} />
         </div>
       )}
