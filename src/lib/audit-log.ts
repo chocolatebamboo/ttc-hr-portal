@@ -11,6 +11,18 @@ import type { PrismaClient } from "@prisma/client";
  * duplicate function. Same call shape either way: inside an already-open transaction, right
  * alongside the real mutation, for the same "it never should have happened if the transaction
  * rolled back" reasoning writeNotification's own doc comment (src/lib/notifications.ts) explains.
+ *
+ * Hotfix (Sept 2026): switched from tx.auditLog.create() to createMany() for the exact same
+ * reason writeNotification's own doc comment explains in full — Prisma's create() does
+ * `INSERT ... RETURNING`, and audit_log_select (prisma/rls.sql) only allows admins to read
+ * AuditLog rows back (`qual: is_admin()`). So this failed with the same "new row violates
+ * row-level security policy" error the instant a non-admin (a supervisor who reviews
+ * availability/PTO but isn't HR_ADMIN/SUPER_ADMIN — Daijour, specifically) tried to decide
+ * anything: the very first write inside that transaction (this one, before writeNotification
+ * even runs) threw and rolled the whole action back. createMany() skips RETURNING entirely, so
+ * only audit_log_insert's `with check (true)` applies — same row lands either way, same
+ * admin-only read access afterward, just no attempt to hand the row back to a non-admin writer
+ * who was never allowed to read it in the first place.
  */
 export async function writeAuditLog(
   tx: PrismaClient,
@@ -24,15 +36,17 @@ export async function writeAuditLog(
     comment?: string;
   }
 ): Promise<void> {
-  await tx.auditLog.create({
-    data: {
-      actorId: params.actorId,
-      action: params.action,
-      targetType: params.targetType,
-      targetId: params.targetId,
-      oldValue: params.oldValue ?? null,
-      newValue: params.newValue ?? null,
-      comment: params.comment ?? null,
-    },
+  await tx.auditLog.createMany({
+    data: [
+      {
+        actorId: params.actorId,
+        action: params.action,
+        targetType: params.targetType,
+        targetId: params.targetId,
+        oldValue: params.oldValue ?? null,
+        newValue: params.newValue ?? null,
+        comment: params.comment ?? null,
+      },
+    ],
   });
 }
