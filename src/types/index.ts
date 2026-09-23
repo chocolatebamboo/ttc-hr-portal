@@ -461,6 +461,20 @@ export interface DirectMessageReplyPreviewDTO {
   hasAttachment: boolean;
 }
 
+/** Phase 5c (CB, Sept 2026): "an option to add an internal comment," confirmed scope "hidden
+ *  from the team member" — see DirectMessageComment's own doc comment in prisma/schema.prisma
+ *  and isStaff() in src/lib/authorization.ts for exactly who that is. Only ever populated on a
+ *  DirectMessageDTO returned to a staff actor (SUPER_ADMIN/HR_ADMIN/SUPERVISOR); an EMPLOYEE-role
+ *  actor always gets an empty array here, on every message, never a filtered-down real one — the
+ *  server never lets a team member learn a note exists at all. */
+export interface DirectMessageCommentDTO {
+  id: string;
+  authorId: string;
+  authorName: string;
+  body: string;
+  createdAt: string; // ISO
+}
+
 /**
  * One message in a peer-to-peer conversation — CB, Sept 2026: "instead of notes, I want it to
  * be messages... I should be able to look up members and send them individual messages." Unlike
@@ -482,6 +496,10 @@ export interface DirectMessageDTO {
   /** Quick-reaction tallies on this message, one entry per emoji actually used — never all six,
    *  never zero-count placeholders. Empty array, not null, when nobody's reacted. */
   reactions: DirectMessageReactionSummaryDTO[];
+  /** Staff-only internal notes on this message — see DirectMessageCommentDTO's own doc comment
+   *  just above for who actually gets these populated. Oldest first, same convention as
+   *  `messages` itself. */
+  comments: DirectMessageCommentDTO[];
 }
 
 /** The GET /api/messages/dm/[employeeId] response shape — CB, Sept 2026: "I should be able to
