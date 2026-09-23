@@ -156,6 +156,7 @@ export default function TeamAvailabilityRequestsSection({
                   onRemoveConfirm={q.removeSubmission}
                   onRemoveCancel={q.cancelRemove}
                   onOpenChat={q.openChat}
+                  onMessageAboutDate={q.openChatForDate}
                   onRemoveDate={q.removeDate}
                 />
               </SwipeReveal>
