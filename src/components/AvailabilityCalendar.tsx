@@ -135,17 +135,120 @@ export interface AvailabilityCalendarControls {
   onSubmitTimeOff: (dates: string[], values: { type: PtoType; hours: number; reason?: string }) => Promise<boolean>;
   submittingTimeOff: boolean;
   timeOffError?: string;
-  /** Redesign follow-up (Sept 2026), CB: "I should be able to click within the days, within the
-   *  week and select... it's not giving me the flexibility to select from that view." AvailabilityView's
-   *  own "This week" strip drives this calendar directly through this pair — tapping a day there
-   *  sets `focusDate` to that date, and this calendar reacts exactly as if that date had been
-   *  tapped on its own month grid (opens its existing submission, or starts a fresh draft right
-   *  there). `onFocusDateHandled` clears it back to null once acted on, so the same date can be
-   *  tapped again later and still fire. Optional so a caller that never needs this (none today,
-   *  but nothing else requires it either) doesn't have to wire up two props it won't use. */
-  focusDate?: string | null;
-  onFocusDateHandled?: () => void;
 }
+
+interface AvailabilityPanelHost {
+  submissions: AvailabilityDTO[];
+  onCancel: (submissionId: string) => void;
+  onDeleteSubmission: (submissionId: string) => void;
+  onSubmitTimeOff: (dates: string[], values: { type: PtoType; hours: number; reason?: string }) => Promise<boolean>;
+}
+
+/**
+ * The day-tap interaction shared by the full month calendar below and AvailabilityView's own
+ * compact "This week" strip (redesign follow-up, Sept 2026 — CB: "I should be able to click
+ * within the days, within the week and select... I don't necessarily want to pull up the full
+ * calendar every single time"): tapping an open date starts (or toggles) a draft selection;
+ * tapping a date that's already part of a submission opens that submission's detail instead —
+ * see this file's own top-of-file doc comment for the full behavior. This used to live inline
+ * inside AvailabilityCalendar itself; pulling it out into a hook is what lets the compact strip
+ * reuse the exact same logic (and the same Panel UI below) instead of a second, drifting
+ * implementation of "what does tapping a date do."
+ *
+ * Each caller gets its OWN instance of this hook (its own draft/viewingId state) rather than one
+ * shared instance, so a draft started in the compact strip and one started in the full calendar
+ * never collide — deliberate, not an oversight: nothing drafted here is saved until Submit, so
+ * there's nothing to lose by the two views not mirroring each other's in-progress drafts, and
+ * keeping them independent avoids a much bigger prop-drilling refactor for a same-moment edge
+ * case (both open and drafting at once) nobody's actually hit in practice.
+ */
+function useAvailabilityPanel(host: AvailabilityPanelHost) {
+  const byDate = useMemo(() => submissionsByDate(host.submissions), [host.submissions]);
+  const today = todayDateKey();
+
+  // Dates tapped for a brand-new submission, not yet sent — keyed by date, each with its own
+  // editable time range. Cleared entirely on a successful submit (see the effect below).
+  const [draft, setDraft] = useState<Record<string, { startTime: string; endTime: string }>>({});
+  // A single existing submission being viewed instead — takes over the panel without
+  // discarding any draft still in progress underneath it.
+  const [viewingId, setViewingId] = useState<string | null>(null);
+
+  const submittedIds = useRef(new Set(host.submissions.map((s) => s.id)));
+  useEffect(() => {
+    // A submission that's now in the list but wasn't a moment ago just got created by this
+    // panel's own submit — clear the draft that produced it. Doesn't fire on every
+    // `submissions` change (e.g. a supervisor deciding one elsewhere), only on growth.
+    const ids = new Set(host.submissions.map((s) => s.id));
+    if (ids.size > submittedIds.current.size) setDraft({});
+    submittedIds.current = ids;
+  }, [host.submissions]);
+
+  // Seeds a fresh draft from a denied submission's own dates and times, then swaps the
+  // read-only detail view out for the editable draft panel.
+  function startResubmit(submission: AvailabilityDTO) {
+    setViewingId(null);
+    setDraft(() =>
+      Object.fromEntries(submission.slots.map((s) => [s.date, { startTime: s.startTime, endTime: s.endTime }]))
+    );
+  }
+
+  function handleCancel(submissionId: string) {
+    host.onCancel(submissionId);
+  }
+
+  // The real, permanent delete — reachable once a submission is Cancelled OR Approved (see
+  // deleteAvailabilitySubmission's doc comment in src/lib/availability.ts). This DOES close the
+  // panel: unlike cancelling, there's nothing left to keep showing once the row is gone.
+  function handleDeleteSubmission(submissionId: string) {
+    host.onDeleteSubmission(submissionId);
+    setViewingId(null);
+  }
+
+  async function handleSubmitTimeOff(dates: string[], values: { type: PtoType; hours: number; reason?: string }) {
+    const ok = await host.onSubmitTimeOff(dates, values);
+    if (ok) setDraft({});
+    return ok;
+  }
+
+  function handleDayClick(dateKey: string) {
+    const existing = byDate.get(dateKey);
+    if (existing) {
+      setViewingId(existing.id);
+      return;
+    }
+    if (dateKey < today) return;
+    setViewingId(null);
+    setDraft((d) => {
+      const next = { ...d };
+      if (next[dateKey]) delete next[dateKey];
+      else next[dateKey] = { startTime: DEFAULT_START, endTime: DEFAULT_END };
+      return next;
+    });
+  }
+
+  const draftDates = Object.keys(draft).sort();
+  const viewingSubmission = viewingId ? host.submissions.find((s) => s.id === viewingId) : undefined;
+  const showPanel = draftDates.length > 0 || !!viewingSubmission;
+
+  return {
+    byDate,
+    today,
+    draft,
+    setDraft,
+    viewingSubmission,
+    draftDates,
+    showPanel,
+    setViewingId,
+    handleDayClick,
+    startResubmit,
+    handleCancel,
+    handleDeleteSubmission,
+    handleSubmitTimeOff,
+  };
+}
+
+export type AvailabilityPanelState = ReturnType<typeof useAvailabilityPanel>;
+export { useAvailabilityPanel };
 
 /**
  * "Availability" (CB, Sept 2026, after seeing the first standing-weekly-pattern version):
@@ -207,7 +310,7 @@ export interface AvailabilityCalendarControls {
  * Cancel button.
  */
 export default function AvailabilityCalendar({ controls }: { controls: AvailabilityCalendarControls }) {
-  const { submissions, employeeId, focusDate, onFocusDateHandled } = controls;
+  const { submissions, employeeId } = controls;
 
   // Ascending offset order (PAST_OFFSET .. MAX_FUTURE_OFFSET) so the array is already in
   // top-to-bottom render order with no reordering logic needed — past months first, current
@@ -291,100 +394,27 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
     };
   }, []);
 
-  const byDate = useMemo(() => submissionsByDate(submissions), [submissions]);
-  const today = todayDateKey();
-
-  // Dates tapped for a brand-new submission, not yet sent — keyed by date, each with its own
-  // editable time range. Cleared entirely on a successful submit (see the effect below).
-  const [draft, setDraft] = useState<Record<string, { startTime: string; endTime: string }>>({});
-  // A single existing submission being viewed instead — takes over the panel without
-  // discarding any draft still in progress underneath it.
-  const [viewingId, setViewingId] = useState<string | null>(null);
-
-  const submittedIds = useRef(new Set(submissions.map((s) => s.id)));
-  useEffect(() => {
-    // A submission that's now in the list but wasn't a moment ago just got created by this
-    // calendar's own submit — clear the draft that produced it. Doesn't fire on every
-    // `submissions` change (e.g. a supervisor deciding one elsewhere), only on growth.
-    const ids = new Set(submissions.map((s) => s.id));
-    if (ids.size > submittedIds.current.size) setDraft({});
-    submittedIds.current = ids;
-  }, [submissions]);
-
-  // Seeds a fresh draft from a denied submission's own dates and times, then swaps the
-  // read-only detail view out for the editable draft panel — see this component's doc comment
-  // above for why this exists rather than leaving a denied date permanently unclickable.
-  function startResubmit(submission: AvailabilityDTO) {
-    setViewingId(null);
-    setDraft(() =>
-      Object.fromEntries(submission.slots.map((s) => [s.date, { startTime: s.startTime, endTime: s.endTime }]))
-    );
-  }
-
-  // CB, Sept 2026: wanted a permanent delete reachable right after clearing, not a separate trip
-  // to Your Submissions — so clearing no longer closes the panel. `submissions` still updates in
-  // place (AvailabilityView's own handleCancel), so `viewingSubmission` below re-resolves to the
-  // same id with its new Cancelled status, and SubmissionDetail swaps its "Clear" button for a
-  // "Delete permanently" one. Tapping a calendar cell for this date now starts a fresh draft
-  // instead (submissionsByDate skips Cancelled ones) — but the panel that's already open for it
-  // stays open on its own until closed or actually deleted, by design.
-  function handleCancel(submissionId: string) {
-    controls.onCancel(submissionId);
-  }
-
-  // The real, permanent delete — only ever reachable once a submission is already Cancelled
-  // (see AvailabilityCalendarControls.onDeleteSubmission's doc comment above). This DOES close
-  // the panel: unlike cancelling, there's nothing left to keep showing once the row is gone.
-  function handleDeleteSubmission(submissionId: string) {
-    controls.onDeleteSubmission(submissionId);
-    setViewingId(null);
-  }
-
-  // "Request time off instead" in the draft panel, submitted from right there — CB, Sept 2026:
-  // "it needs to live within that pop up." These dates were never submitted as availability, so
-  // a successful time-off submission clears the draft (there's nothing to keep them drafted
-  // for) exactly the way a successful availability submit does, which is also what closes the
-  // popup (showPanel below goes false once draftDates is empty). A failed submission leaves the
-  // draft — and whatever was typed into the time-off form — untouched.
-  async function handleSubmitTimeOff(dates: string[], values: { type: PtoType; hours: number; reason?: string }) {
-    const ok = await controls.onSubmitTimeOff(dates, values);
-    if (ok) setDraft({});
-    return ok;
-  }
-
-  function handleDayClick(dateKey: string) {
-    const existing = byDate.get(dateKey);
-    if (existing) {
-      setViewingId(existing.id);
-      return;
-    }
-    if (dateKey < today) return;
-    setViewingId(null);
-    setDraft((d) => {
-      const next = { ...d };
-      if (next[dateKey]) delete next[dateKey];
-      else next[dateKey] = { startTime: DEFAULT_START, endTime: DEFAULT_END };
-      return next;
-    });
-  }
-
-  // Reacts to a date tapped from outside this calendar (AvailabilityView's own "This week"
-  // strip) exactly as if it had been tapped right here, via the same handleDayClick — plus an
-  // explicit scroll, since a date from "This week" is always in the CURRENT month but this
-  // calendar might already be sitting scrolled somewhere else if it was left open from earlier.
-  // See AvailabilityCalendarControls.focusDate's own doc comment above for the full picture.
-  useEffect(() => {
-    if (!focusDate) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    handleDayClick(focusDate);
-    scrollToCurrentMonth();
-    onFocusDateHandled?.();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusDate]);
-
-  const draftDates = Object.keys(draft).sort();
-  const viewingSubmission = viewingId ? submissions.find((s) => s.id === viewingId) : undefined;
-  const showPanel = draftDates.length > 0 || !!viewingSubmission;
+  const panel = useAvailabilityPanel({
+    submissions,
+    onCancel: controls.onCancel,
+    onDeleteSubmission: controls.onDeleteSubmission,
+    onSubmitTimeOff: controls.onSubmitTimeOff,
+  });
+  const {
+    byDate,
+    today,
+    draft,
+    setDraft,
+    viewingSubmission,
+    draftDates,
+    showPanel,
+    setViewingId,
+    handleDayClick,
+    startResubmit,
+    handleCancel,
+    handleDeleteSubmission,
+    handleSubmitTimeOff,
+  } = panel;
 
   return (
     // md:flex-1 md:min-h-0: this row fills whatever height AvailabilityView's own md:h-full
@@ -582,7 +612,7 @@ function MonthSection({
     </div>
   );
 }
-function Panel({
+export function Panel({
   viewingSubmission,
   employeeId,
   draftDates,
@@ -604,6 +634,7 @@ function Panel({
   removingDateKey,
   onDeleteSubmission,
   deleting,
+  variant = "sheet",
 }: {
   viewingSubmission: AvailabilityDTO | undefined;
   employeeId: string;
@@ -636,6 +667,14 @@ function Panel({
    *  see AvailabilityCalendarControls.onDeleteSubmission's doc comment above. */
   onDeleteSubmission?: () => void;
   deleting?: boolean;
+  /** "sheet" (default): the full calendar's own floating bottom-sheet-on-mobile /
+   *  static-sidebar-on-desktop presentation, unchanged from before this was extracted into a
+   *  shared component. "inline" (redesign follow-up, Sept 2026 — CB: "I don't necessarily want
+   *  to pull up the full calendar every single time"): a plain block that flows in place inside
+   *  whatever card it's rendered in — AvailabilityView's compact "This week" strip uses this so
+   *  the exact same add/view/cancel/delete/time-off UI opens right there instead of the full
+   *  month calendar. */
+  variant?: "sheet" | "inline";
 }) {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -662,9 +701,18 @@ function Panel({
       // the unconditional classes below) is what gives IT an independent scrollbar if enough
       // dates are selected to make its own content taller than that fixed height — see this
       // component's doc comment above for why sticky was replaced rather than added to.
-      className="fixed z-50 bg-neutral-900 text-white shadow-2xl overflow-y-auto p-4
+      //
+      // "inline" drops the fixed/sheet positioning entirely — it's rendered by a caller that
+      // already owns its own card (AvailabilityView's "This week" strip), so this just needs to
+      // be a normal block in that flow, capped and scrollable only if its own content (many
+      // selected dates, a long task list) actually runs long.
+      className={
+        variant === "inline"
+          ? "bg-neutral-900 text-white rounded-2xl p-4 max-h-[26rem] overflow-y-auto"
+          : `fixed z-50 bg-neutral-900 text-white shadow-2xl overflow-y-auto p-4
         inset-x-3 bottom-24 max-h-[75vh] rounded-3xl
-        md:static md:inset-auto md:z-auto md:h-full md:max-h-full md:min-h-0 md:w-[320px] md:shrink-0 md:rounded-2xl"
+        md:static md:inset-auto md:z-auto md:h-full md:max-h-full md:min-h-0 md:w-[320px] md:shrink-0 md:rounded-2xl`
+      }
     >
       <div className="flex items-center justify-between gap-3 mb-3">
         <p className="text-sm font-medium">{headerLabel}</p>
@@ -743,7 +791,10 @@ function SubmissionDetail({
 }) {
   const lines = [...submission.slots].sort((a, b) => a.date.localeCompare(b.date));
   const canClear = submission.status === "PENDING" || submission.status === "DENIED";
-  const canDelete = submission.status === "CANCELLED";
+  // Redesign follow-up (Sept 2026), CB, pointing at an Approved submission: "I need to be able
+  // to delete it and knock it off the schedule." Approved joins Cancelled as directly deletable
+  // — see deleteAvailabilitySubmission's doc comment in src/lib/availability.ts.
+  const canDelete = submission.status === "CANCELLED" || submission.status === "APPROVED";
   // Which date's conversation is open — local to this one submission's panel rather than lifted
   // up, since Panel remounts this component fresh (key={viewingSubmission?.id ?? "draft"})
   // every time a different submission is opened, so there's never a stale open date to carry
@@ -891,11 +942,17 @@ function SubmissionDetail({
           But that's only if... it's not fully approved" — confirmed this stays a second step
           after Clear rather than an immediate delete (same reasoning cancelAvailabilitySubmission
           already gives for keeping a Cancelled record), but now reachable right here the moment
-          it's Cancelled instead of only from the separate Your Submissions list. Same
-          Cancelled-only rule MyAvailabilityPreview's own delete button already enforces. */}
+          it's Cancelled instead of only from the separate Your Submissions list. Redesign
+          follow-up (Sept 2026): Approved now gets this same box directly (no Clear step — there
+          isn't one for Approved) — see canDelete above and MyAvailabilityPreview's own delete
+          button, which enforces the identical rule. */}
       {canDelete && onDelete && (
         <div className="rounded-2xl bg-rose-500/10 border border-rose-500/20 p-3.5 space-y-2">
-          <p className="text-sm text-white/70">Cancelled. You can remove it for good, or just leave it here.</p>
+          <p className="text-sm text-white/70">
+            {submission.status === "APPROVED"
+              ? "Approved. You can remove it from your schedule, or just leave it here."
+              : "Cancelled. You can remove it for good, or just leave it here."}
+          </p>
           <button
             type="button"
             onClick={onDelete}
