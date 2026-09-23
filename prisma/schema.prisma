@@ -115,6 +115,7 @@ model Employee {
   teamNotesWritten        TeamNote[]                @relation("TeamNoteAuthor")
   directMessagesSent      DirectMessage[]           @relation("DirectMessageSender")
   directMessagesReceived  DirectMessage[]           @relation("DirectMessageRecipient")
+  directMessageReactions  DirectMessageReaction[]
   dateTasksAsSubject      DateTask[]                @relation("DateTaskSubject")
   dateTasksCreated        DateTask[]                @relation("DateTaskCreatedBy")
   dateTasksApproved       DateTask[]                @relation("DateTaskApprovedBy")
@@ -422,10 +423,51 @@ model DirectMessage {
   refId   String?
   refDate String?
 
+  // CB, Sept 2026: "I should be able to reply to a specific message within the message thread."
+  // A nullable self-relation — ON DELETE SET NULL rather than RESTRICT/CASCADE, since nothing in
+  // this app deletes a DirectMessage today, but if that ever changes, a reply should keep
+  // reading (just losing its quoted preview) instead of blocking or vanishing with the original.
+  replyToId String?
+  replyTo   DirectMessage?  @relation("DirectMessageReply", fields: [replyToId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  replies   DirectMessage[] @relation("DirectMessageReply")
+
+  // CB, Sept 2026: "I should have the options to include emojis to react to other people's
+  // replies." See DirectMessageReaction's own doc comment below for why this is a separate table
+  // rather than columns here.
+  reactions DirectMessageReaction[]
+
   createdAt DateTime @default(now())
 
   @@index([senderId, recipientId, createdAt])
   @@index([recipientId, senderId, createdAt])
+  @@index([replyToId])
+}
+
+/**
+ * One person's quick-emoji reaction to one DirectMessage — CB, Sept 2026: "I should have the
+ * options to include emojis to react to other people's replies." One row per (message, person,
+ * emoji): the unique constraint below means a second call with the SAME emoji is what
+ * toggleReaction (src/lib/direct-messages.ts) treats as "remove it," while a DIFFERENT emoji from
+ * the same person adds a second reaction rather than replacing the first — same as a real chat
+ * app's tapback, not a single "your one reaction" slot per person. `emoji` is validated app-side
+ * against QUICK_REACTION_EMOJIS (src/types/index.ts), the same "validate in the action function,
+ * not the column type" convention this app already uses for PtoType's own options.
+ */
+model DirectMessageReaction {
+  id String @id @default(uuid())
+
+  messageId String
+  message   DirectMessage @relation(fields: [messageId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  emoji String
+
+  createdAt DateTime @default(now())
+
+  @@unique([messageId, employeeId, emoji])
+  @@index([messageId])
 }
 
 enum DateTaskStatus {
