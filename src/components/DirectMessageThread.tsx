@@ -237,7 +237,13 @@ export default function DirectMessageThread({
                 {m.replyTo && (
                   <div className="max-w-[80%] mb-1 rounded-xl border border-border bg-surface px-3 py-2 shadow-sm">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">
-                      {m.replyTo.senderId === viewerId ? "You" : m.replyTo.senderName}
+                      {/* DirectMessageReplyPreviewDTO only carries senderName, not senderId (it's
+                          a lightweight preview, not a full message row) — the quoted message is
+                          still sitting right in this same thread's already-loaded `messages`, so
+                          look it up locally for the "You" label rather than growing the DTO. */}
+                      {messages.find((msg) => msg.id === m.replyTo!.id)?.senderId === viewerId
+                        ? "You"
+                        : m.replyTo.senderName}
                     </p>
                     <p className="text-xs text-muted truncate">{previewText(m.replyTo)}</p>
                   </div>
