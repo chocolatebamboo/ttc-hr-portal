@@ -53,6 +53,19 @@ export function assertCanAccessReports(actor: CurrentEmployee): void {
 }
 
 /**
+ * Phase 5c (CB, Sept 2026): "an option to add an internal comment" on a direct message,
+ * confirmed scope "hidden from the team member." Same three-role "staff" cut canAccessReports
+ * already draws (isAdmin() plus SUPERVISOR) — given its own name here since internal DM notes
+ * and Reports access aren't otherwise related capabilities, and "isStaff" reads more plainly at
+ * the DM comment call sites than reusing canAccessReports would. prisma/rls.sql's
+ * direct_message_comment_select/_insert enforce the same cut independently, via
+ * current_role_name() <> 'EMPLOYEE'.
+ */
+export function isStaff(actor: CurrentEmployee): boolean {
+  return isAdmin(actor) || actor.role === "SUPERVISOR";
+}
+
+/**
  * True if `actor` may view/act on `targetEmployeeId`'s work-related records (time entries,
  * PTO). Admins: anyone. Supervisors: their direct reports only — checked against the
  * database, not a client-supplied "I am their supervisor" claim. Employees: themselves only.
