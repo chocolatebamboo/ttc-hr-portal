@@ -87,6 +87,13 @@ export default function MessagesInboxView({
   // directConversations (which only ever reflects rows that actually exist in the database)
   // until the first message is sent, at which point the real fetch below takes over.
   const [pendingDms, setPendingDms] = useState<Map<string, string>>(new Map());
+  // Phase 5d (CB, Sept 2026): "chat icons on availability requests linked to specific dates" —
+  // the reference a date-chat link asks the thread below to pre-attach, read from the URL
+  // alongside dm/name (see the effect below). Only ever meant for the ONE thread that's about
+  // to open as a result of this exact link — cleared the moment DirectMessageThread has
+  // captured it (its own onInitialRefConsumed callback), so reopening a thread later (or a
+  // different one) never inherits a stale reference from an earlier date-chat click.
+  const [pendingRef, setPendingRef] = useState<{ type: "AVAILABILITY_DATE"; id: string; date: string } | null>(null);
 
   // Correction brief #11 (Sept 2026): "The chat bubble on an availability request should take
   // the user into My Messages... open the relevant conversation/thread for that specific team
@@ -105,6 +112,15 @@ export default function MessagesInboxView({
       const name = params.get("name") || "Team member";
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setPendingDms((prev) => new Map(prev).set(dm, name));
+      // Phase 5d: the same link can also carry refType/refId/refDate — see TeamAvailabilityCards'
+      // openChatForDate, which is the only place that adds them today. All three or none; a
+      // partial/malformed set is just ignored rather than opening the thread with a broken ref.
+      const refType = params.get("refType");
+      const refId = params.get("refId");
+      const refDate = params.get("refDate");
+      if (refType === "AVAILABILITY_DATE" && refId && refDate) {
+        setPendingRef({ type: "AVAILABILITY_DATE", id: refId, date: refDate });
+      }
       setOpenKey(dmRowKey(dm));
       window.history.replaceState(null, "", "/messages");
     }
@@ -210,6 +226,8 @@ export default function MessagesInboxView({
                   otherEmployeeId={row.employeeId}
                   viewerId={viewerId}
                   canUseInternalNotes={canUseInternalNotes}
+                  initialRef={pendingRef}
+                  onInitialRefConsumed={() => setPendingRef(null)}
                   onRead={() => router.refresh()}
                 />
               )}
