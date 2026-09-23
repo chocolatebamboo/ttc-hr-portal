@@ -2,6 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import { withRlsContext } from "@/lib/db";
 import { getSignedDownloadUrl } from "@/lib/storage";
 import { isStaff, ForbiddenError } from "@/lib/authorization";
+import { formatTime12h } from "@/lib/availability-format";
 import {
   threadKeyForDirectMessage,
   markThreadRead,
@@ -11,6 +12,7 @@ import {
 } from "@/lib/message-read-state";
 import {
   QUICK_REACTION_EMOJIS,
+  type AvailabilitySlot,
   type CurrentEmployee,
   type DirectConversationSummaryDTO,
   type DirectMessageCommentDTO,
@@ -137,7 +139,10 @@ function summarizeReactions(reactions: ReactionRow[], actorId: string): DirectMe
 function toDTO(row: MessageRow, labels: Map<string, string>, actorId: string, actorIsStaff: boolean): DirectMessageDTO {
   let ref: DirectMessageRefDTO | null = null;
   if (row.refType && row.refId) {
-    const label = labels.get(`${row.refType}:${row.refId}`);
+    // Keyed by date as well as type+id (Phase 5d) — a DATE_TASK only ever has one date, so this
+    // is a no-op there, but an AVAILABILITY_DATE ref's `id` is a whole AvailabilitySubmission,
+    // which can cover several dates each with its own time range — see resolveRefLabels below.
+    const label = labels.get(`${row.refType}:${row.refId}:${row.refDate ?? ""}`);
     if (label) {
       ref = { type: row.refType as DirectMessageRefType, id: row.refId, date: row.refDate, label };
     }
@@ -166,22 +171,45 @@ function toDTO(row: MessageRow, labels: Map<string, string>, actorId: string, ac
   };
 }
 
-/** Batch-resolves every DATE_TASK ref among `rows` to its task's own title in one query, rather
- *  than one lookup per message — same "fine at this company's size, one query beats N" tradeoff
- *  this file already makes elsewhere (listConversationSummaries' own comment). AVAILABILITY_DATE
- *  and PTO_REQUEST are declared on DirectMessageRefType (prisma/schema.prisma's own doc comment
- *  reserved all three from the start) but nothing attaches those yet — only DATE_TASK actually
- *  gets written today, so this only resolves that kind; an unresolvable ref just renders as a
- *  plain message with no card, never an error. */
+/** Batch-resolves every ref among `rows` to a display label in (at most) one query per ref type,
+ *  rather than one lookup per message — same "fine at this company's size, one query beats N"
+ *  tradeoff this file already makes elsewhere (listConversationSummaries' own comment).
+ *  DATE_TASK resolves to the task's own title, one row per task. AVAILABILITY_DATE (Phase 5d,
+ *  CB: "chat icons on availability requests linked to specific dates") resolves to that one
+ *  date's own time range, e.g. "9:00 AM–5:00 PM" — a submission's `slots` can cover several
+ *  dates, so this fans one fetched submission out into one label per date it actually has, keyed
+ *  by date (see toDTO's own lookup above). PTO_REQUEST is declared on DirectMessageRefType
+ *  (prisma/schema.prisma's own doc comment reserved all three from the start) but nothing
+ *  attaches it yet. An unresolvable ref just renders as a plain message with no card, never an
+ *  error — same as an id that's since been deleted. */
 async function resolveRefLabels(
   tx: PrismaClient,
   rows: MessageRow[]
 ): Promise<Map<string, string>> {
   const taskIds = [...new Set(rows.filter((r) => r.refType === "DATE_TASK" && r.refId).map((r) => r.refId as string))];
+  const availabilityIds = [
+    ...new Set(rows.filter((r) => r.refType === "AVAILABILITY_DATE" && r.refId).map((r) => r.refId as string)),
+  ];
   const labels = new Map<string, string>();
-  if (taskIds.length === 0) return labels;
-  const tasks = await tx.dateTask.findMany({ where: { id: { in: taskIds } }, select: { id: true, title: true } });
-  for (const t of tasks) labels.set(`DATE_TASK:${t.id}`, t.title);
+
+  if (taskIds.length > 0) {
+    const tasks = await tx.dateTask.findMany({ where: { id: { in: taskIds } }, select: { id: true, title: true, taskDate: true } });
+    for (const t of tasks) labels.set(`DATE_TASK:${t.id}:${t.taskDate}`, t.title);
+  }
+
+  if (availabilityIds.length > 0) {
+    const submissions = await tx.availabilitySubmission.findMany({
+      where: { id: { in: availabilityIds } },
+      select: { id: true, slots: true },
+    });
+    for (const s of submissions) {
+      const slots = s.slots as unknown as AvailabilitySlot[];
+      for (const slot of slots) {
+        labels.set(`AVAILABILITY_DATE:${s.id}:${slot.date}`, `${formatTime12h(slot.startTime)}–${formatTime12h(slot.endTime)}`);
+      }
+    }
+  }
+
   return labels;
 }
 
@@ -289,9 +317,13 @@ export async function listMessages(actor: CurrentEmployee, otherEmployeeId: stri
  *
  * `ref` attaches the reference-card columns reserved on DirectMessage since the start (see its
  * own doc comment in prisma/schema.prisma) — CB, Sept 2026: "I should be able to kind of like
- * reference within the conversation of my message with a specific team member." Nothing in this
- * app's own UI lets someone attach one directly yet; today the only caller is
- * addDateTaskComment's mirror (src/lib/date-tasks.ts), which passes the task it was posted from.
+ * reference within the conversation of my message with a specific team member." Two callers today:
+ * addDateTaskComment's mirror (src/lib/date-tasks.ts), server-side only, passes the task it was
+ * posted from; and, as of Phase 5d, POST /api/messages/dm/[employeeId] accepts an AVAILABILITY_DATE
+ * ref straight from the client (see that route's own doc comment) when the message was started
+ * from a date's own "Message about this date" button — DATE_TASK is deliberately NOT accepted from
+ * that route, since there's no client UI for attaching one and no access check here that would
+ * verify the caller can actually see a client-supplied task id.
  *
  * `replyToId` is CB's "reply to a specific message within the message thread" (Sept 2026) — the
  * id of an existing message to quote. Re-checked against this same thread (not just any message
@@ -303,7 +335,7 @@ export async function postMessage(
   recipientId: string,
   body: string,
   attachment?: { key: string; name: string },
-  ref?: { type: "DATE_TASK"; id: string; date: string | null },
+  ref?: { type: "DATE_TASK" | "AVAILABILITY_DATE"; id: string; date: string | null },
   replyToId?: string | null
 ): Promise<DirectMessageDTO> {
   if (recipientId === actor.id) {
