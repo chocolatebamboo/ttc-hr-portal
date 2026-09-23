@@ -37,6 +37,18 @@ function toDTO(row: NotificationRow): NotificationDTO {
  * should never have existed either. Same "write it inside the same tx as the audit log" shape
  * writeShiftAuditLog already uses in src/lib/shifts.ts, just for the newer recipient-facing
  * table instead of (or, at the four new call sites in phase 4, alongside) AuditLog.
+ *
+ * Hotfix (Sept 2026): this used to call tx.notification.create(), which is Prisma's shorthand
+ * for `INSERT ... RETURNING *`. Under this table's RLS (prisma/rls.sql: notification_select is
+ * `recipientId = current_employee_id()`, with no admin override — see that policy's own
+ * comment), Postgres checks a just-inserted row against the SELECT policy before it can be
+ * handed back via RETURNING, and a notification is by definition addressed to someone OTHER
+ * than whoever's running this transaction — so that check failed on literally every call,
+ * rolling back the entire decide/approve/deny action around it ("new row violates row-level
+ * security policy for table \"Notification\""). createMany() below issues a plain INSERT with
+ * no RETURNING clause, so only notification_insert's `with check (true)` applies — same row,
+ * same privacy (still nobody but the recipient can ever SELECT it back out), just without
+ * Postgres trying to hand back a row this caller isn't allowed to read.
  */
 export async function writeNotification(
   tx: PrismaClient,
@@ -49,15 +61,17 @@ export async function writeNotification(
     targetId: string;
   }
 ): Promise<void> {
-  await tx.notification.create({
-    data: {
-      recipientId: params.recipientId,
-      type: params.type,
-      title: params.title,
-      body: params.body ?? null,
-      targetType: params.targetType,
-      targetId: params.targetId,
-    },
+  await tx.notification.createMany({
+    data: [
+      {
+        recipientId: params.recipientId,
+        type: params.type,
+        title: params.title,
+        body: params.body ?? null,
+        targetType: params.targetType,
+        targetId: params.targetId,
+      },
+    ],
   });
 }
 
