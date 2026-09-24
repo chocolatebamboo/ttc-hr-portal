@@ -132,7 +132,7 @@ export default function TeamAvailabilityRequestsSection({
                 onAction={() => q.setRemovingId(r.id)}
               >
                 <Card
-                  row={r}
+                  submissions={[r]}
                   viewerId={viewerId}
                   busy={q.busyId === r.id}
                   denying={q.denyingId === r.id}
@@ -140,11 +140,11 @@ export default function TeamAvailabilityRequestsSection({
                   decideError={q.decideErrorId === r.id ? q.decideError : undefined}
                   removing={q.removingId === r.id}
                   removeError={q.removeErrorId === r.id ? q.removeError : undefined}
-                  openDate={q.openDate?.submissionId === r.id ? q.openDate.date : null}
+                  openDate={q.openDate}
                   shiftsByDate={q.shiftsByDate}
                   dmCounts={q.dmCounts}
-                  onToggleDate={(date) =>
-                    q.setOpenDate(q.openDate?.submissionId === r.id && q.openDate.date === date ? null : { submissionId: r.id, date })
+                  onToggleDate={(submissionId, date) =>
+                    q.setOpenDate(q.openDate?.submissionId === submissionId && q.openDate.date === date ? null : { submissionId, date })
                   }
                   onDenyToggle={() => q.setDenyingId(q.denyingId === r.id ? null : r.id)}
                   onDenyCommentChange={q.setDenyComment}
