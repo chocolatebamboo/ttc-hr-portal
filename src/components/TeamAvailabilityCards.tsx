@@ -7,7 +7,7 @@ import ShiftStatusPill from "@/components/ShiftStatusPill";
 import DateTasksPanel from "@/components/DateTasksPanel";
 import SwipeReveal from "@/components/SwipeReveal";
 import { ChecklistIcon, CheckCircleIcon, CalendarIcon, TrashIcon, ChatIcon } from "@/components/icons";
-import { slotChips } from "@/lib/availability-format";
+import { slotChips, type SlotChip } from "@/lib/availability-format";
 import { toneForStatus, YOU_TONE } from "@/lib/status-tone";
 import type { AdminAvailabilityDTO, AdminShiftDTO, AvailabilityDateDecision } from "@/types";
 
@@ -431,6 +431,43 @@ function useTeamAvailabilityQueue(opts?: { initialPending?: AdminAvailabilityDTO
 export type TeamAvailabilityQueue = ReturnType<typeof useTeamAvailabilityQueue>;
 export { useTeamAvailabilityQueue };
 
+/** One employee's row(s) within a single section (Pending or Decided) — almost always exactly
+ *  one submission (see groupByEmployee below), in which case Card renders it identically to how
+ *  a single row always has; only a genuinely merged group (the same employee with more than one
+ *  submission in this section) changes anything visible — see Card's own doc comment. */
+type FolderGroup = {
+  employeeId: string;
+  employeeName: string;
+  submissions: AdminAvailabilityDTO[];
+};
+
+/**
+ * Folder-card grouping (CB, Sept 2026): "I shouldn't see multiple cards with the same name...
+ * I want that card to kind of represent almost like a folder for everything... we see everybody
+ * at all at one time." Groups every row within ONE section's list (Pending or Decided — confirmed
+ * scope: "merge within each section only," never across both) by employeeId, so a team member
+ * with several separate submissions in the same section shows up as one card instead of one card
+ * per submission. Preserves that list's own existing order by the position of that employee's
+ * FIRST row in it (Pending stays oldest-submitted-first, Decided stays most-recently-reviewed-
+ * first — see listAdminAvailability's own orderBy in src/lib/availability.ts). A person with
+ * only one submission in this section — the normal case — produces a group of exactly one.
+ */
+function groupByEmployee(rows: AdminAvailabilityDTO[]): FolderGroup[] {
+  const order: string[] = [];
+  const byEmployee = new Map<string, AdminAvailabilityDTO[]>();
+  for (const row of rows) {
+    if (!byEmployee.has(row.employeeId)) {
+      byEmployee.set(row.employeeId, []);
+      order.push(row.employeeId);
+    }
+    byEmployee.get(row.employeeId)!.push(row);
+  }
+  return order.map((employeeId) => {
+    const submissions = byEmployee.get(employeeId)!;
+    return { employeeId, employeeName: submissions[0].employeeName, submissions };
+  });
+}
+
 /**
  * The HR-wide availability roster's actual card list — fetch, Approve/Deny/Undo,
  * Pending/Decided sections, and a per-date task list on each card — extracted from
@@ -460,7 +497,9 @@ export { useTeamAvailabilityQueue };
  * removeAvailabilitySubmission's own comment in src/lib/availability.ts for exactly how). A
  * Decided card's swipe therefore reveals two actions side by side: "Clear" (Correction brief #9's
  * local dismiss, unchanged) and "Remove" (this round's real, permanent removal) — SwipeReveal's
- * new secondaryAction prop makes that one swipe instead of two different gestures.
+ * new secondaryAction prop makes that one swipe instead of two different gestures. Folder-card
+ * grouping (below) scopes both gestures to a card that still represents exactly one submission —
+ * see the render below for why a genuinely merged card renders without either.
  *
  * Correction brief #11 (Sept 2026): "The chat bubble on an availability request should take the
  * user into My Messages... open the relevant conversation/thread for that specific team member/
@@ -490,6 +529,12 @@ export { useTeamAvailabilityQueue };
  * directly now lives in useTeamAvailabilityQueue above — this component is a thin renderer over
  * that hook, unchanged in behavior, so the dashboard's own TeamAvailabilityRequestsSection can
  * drive the exact same Card component off the exact same hook instead of duplicating any of it.
+ *
+ * Folder-card grouping (CB, Sept 2026): each section's flat rows are grouped by employee
+ * (groupByEmployee above) before rendering — see Card's own doc comment for what changes on an
+ * actually-merged card. Swipe-to-remove (Pending) and Swipe-to-clear/Remove (Decided) both target
+ * exactly one submission, so they're only offered while a group still represents exactly one —
+ * `soleId` below is that submission's id, or null once a card has genuinely merged more than one.
  */
 export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }) {
   const q = useTeamAvailabilityQueue();
@@ -525,31 +570,27 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
             Pending ({q.pending.length})
           </h2>
           <div className="space-y-3">
-            {q.pending.map((r) => (
-              <SwipeReveal
-                key={r.id}
-                actionSide="right"
-                actionLabel="Remove"
-                actionIcon={<TrashIcon className="h-4 w-4" />}
-                actionClassName="bg-rose-600 text-white rounded-3xl"
-                onAction={() => q.setRemovingId(r.id)}
-              >
+            {groupByEmployee(q.pending).map((group) => {
+              const soleId = group.submissions.length === 1 ? group.submissions[0].id : null;
+              const card = (
                 <Card
-                  row={r}
+                  submissions={group.submissions}
                   viewerId={viewerId}
-                  busy={q.busyId === r.id}
-                  denying={q.denyingId === r.id}
+                  busy={group.submissions.some((s) => s.id === q.busyId)}
+                  denying={soleId !== null && q.denyingId === soleId}
                   denyComment={q.denyComment}
-                  decideError={q.decideErrorId === r.id ? q.decideError : undefined}
-                  removing={q.removingId === r.id}
-                  removeError={q.removeErrorId === r.id ? q.removeError : undefined}
-                  openDate={q.openDate?.submissionId === r.id ? q.openDate.date : null}
+                  decideError={group.submissions.some((s) => s.id === q.decideErrorId) ? q.decideError : undefined}
+                  removing={soleId !== null && q.removingId === soleId}
+                  removeError={group.submissions.some((s) => s.id === q.removeErrorId) ? q.removeError : undefined}
+                  openDate={q.openDate}
                   shiftsByDate={q.shiftsByDate}
                   dmCounts={q.dmCounts}
-                  onToggleDate={(date) =>
-                    q.setOpenDate(q.openDate?.submissionId === r.id && q.openDate.date === date ? null : { submissionId: r.id, date })
+                  onToggleDate={(submissionId, date) =>
+                    q.setOpenDate(
+                      q.openDate?.submissionId === submissionId && q.openDate.date === date ? null : { submissionId, date }
+                    )
                   }
-                  onDenyToggle={() => q.setDenyingId(q.denyingId === r.id ? null : r.id)}
+                  onDenyToggle={() => soleId && q.setDenyingId(q.denyingId === soleId ? null : soleId)}
                   onDenyCommentChange={q.setDenyComment}
                   onDecide={q.decide}
                   onDecideDate={q.decideDate}
@@ -562,8 +603,29 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                   onMessageAboutDate={q.openChatForDate}
                   onRemoveDate={q.removeDate}
                 />
-              </SwipeReveal>
-            ))}
+              );
+              // Swipe-to-remove targets ONE submission (removeAvailabilitySubmission takes a
+              // single submissionId) — offered only while this card still represents exactly
+              // one, same as the bulk Approve/Deny row inside Card itself. A genuinely merged
+              // card has no single submission for a card-wide swipe to mean "remove," so it
+              // renders without the gesture; an admin who wants to clean up one of several
+              // merged requests still can, date by date, via that card's own Edit/Done per-date
+              // remove (see Card's own canEditDates).
+              return soleId !== null ? (
+                <SwipeReveal
+                  key={group.employeeId}
+                  actionSide="right"
+                  actionLabel="Remove"
+                  actionIcon={<TrashIcon className="h-4 w-4" />}
+                  actionClassName="bg-rose-600 text-white rounded-3xl"
+                  onAction={() => q.setRemovingId(soleId)}
+                >
+                  {card}
+                </SwipeReveal>
+              ) : (
+                <div key={group.employeeId}>{card}</div>
+              );
+            })}
           </div>
         </section>
       )}
@@ -574,35 +636,25 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
             Decided ({q.decided.length})
           </h2>
           <div className="space-y-3">
-            {q.decided.map((r) => (
-              <SwipeReveal
-                key={r.id}
-                actionSide="right"
-                actionLabel="Clear"
-                actionIcon={<CheckCircleIcon className="h-4 w-4" />}
-                actionClassName="bg-black/[0.06] text-accent-ink rounded-3xl"
-                onAction={() => q.clearDecided(r.id)}
-                secondaryAction={{
-                  label: "Remove",
-                  icon: <TrashIcon className="h-4 w-4" />,
-                  className: "bg-rose-600 text-white rounded-3xl",
-                  onAction: () => q.setRemovingId(r.id),
-                }}
-              >
+            {groupByEmployee(q.decided).map((group) => {
+              const soleId = group.submissions.length === 1 ? group.submissions[0].id : null;
+              const card = (
                 <Card
-                  row={r}
+                  submissions={group.submissions}
                   viewerId={viewerId}
-                  busy={q.busyId === r.id}
+                  busy={group.submissions.some((s) => s.id === q.busyId)}
                   denying={false}
                   denyComment=""
                   decideError={undefined}
-                  removing={q.removingId === r.id}
-                  removeError={q.removeErrorId === r.id ? q.removeError : undefined}
-                  openDate={q.openDate?.submissionId === r.id ? q.openDate.date : null}
+                  removing={soleId !== null && q.removingId === soleId}
+                  removeError={group.submissions.some((s) => s.id === q.removeErrorId) ? q.removeError : undefined}
+                  openDate={q.openDate}
                   shiftsByDate={q.shiftsByDate}
                   dmCounts={q.dmCounts}
-                  onToggleDate={(date) =>
-                    q.setOpenDate(q.openDate?.submissionId === r.id && q.openDate.date === date ? null : { submissionId: r.id, date })
+                  onToggleDate={(submissionId, date) =>
+                    q.setOpenDate(
+                      q.openDate?.submissionId === submissionId && q.openDate.date === date ? null : { submissionId, date }
+                    )
                   }
                   onDenyToggle={() => {}}
                   onDenyCommentChange={() => {}}
@@ -617,8 +669,28 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                   onMessageAboutDate={q.openChatForDate}
                   onRemoveDate={q.removeDate}
                 />
-              </SwipeReveal>
-            ))}
+              );
+              return soleId !== null ? (
+                <SwipeReveal
+                  key={group.employeeId}
+                  actionSide="right"
+                  actionLabel="Clear"
+                  actionIcon={<CheckCircleIcon className="h-4 w-4" />}
+                  actionClassName="bg-black/[0.06] text-accent-ink rounded-3xl"
+                  onAction={() => q.clearDecided(soleId)}
+                  secondaryAction={{
+                    label: "Remove",
+                    icon: <TrashIcon className="h-4 w-4" />,
+                    className: "bg-rose-600 text-white rounded-3xl",
+                    onAction: () => q.setRemovingId(soleId),
+                  }}
+                >
+                  {card}
+                </SwipeReveal>
+              ) : (
+                <div key={group.employeeId}>{card}</div>
+              );
+            })}
           </div>
         </section>
       )}
@@ -640,14 +712,34 @@ function DateDecisionDot({ status }: { status: AvailabilityDateDecision["status"
   );
 }
 
+/** One merged date chip — everything SlotChip already carries, plus which underlying submission
+ *  it came from and that submission's own decision for this date (folder-card grouping, CB, Sept
+ *  2026 — see Card's own doc comment below). */
+type FolderChip = SlotChip & { submissionId: string; decision?: AvailabilityDateDecision };
+
 /**
- * One request's full colored card — Approve/Deny, per-date decisions, Edit/remove-date, the chat
- * bubble, and each date's own task list. Exported (redesign follow-up, Sept 2026) alongside
- * useTeamAvailabilityQueue above so TeamAvailabilityRequestsSection can render this exact same
- * component when a dashboard-widget row is expanded — see that file's own doc comment.
+ * One team member's card within a section — Approve/Deny, per-date decisions, Edit/remove-date,
+ * the chat bubble, and each date's own task list. Exported (redesign follow-up, Sept 2026)
+ * alongside useTeamAvailabilityQueue above so TeamAvailabilityRequestsSection can render this
+ * exact same component when a dashboard-widget row is expanded — see that file's own doc comment.
+ *
+ * Folder-card grouping (CB, Sept 2026): `submissions` is now always an array — almost always of
+ * length 1 (a person with one request in this section), in which case every branch below gated on
+ * `solo` takes the exact same path it always did and nothing changes. Only when the SAME employee
+ * has more than one submission in this section (merged by groupByEmployee above) does this card
+ * actually do anything new: every date across all of them renders as one merged, sorted row of
+ * chips (each chip still remembers which underlying submission it came from, so Approve/Deny/
+ * Change date time/the chat bubble/tasks all still act on the right one), the card-wide Approve
+ * all/Deny all/Undo/reviewer-name line disappear in favor of a plain "N dates · M requests" badge
+ * (CB's own confirmed mockup: approving several different REQUESTS' dates in one tap is too easy
+ * to get wrong once they're not all the same request), and the swipe-to-remove/Clear gestures —
+ * which only ever target one submission — step aside too (see the two call sites above for
+ * exactly why). Per-date Approve/Deny/Change date/time, the chat bubble, and each date's own task
+ * list are completely unaffected either way, since those were already scoped by submissionId+date
+ * rather than by "the" card.
  */
 export function Card({
-  row: r,
+  submissions,
   viewerId,
   busy,
   denying,
@@ -672,7 +764,7 @@ export function Card({
   onMessageAboutDate,
   onRemoveDate,
 }: {
-  row: AdminAvailabilityDTO;
+  submissions: AdminAvailabilityDTO[];
   viewerId: string;
   busy: boolean;
   denying: boolean;
@@ -680,10 +772,10 @@ export function Card({
   decideError?: string;
   removing: boolean;
   removeError?: string;
-  openDate: string | null;
+  openDate: { submissionId: string; date: string } | null;
   shiftsByDate: Map<string, AdminShiftDTO>;
   dmCounts: Map<string, { total: number; unread: number }>;
-  onToggleDate: (date: string) => void;
+  onToggleDate: (submissionId: string, date: string) => void;
   onDenyToggle: () => void;
   onDenyCommentChange: (v: string) => void;
   onDecide: (submissionId: string, decision: "APPROVED" | "DENIED", comment?: string) => void;
@@ -702,11 +794,27 @@ export function Card({
   onMessageAboutDate: (employeeId: string, employeeName: string, submissionId: string, date: string) => void;
   onRemoveDate: (submissionId: string, date: string) => void;
 }) {
-  const chips = slotChips(r.slots);
-  // CB, Sept 2026: the per-date minus lives behind an Edit/Done toggle so it's opt-in, not
-  // sitting on every card by default. Eligible on the same PENDING/DENIED requests
-  // removeAvailabilityDateForReview allows — a Decided-but-Approved card never gets this.
-  const canEditDates = (r.status === "PENDING" || r.status === "DENIED") && chips.length > 1;
+  const { employeeId, employeeName } = submissions[0];
+  const isSelf = employeeId === viewerId;
+  // Every date across every submission in this group, sorted together and each still tagged with
+  // which submission it actually belongs to — see this component's own doc comment above.
+  const chips: FolderChip[] = submissions
+    .flatMap((s) =>
+      slotChips(s.slots).map((c) => ({
+        ...c,
+        submissionId: s.id,
+        decision: s.dateDecisions.find((d) => d.date === c.date),
+      }))
+    )
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const isPending = submissions.every((s) => s.status === "PENDING");
+  // "solo" is the ordinary, unmerged case (see this component's own doc comment) — every branch
+  // gated on it behaves exactly as it did before this card could ever hold more than one
+  // submission.
+  const solo = submissions.length === 1 ? submissions[0] : null;
+  const perDateMode = solo ? isInPerDateMode(solo.dateDecisions) : false;
+  const fullyDecided = solo ? allDatesDecided(solo.dateDecisions) : false;
+
   const [editingDates, setEditingDates] = useState(false);
   const [confirmRemoveDate, setConfirmRemoveDate] = useState<string | null>(null);
   // Per-date deny's own comment box — mirrors the bulk denyComment/denying pair above, just
@@ -726,31 +834,47 @@ export function Card({
   const [adjustStart, setAdjustStart] = useState("");
   const [adjustEnd, setAdjustEnd] = useState("");
   const [adjustDateComment, setAdjustDateComment] = useState("");
+
   // CB, Sept 2026, round three: "instead of the yellow background, I want the pink
   // background" (Approved) / "I think the pending color should be that yellow as well" —
   // confirmed this replaces the old per-employee tone entirely: color now signals the
   // decision itself (Pending/Approved/Denied), same everywhere, not who or what it's about.
   // CB, round five: the viewer's own card always reads in brand blue, regardless of status —
-  // see YOU_TONE's doc comment in src/lib/status-tone.ts.
-  const isSelf = r.employeeId === viewerId;
-  const tone = isSelf ? YOU_TONE : toneForStatus(r.status);
-  const isPending = r.status === "PENDING";
-  const openChip = chips.find((c) => c.date === openDate);
-  const openDecision = openChip ? r.dateDecisions.find((d) => d.date === openChip.date) : undefined;
-  // Either/or with the bulk actions — see this file's own top-level doc comment and
-  // AvailabilitySubmission.dateDecisions' doc comment in prisma/schema.prisma.
-  const perDateMode = isInPerDateMode(r.dateDecisions);
-  const fullyDecided = allDatesDecided(r.dateDecisions);
+  // see YOU_TONE's doc comment in src/lib/status-tone.ts. Folder-card grouping: a merged card
+  // can hold submissions with different outcomes (Decided) — picks Approved over Denied the
+  // same way aggregateStatus itself resolves "at least one date approved" in
+  // src/lib/availability.ts, falling back to the first submission's own tone for anything else
+  // (Cancelled, Adjustment Requested) rather than inventing a new precedence rule for those.
+  const tone = isSelf
+    ? YOU_TONE
+    : solo
+      ? toneForStatus(solo.status)
+      : submissions.some((s) => s.status === "APPROVED")
+        ? toneForStatus("APPROVED")
+        : submissions.some((s) => s.status === "DENIED")
+          ? toneForStatus("DENIED")
+          : toneForStatus(submissions[0].status);
+  const openChip = openDate ? chips.find((c) => c.submissionId === openDate.submissionId && c.date === openDate.date) : undefined;
+  const openSubmission = openChip ? submissions.find((s) => s.id === openChip.submissionId) : undefined;
+  const openDecision = openChip?.decision;
   // Correction brief #10 (Sept 2026): "if an already-approved availability request has
   // generated or affected an actual schedule, handle the schedule relationship explicitly" —
   // this doesn't change whether Remove is allowed (removeAvailabilitySubmission never touches
   // the Shift table either way), just whether the confirmation below says so, so the admin isn't
   // surprised later. shiftsByDate is the same admin-wide map the "Scheduled as a shift" section
-  // further down already uses, keyed "submissionId:date".
-  const hasLinkedShift = chips.some((c) => shiftsByDate.has(`${r.id}:${c.date}`));
+  // further down already uses, keyed "submissionId:date". Only meaningful for `solo` — Remove is
+  // only ever offered on an unmerged card (see this component's own doc comment).
+  const hasLinkedShift = solo ? chips.some((c) => shiftsByDate.has(`${solo.id}:${c.date}`)) : false;
   // Correction brief #11 (Sept 2026): the chat bubble's own unread badge — see this component's
   // top-level doc comment for why this is a DM count, not a topic-thread count.
-  const dmCount = dmCounts.get(r.employeeId);
+  const dmCount = dmCounts.get(employeeId);
+  // CB, Sept 2026: the per-date minus lives behind an Edit/Done toggle so it's opt-in, not
+  // sitting on every card by default. Eligible on the same PENDING/DENIED requests
+  // removeAvailabilityDateForReview allows — a Decided-but-Approved card never gets this.
+  // Folder-card grouping: scoped to the unmerged case only — a merged card's dates already
+  // belong to different submissions, each with their own status, so "trim a date off THIS
+  // request" only has one unambiguous request to mean while there's just one.
+  const canEditDates = solo !== null && (solo.status === "PENDING" || solo.status === "DENIED") && chips.length > 1;
 
   function startAdjustDate(date: string, seedStart: string, seedEnd: string) {
     setAdjustingDate(date);
@@ -761,9 +885,9 @@ export function Card({
   }
 
   function submitAdjustDate() {
-    if (!adjustingDate) return;
+    if (!adjustingDate || !openSubmission) return;
     const newDate = adjustDate || adjustingDate;
-    onChangeDate(r.id, adjustingDate, newDate, adjustStart, adjustEnd, adjustDateComment.trim() || undefined);
+    onChangeDate(openSubmission.id, adjustingDate, newDate, adjustStart, adjustEnd, adjustDateComment.trim() || undefined);
     setAdjustingDate(null);
     setAdjustDateComment("");
   }
@@ -776,41 +900,55 @@ export function Card({
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3 min-w-0 flex-1">
           <span className="h-10 w-10 rounded-full bg-white/25 border border-white/40 flex items-center justify-center text-sm font-semibold text-white shrink-0">
-            {initialsOf(r.employeeName)}
+            {initialsOf(employeeName)}
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
-              <p className="text-base font-semibold text-white truncate">{r.employeeName}</p>
+              <p className="text-base font-semibold text-white truncate">{employeeName}</p>
               {isSelf && (
                 <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-white bg-white/25 border border-white/40 rounded-full px-1.5 py-0.5">
                   You
                 </span>
               )}
-            </div>
-            <div className="flex items-center gap-2 mt-0.5">
-              {isPending ? (
-                <span className="text-xs font-medium text-white/80">
-                  {perDateMode && !fullyDecided ? "Some dates decided — finish the rest below" : "Awaiting your decision"}
+              {/* Folder badge (CB's own confirmed mockup, Sept 2026): replaces the single status
+                  pill/reviewer-name line below once more than one of this person's submissions
+                  are merged into this card — there's no longer one status or one reviewer to
+                  summarize at the card level; each date still shows its own further down. */}
+              {!solo && (
+                <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-white bg-white/20 border border-white/35 rounded-full px-2 py-0.5">
+                  {chips.length} dates · {submissions.length} requests
                 </span>
-              ) : (
-                <>
-                  <AvailabilityStatusPill status={r.status} />
-                  <button onClick={() => onUndo(r.id)} disabled={busy} className="text-xs font-medium text-white/85 hover:text-white underline underline-offset-2">
-                    Undo
-                  </button>
-                </>
               )}
             </div>
-            {/* CB, Sept 2026: "I need to see that directly on the card itself once it's
-                approved... so I don't have to go all the way to the reports in order for me to
-                find that." reviewedByName was already resolved server-side for Activity History
-                — see its own doc comment in src/types/index.ts — just never surfaced here. Only
-                set once decide() actually runs (APPROVED/DENIED), so this naturally stays hidden
-                for CANCELLED/ADJUSTMENT_REQUESTED without a separate status check. */}
-            {r.reviewedByName && (
-              <p className="text-xs font-medium text-white mt-0.5">
-                {r.status === "APPROVED" ? "Approved" : "Denied"} by {r.reviewedByName}
-              </p>
+            {solo && (
+              <>
+                <div className="flex items-center gap-2 mt-0.5">
+                  {isPending ? (
+                    <span className="text-xs font-medium text-white/80">
+                      {perDateMode && !fullyDecided ? "Some dates decided — finish the rest below" : "Awaiting your decision"}
+                    </span>
+                  ) : (
+                    <>
+                      <AvailabilityStatusPill status={solo.status} />
+                      <button onClick={() => onUndo(solo.id)} disabled={busy} className="text-xs font-medium text-white/85 hover:text-white underline underline-offset-2">
+                        Undo
+                      </button>
+                    </>
+                  )}
+                </div>
+                {/* CB, Sept 2026: "I need to see that directly on the card itself once it's
+                    approved... so I don't have to go all the way to the reports in order for me
+                    to find that." reviewedByName was already resolved server-side for Activity
+                    History — see its own doc comment in src/types/index.ts — just never surfaced
+                    here. Only set once decide() actually runs (APPROVED/DENIED), so this
+                    naturally stays hidden for CANCELLED/ADJUSTMENT_REQUESTED without a separate
+                    status check. */}
+                {solo.reviewedByName && (
+                  <p className="text-xs font-medium text-white mt-0.5">
+                    {solo.status === "APPROVED" ? "Approved" : "Denied"} by {solo.reviewedByName}
+                  </p>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -822,9 +960,9 @@ export function Card({
           {!isSelf && (
             <button
               type="button"
-              onClick={() => onOpenChat(r.employeeId, r.employeeName)}
+              onClick={() => onOpenChat(employeeId, employeeName)}
               className="relative h-8 w-8 rounded-full bg-white/20 flex items-center justify-center hover:bg-white/30 transition-colors"
-              title={`Message ${r.employeeName}`}
+              title={`Message ${employeeName}`}
             >
               <ChatIcon className="h-4 w-4 text-white" />
               {!!dmCount?.unread && (
@@ -861,19 +999,18 @@ export function Card({
       {chips.length > 0 ? (
         <div className="mt-3.5 flex flex-wrap gap-1.5">
           {chips.map((c) => {
-            const active = c.date === openDate;
-            const decision = r.dateDecisions.find((d) => d.date === c.date);
+            const active = openDate?.submissionId === c.submissionId && openDate?.date === c.date;
             return (
-              <div key={c.date} className="relative">
+              <div key={`${c.submissionId}:${c.date}`} className="relative">
                 <button
                   type="button"
-                  onClick={() => onToggleDate(c.date)}
+                  onClick={() => onToggleDate(c.submissionId, c.date)}
                   className={`relative flex flex-col items-start rounded-xl px-2.5 py-1.5 leading-tight transition-colors ${
                     active ? "bg-white" : "bg-white/15 hover:bg-white/25 border border-white/25"
                   } ${editingDates ? "border-white/55" : ""}`}
                   style={active ? { color: tone.to } : undefined}
                 >
-                  {decision && <DateDecisionDot status={decision.status} />}
+                  {c.decision && <DateDecisionDot status={c.decision.status} />}
                   <span className={`text-xs font-semibold ${active ? "" : "text-white"}`}>{c.dateLabel}</span>
                   <span className={`text-[11px] ${active ? "opacity-70" : "text-white/80"}`}>{c.timeLabel}</span>
                 </button>
@@ -899,13 +1036,13 @@ export function Card({
         <p className="text-sm text-white/80 mt-2">No dates marked available.</p>
       )}
 
-      {editingDates && confirmRemoveDate && (
+      {editingDates && confirmRemoveDate && solo && (
         <div className="mt-2.5 bg-black/20 rounded-xl p-3">
           <p className="text-sm font-semibold text-white">
             Remove {chips.find((c) => c.date === confirmRemoveDate)?.dateLabel} from this request?
           </p>
           <p className="text-xs text-white/80 mt-1">
-            Just this date drops off, the rest of the request stays exactly as it is. {r.employeeName} isn&apos;t notified.
+            Just this date drops off, the rest of the request stays exactly as it is. {employeeName} isn&apos;t notified.
           </p>
           <div className="flex items-center gap-2 mt-2.5">
             <button
@@ -919,7 +1056,7 @@ export function Card({
             <button
               type="button"
               onClick={() => {
-                onRemoveDate(r.id, confirmRemoveDate);
+                onRemoveDate(solo.id, confirmRemoveDate);
                 setConfirmRemoveDate(null);
               }}
               disabled={busy}
@@ -931,18 +1068,19 @@ export function Card({
         </div>
       )}
 
-      {r.note && <p className="text-sm text-white/85 italic mt-2.5">&ldquo;{r.note}&rdquo;</p>}
-      {!isPending && r.reviewComment && (
-        <p className="text-sm text-white/85 italic mt-2">Reviewer note: &ldquo;{r.reviewComment}&rdquo;</p>
+      {solo?.note && <p className="text-sm text-white/85 italic mt-2.5">&ldquo;{solo.note}&rdquo;</p>}
+      {solo && !isPending && solo.reviewComment && (
+        <p className="text-sm text-white/85 italic mt-2">Reviewer note: &ldquo;{solo.reviewComment}&rdquo;</p>
       )}
 
       {/* Bulk actions — "I have the option to approve everything at one time." Hidden the
-          moment any date has been decided individually (perDateMode), since from that point on
-          the remaining dates are finished one at a time below instead. */}
-      {isPending && !perDateMode && (
+          moment any date has been decided individually (perDateMode), and — folder-card
+          grouping — hidden entirely once more than one submission is merged into this card
+          (see this component's own doc comment for why). */}
+      {solo && isPending && !perDateMode && (
         <div className="flex items-center gap-2 mt-3.5 flex-wrap">
           <button
-            onClick={() => onDecide(r.id, "APPROVED")}
+            onClick={() => onDecide(solo.id, "APPROVED")}
             disabled={busy}
             className="rounded-full bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:brightness-95 disabled:opacity-60"
             style={{ color: tone.to }}
@@ -961,7 +1099,7 @@ export function Card({
 
       {decideError && <p className="text-xs font-medium text-rose-50 mt-2">{decideError}</p>}
 
-      {denying && (
+      {denying && solo && (
         <div className="mt-3 flex flex-col sm:flex-row gap-2 bg-white/15 rounded-xl p-3">
           <textarea
             value={denyComment}
@@ -971,7 +1109,7 @@ export function Card({
             className="flex-1 rounded-md border border-white/30 bg-white/90 px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-white placeholder:text-muted"
           />
           <button
-            onClick={() => onDecide(r.id, "DENIED", denyComment.trim() || undefined)}
+            onClick={() => onDecide(solo.id, "DENIED", denyComment.trim() || undefined)}
             disabled={busy}
             className="rounded-full bg-white px-4 py-2 text-sm font-semibold self-start shadow-sm"
             style={{ color: tone.to }}
@@ -986,13 +1124,15 @@ export function Card({
           request?'" — opened by the swipe-revealed Remove button above, not by the swipe itself,
           so a swipe alone never removes anything. Distinct from Deny: this never notifies the
           team member and never records a decision on the request's merits, only that HR cleaned
-          it up (see removeAvailabilitySubmission's own comment for the full reasoning). */}
-      {removing && (
+          it up (see removeAvailabilitySubmission's own comment for the full reasoning). Only
+          ever reachable on an unmerged card (see this component's own doc comment), so `solo` is
+          always set here in practice — the guard just keeps this branch type-safe. */}
+      {removing && solo && (
         <div className="mt-3.5 flex flex-col gap-2.5 bg-white/15 rounded-xl p-3">
           <p className="text-sm font-semibold text-white">Remove this availability request?</p>
           <p className="text-xs text-white/80">
             This is administrative cleanup, not a decision — it won&rsquo;t notify{" "}
-            {isSelf ? "you" : r.employeeName}, and HR keeps an internal record even after it&rsquo;s
+            {isSelf ? "you" : employeeName}, and HR keeps an internal record even after it&rsquo;s
             removed.
             {hasLinkedShift &&
               " A shift already scheduled from this request stays exactly as it is — removing the request will not cancel or change it."}
@@ -1009,7 +1149,7 @@ export function Card({
             </button>
             <button
               type="button"
-              onClick={() => onRemoveConfirm(r.id)}
+              onClick={() => onRemoveConfirm(solo.id)}
               disabled={busy}
               className="rounded-full bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-rose-700 disabled:opacity-60"
             >
@@ -1019,13 +1159,13 @@ export function Card({
         </div>
       )}
 
-      {openChip && (
+      {openChip && openSubmission && (
         <div className="mt-3.5 space-y-3.5">
           {/* This one date's own decision — approve/deny it individually, propose a different
               time for just this date, or (once decided) see the outcome. Only offered while the
-              submission itself is still Pending; a Decided card's dates are all already
+              date's OWN submission is still Pending; a Decided card's dates are all already
               resolved. */}
-          {isPending && openDecision && (
+          {openSubmission.status === "PENDING" && openDecision && (
             <div className="bg-white/15 rounded-xl p-3 space-y-2.5">
               {openDecision.status === "PENDING" ? (
                 adjustingDate === openChip.date ? (
@@ -1092,7 +1232,7 @@ export function Card({
                     />
                     <button
                       onClick={() => {
-                        onDecideDate(r.id, openChip.date, "DENIED", denyDateComment.trim() || undefined);
+                        onDecideDate(openSubmission.id, openChip.date, "DENIED", denyDateComment.trim() || undefined);
                         setDenyingDate(null);
                         setDenyDateComment("");
                       }}
@@ -1107,7 +1247,7 @@ export function Card({
                   <div className="flex items-center gap-2 flex-wrap">
                     <button
                       type="button"
-                      onClick={() => onDecideDate(r.id, openChip.date, "APPROVED")}
+                      onClick={() => onDecideDate(openSubmission.id, openChip.date, "APPROVED")}
                       disabled={busy}
                       className="rounded-full bg-white px-3.5 py-1.5 text-xs font-semibold shadow-sm hover:brightness-95 disabled:opacity-60"
                       style={{ color: tone.to }}
@@ -1125,7 +1265,7 @@ export function Card({
                     <button
                       type="button"
                       onClick={() => {
-                        const original = r.slots.find((s) => s.date === openChip.date);
+                        const original = openSubmission.slots.find((s) => s.date === openChip.date);
                         startAdjustDate(openChip.date, original?.startTime ?? "09:00", original?.endTime ?? "17:00");
                       }}
                       disabled={busy}
@@ -1141,7 +1281,7 @@ export function Card({
                     {!isSelf && (
                       <button
                         type="button"
-                        onClick={() => onMessageAboutDate(r.employeeId, r.employeeName, r.id, openChip.date)}
+                        onClick={() => onMessageAboutDate(employeeId, employeeName, openSubmission.id, openChip.date)}
                         className="flex items-center gap-1.5 rounded-full bg-white/15 border border-white/35 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-white/25"
                       >
                         <ChatIcon className="h-3.5 w-3.5" />
@@ -1172,10 +1312,10 @@ export function Card({
                       untouched. Hidden once a real shift already exists for this date (task
                       pushed) — see undecideAvailabilityDate's own doc comment for why that case
                       goes through Team Schedule instead. */}
-                  {!shiftsByDate.has(`${r.id}:${openChip.date}`) && (
+                  {!shiftsByDate.has(`${openSubmission.id}:${openChip.date}`) && (
                     <button
                       type="button"
-                      onClick={() => onUndoDate(r.id, openChip.date)}
+                      onClick={() => onUndoDate(openSubmission.id, openChip.date)}
                       disabled={busy}
                       className="text-xs font-medium text-white/85 hover:text-white underline underline-offset-2 disabled:opacity-50"
                     >
@@ -1195,7 +1335,7 @@ export function Card({
               already confirmed (a task was pushed), or it's sitting in the admin's own "needs a
               task" queue, and DateTasksPanel right below is where that actually happens. */}
           {openDecision?.status === "APPROVED" && (() => {
-            const existingShift = shiftsByDate.get(`${r.id}:${openChip.date}`);
+            const existingShift = shiftsByDate.get(`${openSubmission.id}:${openChip.date}`);
             return (
               <div className="flex items-center gap-2 bg-white/15 rounded-xl px-3 py-2">
                 <CalendarIcon className="h-3.5 w-3.5 text-white/80 shrink-0" />
@@ -1225,7 +1365,7 @@ export function Card({
               <ChecklistIcon className="h-3.5 w-3.5 text-white/80" />
               {openChip.dateLabel} — tasks
             </p>
-            <DateTasksPanel employeeId={r.employeeId} taskDate={openChip.date} viewerId={viewerId} />
+            <DateTasksPanel employeeId={employeeId} taskDate={openChip.date} viewerId={viewerId} />
           </div>
         </div>
       )}
