@@ -9,7 +9,7 @@ import SwipeReveal from "@/components/SwipeReveal";
 import { ChecklistIcon, CheckCircleIcon, CalendarIcon, TrashIcon, ChatIcon } from "@/components/icons";
 import { slotChips } from "@/lib/availability-format";
 import { toneForStatus, YOU_TONE } from "@/lib/status-tone";
-import type { AdminAvailabilityDTO, AdminShiftDTO, AvailabilityDateDecision, AvailabilitySlot } from "@/types";
+import type { AdminAvailabilityDTO, AdminShiftDTO, AvailabilityDateDecision } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -358,23 +358,31 @@ function useTeamAvailabilityQueue(opts?: { initialPending?: AdminAvailabilityDTO
     }
   }
 
-  // Phase 2 (client spec, Sept 2026): the reviewer's third option besides Approve/Deny —
-  // "Adjust the proposed time and send it to the team member for confirmation." Still a
-  // whole-submission action (adjustedSlots must cover every date, unchanged) — see Card below
-  // for how a per-date edit gets folded into the full array before this is called.
-  async function requestAdjustment(submissionId: string, adjustedSlots: AvailabilitySlot[], comment?: string) {
+  // CB, Sept 2026, replacing the original "propose new date/time, wait for the team member to
+  // confirm" flow: "we shouldn't have to wait on the team member... once we set it, then that
+  // becomes the new schedule." Per-date, same granularity as decideDate below — sets a new
+  // date/time for ONE date and approves it immediately, in one call, no separate accept step.
+  // See changeAvailabilityDate's own doc comment in src/lib/availability.ts.
+  async function changeDate(
+    submissionId: string,
+    date: string,
+    newDate: string,
+    newStartTime: string,
+    newEndTime: string,
+    comment?: string
+  ) {
     setBusyId(submissionId);
     setDecideError(undefined);
     setDecideErrorId(null);
     try {
-      const res = await fetch(`/api/availability/${submissionId}/request-adjustment`, {
+      const res = await fetch(`/api/availability/${submissionId}/change-date`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ adjustedSlots, comment }),
+        body: JSON.stringify({ date, newDate, newStartTime, newEndTime, comment }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setDecideError(data.error ?? "Unable to send that adjustment. Please try again.");
+        setDecideError(data.error ?? "Unable to save that change. Please try again.");
         setDecideErrorId(submissionId);
         return;
       }
@@ -416,7 +424,7 @@ function useTeamAvailabilityQueue(opts?: { initialPending?: AdminAvailabilityDTO
     removeDate,
     undo,
     undoDate,
-    requestAdjustment,
+    changeDate,
   };
 }
 
@@ -471,8 +479,9 @@ export { useTeamAvailabilityQueue };
  * AvailabilitySubmission.dateDecisions' doc comment in prisma/schema.prisma): the Pending/Decided
  * bulk buttons stay available for a submission nothing's been decided on yet; opening a date chip
  * whose own decision is still Pending shows that date's own Approve/Deny (and — CB: "click on the
- * date that I want to adjust and... change the date and the time from there" — a "Propose new
- * date/time" control scoped to that one date, letting the date itself move, not just its time)
+ * date that I want to adjust and... change the date and the time from there" — a "Change
+ * date/time" control scoped to that one date, letting the date itself move, not just its time,
+ * approved immediately once set)
  * and the moment any date is decided that way
  * the bulk buttons step aside so the rest get finished one at a time. Each chip now also carries
  * a small tone dot showing that date's own decision at a glance.
@@ -546,7 +555,7 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                   onDecideDate={q.decideDate}
                   onUndo={q.undo}
                   onUndoDate={q.undoDate}
-                  onRequestAdjustment={q.requestAdjustment}
+                  onChangeDate={q.changeDate}
                   onRemoveConfirm={q.removeSubmission}
                   onRemoveCancel={q.cancelRemove}
                   onOpenChat={q.openChat}
@@ -601,7 +610,7 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                   onDecideDate={() => {}}
                   onUndo={q.undo}
                   onUndoDate={q.undoDate}
-                  onRequestAdjustment={() => {}}
+                  onChangeDate={() => {}}
                   onRemoveConfirm={q.removeSubmission}
                   onRemoveCancel={q.cancelRemove}
                   onOpenChat={q.openChat}
@@ -656,7 +665,7 @@ export function Card({
   onDecideDate,
   onUndo,
   onUndoDate,
-  onRequestAdjustment,
+  onChangeDate,
   onRemoveConfirm,
   onRemoveCancel,
   onOpenChat,
@@ -680,7 +689,10 @@ export function Card({
   onDecide: (submissionId: string, decision: "APPROVED" | "DENIED", comment?: string) => void;
   onDecideDate: (submissionId: string, date: string, decision: "APPROVED" | "DENIED", comment?: string) => void;
   onUndo: (submissionId: string) => void;
-  onRequestAdjustment: (submissionId: string, adjustedSlots: AvailabilitySlot[], comment?: string) => void;
+  /** CB, Sept 2026: replaces the old "propose new date/time, wait for confirmation" flow — sets
+   *  ONE date's new date/time and approves it immediately, same per-date granularity as
+   *  onDecideDate. See changeAvailabilityDate's own doc comment in src/lib/availability.ts. */
+  onChangeDate: (submissionId: string, date: string, newDate: string, newStartTime: string, newEndTime: string, comment?: string) => void;
   onUndoDate: (submissionId: string, date: string) => void;
   onRemoveConfirm: (submissionId: string) => void;
   onRemoveCancel: () => void;
@@ -701,15 +713,14 @@ export function Card({
   // scoped to whichever date is currently open rather than the whole card.
   const [denyingDate, setDenyingDate] = useState<string | null>(null);
   const [denyDateComment, setDenyDateComment] = useState("");
-  // Per-date "Propose new date/time" — CB: "click on the date that I want to adjust and...
-  // change the date and the time from there," and (QA pass, Sept 2026) confirmed this should
-  // let the DATE itself change too, not just the time window on the same day. Still submits
-  // through onRequestAdjustment's whole-submission adjustedSlots array (unchanged backend
-  // contract — respondToAvailabilityAdjustment already regenerates dateDecisions fresh from
-  // whatever dates end up in adjustedSlots on accept, so a changed date here needs no backend
-  // change at all); everything except the one slot being edited comes straight from r.slots
-  // untouched. `adjustingDate` still tracks by the ORIGINAL date (which chip/panel is open),
-  // even after `adjustDate` itself is edited to something else.
+  // Per-date "Change date/time" — CB: "click on the date that I want to adjust and... change
+  // the date and the time from there," and (QA pass, Sept 2026) confirmed this should let the
+  // DATE itself change too, not just the time window on the same day. CB, later: "we shouldn't
+  // have to wait on the team member... once we set it, then that becomes the new schedule" —
+  // onChangeDate approves this one date immediately with the edited date/time, no separate
+  // confirmation step (see its own doc comment above). `adjustingDate` still tracks by the
+  // ORIGINAL date (which chip/panel is open), even after `adjustDate` itself is edited to
+  // something else.
   const [adjustingDate, setAdjustingDate] = useState<string | null>(null);
   const [adjustDate, setAdjustDate] = useState("");
   const [adjustStart, setAdjustStart] = useState("");
@@ -752,10 +763,7 @@ export function Card({
   function submitAdjustDate() {
     if (!adjustingDate) return;
     const newDate = adjustDate || adjustingDate;
-    const adjustedSlots: AvailabilitySlot[] = r.slots.map((slot) =>
-      slot.date === adjustingDate ? { date: newDate, startTime: adjustStart, endTime: adjustEnd } : slot
-    );
-    onRequestAdjustment(r.id, adjustedSlots, adjustDateComment.trim() || undefined);
+    onChangeDate(r.id, adjustingDate, newDate, adjustStart, adjustEnd, adjustDateComment.trim() || undefined);
     setAdjustingDate(null);
     setAdjustDateComment("");
   }
@@ -800,7 +808,7 @@ export function Card({
                 set once decide() actually runs (APPROVED/DENIED), so this naturally stays hidden
                 for CANCELLED/ADJUSTMENT_REQUESTED without a separate status check. */}
             {r.reviewedByName && (
-              <p className="text-xs text-white/75 mt-0.5">
+              <p className="text-xs font-medium text-white mt-0.5">
                 {r.status === "APPROVED" ? "Approved" : "Denied"} by {r.reviewedByName}
               </p>
             )}
@@ -1069,7 +1077,7 @@ export function Card({
                         className="rounded-full bg-white px-3.5 py-1.5 text-xs font-semibold shadow-sm"
                         style={{ color: tone.to }}
                       >
-                        Send to team member
+                        Save change
                       </button>
                     </div>
                   </div>
@@ -1114,19 +1122,17 @@ export function Card({
                     >
                       Deny this date
                     </button>
-                    {!perDateMode && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const original = r.slots.find((s) => s.date === openChip.date);
-                          startAdjustDate(openChip.date, original?.startTime ?? "09:00", original?.endTime ?? "17:00");
-                        }}
-                        disabled={busy}
-                        className="rounded-full bg-white/15 border border-white/35 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-white/25 disabled:opacity-60"
-                      >
-                        Propose new date/time
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const original = r.slots.find((s) => s.date === openChip.date);
+                        startAdjustDate(openChip.date, original?.startTime ?? "09:00", original?.endTime ?? "17:00");
+                      }}
+                      disabled={busy}
+                      className="rounded-full bg-white/15 border border-white/35 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-white/25 disabled:opacity-60"
+                    >
+                      Change date/time
+                    </button>
                     {/* Phase 5d (CB, Sept 2026): "chat icons on availability requests linked to
                         specific dates" — opens My Messages with this date already attached as a
                         reference (openChatForDate's own doc comment above). Not shown on the
@@ -1152,7 +1158,7 @@ export function Card({
                         approved" — same reviewer-name surfacing as the card-level status above,
                         just the per-date counterpart (decidedByName, src/types/index.ts). */}
                     {openDecision.decidedByName && (
-                      <span className="block text-white/75 mt-0.5 font-normal">
+                      <span className="block text-white mt-0.5">
                         {openDecision.status === "APPROVED" ? "Approved" : "Denied"} by {openDecision.decidedByName}
                       </span>
                     )}
