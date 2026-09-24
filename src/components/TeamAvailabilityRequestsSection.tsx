@@ -152,7 +152,7 @@ export default function TeamAvailabilityRequestsSection({
                   onDecideDate={q.decideDate}
                   onUndo={q.undo}
                   onUndoDate={q.undoDate}
-                  onRequestAdjustment={q.requestAdjustment}
+                  onChangeDate={q.changeDate}
                   onRemoveConfirm={q.removeSubmission}
                   onRemoveCancel={q.cancelRemove}
                   onOpenChat={q.openChat}
