@@ -579,6 +579,107 @@ export async function decideAvailabilityDate(
 }
 
 /**
+ * CB, Sept 2026, on the original two-step "propose new date/time, wait for the team member to
+ * confirm" flow: "we shouldn't have to wait on the team member... once we set it, then that
+ * becomes the new schedule, and then it just updates on the team member's end." Replaces
+ * requestAvailabilityAdjustment/respondToAvailabilityAdjustment below for new use — this sets
+ * ONE date's new date and/or time and approves it immediately, in the same single call, the same
+ * per-date granularity decideAvailabilityDate already uses (and with the exact same "only a
+ * still-Pending date can be acted on" guard). No ADJUSTMENT_REQUESTED status is ever entered by
+ * this path — the reviewer's choice is final the moment they make it, same authority Approve/
+ * Deny already carry; a team member with something to say about it does so through the DM/task
+ * comment thread, not a formal accept/decline. (requestAvailabilityAdjustment and
+ * respondToAvailabilityAdjustment are left in place, unused by the current UI, rather than
+ * removed outright — no live submission is sitting in ADJUSTMENT_REQUESTED as of this change, so
+ * nothing depends on them, but ripping out a whole status/flow isn't this change's job.)
+ *
+ * `newSlot.date` may differ from `date` (the admin can move the date itself, not just the time —
+ * QA pass's earlier "there's no way to change the date" note already established this for the
+ * old flow, carried over here). Guarded against colliding with another date already on this same
+ * submission, which `slots`/`dateDecisions` both assume never happens (each keyed uniquely by
+ * date).
+ */
+export async function changeAvailabilityDate(
+  reviewer: CurrentEmployee,
+  submissionId: string,
+  date: string,
+  newSlot: AvailabilitySlot,
+  comment?: string
+): Promise<AvailabilityDTO> {
+  assertValidSlots([newSlot]);
+
+  return withRlsContext({ employeeId: reviewer.id, role: reviewer.role }, async (tx) => {
+    const existing = await tx.availabilitySubmission.findUnique({ where: { id: submissionId } });
+    if (!existing || existing.status !== "PENDING") {
+      throw new InvalidAvailabilityError('Only a "Pending" submission can be changed.');
+    }
+    const slots = existing.slots as unknown as AvailabilitySlot[];
+    const decisions = readDateDecisions(slots, existing.dateDecisions);
+    const index = decisions.findIndex((d) => d.date === date);
+    if (index === -1) {
+      throw new InvalidAvailabilityError("That date isn't part of this submission.");
+    }
+    if (decisions[index].status !== "PENDING") {
+      throw new InvalidAvailabilityError("This date has already been decided.");
+    }
+    if (newSlot.date !== date && slots.some((s, i) => i !== index && s.date === newSlot.date)) {
+      throw new InvalidAvailabilityError("This request already has a date entry for that day.");
+    }
+
+    const trimmedComment = comment?.trim() || null;
+    const nextSlots = slots.slice();
+    nextSlots[index] = newSlot;
+    const nextDecisions = decisions.slice();
+    nextDecisions[index] = {
+      date: newSlot.date,
+      status: "APPROVED",
+      decidedAt: new Date().toISOString(),
+      decidedById: reviewer.id,
+      decidedByName: null,
+      comment: trimmedComment,
+    };
+    const nowFullyDecided = allDatesDecided(nextDecisions);
+
+    const row = await tx.availabilitySubmission.update({
+      where: { id: submissionId },
+      data: {
+        slots: nextSlots as unknown as Prisma.InputJsonValue,
+        dateDecisions: nextDecisions as unknown as Prisma.InputJsonValue,
+        ...(nowFullyDecided
+          ? {
+              status: aggregateStatus(nextDecisions),
+              reviewedById: reviewer.id,
+              reviewedAt: new Date(),
+              reviewComment: trimmedComment,
+            }
+          : {}),
+      },
+    });
+    await writeAuditLog(tx, {
+      actorId: reviewer.id,
+      action: "AVAILABILITY_DATE_CHANGED",
+      targetType: "AvailabilitySubmission",
+      targetId: row.id,
+      oldValue: date,
+      newValue: newSlot.date,
+      comment: trimmedComment ?? undefined,
+    });
+    await writeNotification(tx, {
+      recipientId: existing.employeeId,
+      type: "AVAILABILITY_APPROVED",
+      title:
+        newSlot.date !== date
+          ? `Your ${date} request was approved for ${newSlot.date} instead`
+          : `Your ${date} availability was approved for a different time`,
+      body: trimmedComment ?? undefined,
+      targetType: "AvailabilitySubmission",
+      targetId: row.id,
+    });
+    return toDTO(row, new Map([[reviewer.id, nameOf(reviewer)]]));
+  });
+}
+
+/**
  * Reviewer walks back a decision they already made — CB (Sept 2026), on the redesigned admin
  * card view: "I see approved, but I should be able to, like, unapprove it." Puts the
  * submission back to Pending (never CANCELLED — that status means the EMPLOYEE withdrew it,
