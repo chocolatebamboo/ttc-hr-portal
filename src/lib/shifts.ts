@@ -171,20 +171,37 @@ function toAdminDTO(row: ShiftRow, displayStatus: ShiftStatus): AdminShiftDTO {
   };
 }
 
+/**
+ * Hotfix (Sept 2026): switched from tx.auditLog.create() to createMany() — same bug, same fix,
+ * as src/lib/audit-log.ts's shared writeAuditLog() (see that file's doc comment for the full
+ * mechanism: create() does INSERT ... RETURNING, RETURNING is subject to audit_log_select
+ * (`is_admin()`, prisma/rls.sql) not just the insert with-check, so any NON-admin actor — a
+ * SUPERVISOR approving/denying/cancelling/reassigning a shift, which is most of what this
+ * function is called for — failed the RETURNING re-check and rolled back the whole shift
+ * action with the generic "Something went wrong" error. This function is a separate, older,
+ * shift-specific copy of that same helper (see its own doc comment above) that predates the
+ * shared one and was missed when the shared one got fixed. createMany() never issues
+ * RETURNING, so only audit_log_insert's `with check (true)` applies — same row, same
+ * admin-only read access afterward, just no attempt to hand it back to a non-admin writer who
+ * was never allowed to read AuditLog in the first place. Confirmed directly against the live
+ * database (both the failure and the fix) before shipping this.
+ */
 async function writeShiftAuditLog(
   tx: PrismaClient,
   params: { actorId: string; action: string; targetId: string; oldValue?: string; newValue?: string; comment?: string }
 ): Promise<void> {
-  await tx.auditLog.create({
-    data: {
-      actorId: params.actorId,
-      action: params.action,
-      targetType: "Shift",
-      targetId: params.targetId,
-      oldValue: params.oldValue ?? null,
-      newValue: params.newValue ?? null,
-      comment: params.comment ?? null,
-    },
+  await tx.auditLog.createMany({
+    data: [
+      {
+        actorId: params.actorId,
+        action: params.action,
+        targetType: "Shift",
+        targetId: params.targetId,
+        oldValue: params.oldValue ?? null,
+        newValue: params.newValue ?? null,
+        comment: params.comment ?? null,
+      },
+    ],
   });
 }
 
