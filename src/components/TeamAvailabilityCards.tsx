@@ -60,8 +60,13 @@ function useTeamAvailabilityQueue(opts?: { initialPending?: AdminAvailabilityDTO
   const [decided, setDecided] = useState<AdminAvailabilityDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>(opts?.initialPending ? "ready" : "loading");
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [denyingId, setDenyingId] = useState<string | null>(null);
-  const [denyComment, setDenyComment] = useState("");
+  // CB, Sept 2026: "I shouldn't have to explain myself... if I want to make a comment, that
+  // should be an optional thing." Deny now fires immediately, matching Approve — no comment box
+  // gates the click anymore (see decide/decideDate below). This is that comment, offered
+  // afterward instead: which submission (if any) currently has its note box open, and the text
+  // being typed into it. Renamed from denyingId/denyComment, which used to gate the Deny click.
+  const [addingNoteId, setAddingNoteId] = useState<string | null>(null);
+  const [noteText, setNoteText] = useState("");
   const [openDate, setOpenDate] = useState<{ submissionId: string; date: string } | null>(null);
   // Real, server-surfaced errors from a decide/decide-date attempt — same shape as
   // removeError/removeErrorId below, keyed to whichever card most recently failed so a stale
@@ -254,8 +259,6 @@ function useTeamAvailabilityQueue(opts?: { initialPending?: AdminAvailabilityDTO
         setDecideErrorId(submissionId);
         return;
       }
-      setDenyingId(null);
-      setDenyComment("");
       load();
     } catch {
       setDecideError("Couldn't reach the server. Check your connection and try again.");
@@ -280,6 +283,64 @@ function useTeamAvailabilityQueue(opts?: { initialPending?: AdminAvailabilityDTO
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         setDecideError(data.error ?? "Unable to save that decision. Please try again.");
+        setDecideErrorId(submissionId);
+        return;
+      }
+      load();
+    } catch {
+      setDecideError("Couldn't reach the server. Check your connection and try again.");
+      setDecideErrorId(submissionId);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  // CB, Sept 2026: "if I want to make a comment, that should be an optional thing" — now that
+  // Deny fires immediately with no comment step (decide/decideDate above), this is that comment,
+  // added afterward instead of gating the click. Only valid once the submission is actually
+  // decided already (see addAvailabilityReviewComment's own guard in src/lib/availability.ts).
+  async function addNote(submissionId: string, comment: string) {
+    setBusyId(submissionId);
+    setDecideError(undefined);
+    setDecideErrorId(null);
+    try {
+      const res = await fetch(`/api/availability/${submissionId}/comment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setDecideError(data.error ?? "Unable to save that note. Please try again.");
+        setDecideErrorId(submissionId);
+        return;
+      }
+      setAddingNoteId(null);
+      setNoteText("");
+      load();
+    } catch {
+      setDecideError("Couldn't reach the server. Check your connection and try again.");
+      setDecideErrorId(submissionId);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  // Per-date counterpart to addNote above — same "optional, after the fact" comment, scoped to
+  // one date's own already-made decision instead of the whole submission.
+  async function addDateNote(submissionId: string, date: string, comment: string) {
+    setBusyId(submissionId);
+    setDecideError(undefined);
+    setDecideErrorId(null);
+    try {
+      const res = await fetch(`/api/availability/${submissionId}/dates/${date}/comment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setDecideError(data.error ?? "Unable to save that note. Please try again.");
         setDecideErrorId(submissionId);
         return;
       }
@@ -400,10 +461,10 @@ function useTeamAvailabilityQueue(opts?: { initialPending?: AdminAvailabilityDTO
     decided,
     loadState,
     busyId,
-    denyingId,
-    setDenyingId,
-    denyComment,
-    setDenyComment,
+    addingNoteId,
+    setAddingNoteId,
+    noteText,
+    setNoteText,
     openDate,
     setOpenDate,
     decideError,
@@ -421,6 +482,8 @@ function useTeamAvailabilityQueue(opts?: { initialPending?: AdminAvailabilityDTO
     openChatForDate,
     decide,
     decideDate,
+    addNote,
+    addDateNote,
     removeDate,
     undo,
     undoDate,
@@ -582,8 +645,8 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                   submissions={group.submissions}
                   viewerId={viewerId}
                   busy={group.submissions.some((s) => s.id === q.busyId)}
-                  denying={soleId !== null && q.denyingId === soleId}
-                  denyComment={q.denyComment}
+                  addingNote={soleId !== null && q.addingNoteId === soleId}
+                  noteText={q.noteText}
                   decideError={group.submissions.some((s) => s.id === q.decideErrorId) ? q.decideError : undefined}
                   removing={soleId !== null && q.removingId === soleId}
                   removeError={group.submissions.some((s) => s.id === q.removeErrorId) ? q.removeError : undefined}
@@ -595,8 +658,10 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                       q.openDate?.submissionId === submissionId && q.openDate.date === date ? null : { submissionId, date }
                     )
                   }
-                  onDenyToggle={() => soleId && q.setDenyingId(q.denyingId === soleId ? null : soleId)}
-                  onDenyCommentChange={q.setDenyComment}
+                  onAddNoteToggle={() => soleId && q.setAddingNoteId(q.addingNoteId === soleId ? null : soleId)}
+                  onNoteTextChange={q.setNoteText}
+                  onAddNote={q.addNote}
+                  onAddDateNote={q.addDateNote}
                   onDecide={q.decide}
                   onDecideDate={q.decideDate}
                   onUndo={q.undo}
@@ -648,9 +713,9 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                   submissions={group.submissions}
                   viewerId={viewerId}
                   busy={group.submissions.some((s) => s.id === q.busyId)}
-                  denying={false}
-                  denyComment=""
-                  decideError={undefined}
+                  addingNote={soleId !== null && q.addingNoteId === soleId}
+                  noteText={q.noteText}
+                  decideError={group.submissions.some((s) => s.id === q.decideErrorId) ? q.decideError : undefined}
                   removing={soleId !== null && q.removingId === soleId}
                   removeError={group.submissions.some((s) => s.id === q.removeErrorId) ? q.removeError : undefined}
                   openDate={q.openDate}
@@ -661,8 +726,10 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                       q.openDate?.submissionId === submissionId && q.openDate.date === date ? null : { submissionId, date }
                     )
                   }
-                  onDenyToggle={() => {}}
-                  onDenyCommentChange={() => {}}
+                  onAddNoteToggle={() => soleId && q.setAddingNoteId(q.addingNoteId === soleId ? null : soleId)}
+                  onNoteTextChange={q.setNoteText}
+                  onAddNote={q.addNote}
+                  onAddDateNote={q.addDateNote}
                   onDecide={() => {}}
                   onDecideDate={() => {}}
                   onUndo={q.undo}
@@ -747,8 +814,8 @@ export function Card({
   submissions,
   viewerId,
   busy,
-  denying,
-  denyComment,
+  addingNote,
+  noteText,
   decideError,
   removing,
   removeError,
@@ -756,8 +823,10 @@ export function Card({
   shiftsByDate,
   dmCounts,
   onToggleDate,
-  onDenyToggle,
-  onDenyCommentChange,
+  onAddNoteToggle,
+  onNoteTextChange,
+  onAddNote,
+  onAddDateNote,
   onDecide,
   onDecideDate,
   onUndo,
@@ -772,8 +841,11 @@ export function Card({
   submissions: AdminAvailabilityDTO[];
   viewerId: string;
   busy: boolean;
-  denying: boolean;
-  denyComment: string;
+  /** CB, Sept 2026: "I shouldn't have to explain myself" — Deny fires immediately now, same as
+   *  Approve (onDecide below), so these no longer gate the click. They drive the OPTIONAL note,
+   *  offered afterward instead — whether this card's note box is open, and the text in it. */
+  addingNote: boolean;
+  noteText: string;
   decideError?: string;
   removing: boolean;
   removeError?: string;
@@ -781,8 +853,14 @@ export function Card({
   shiftsByDate: Map<string, AdminShiftDTO>;
   dmCounts: Map<string, { total: number; unread: number }>;
   onToggleDate: (submissionId: string, date: string) => void;
-  onDenyToggle: () => void;
-  onDenyCommentChange: (v: string) => void;
+  onAddNoteToggle: () => void;
+  onNoteTextChange: (v: string) => void;
+  /** Saves the note typed into the box above onto an already-decided submission — see
+   *  addAvailabilityReviewComment's own doc comment in src/lib/availability.ts. */
+  onAddNote: (submissionId: string, comment: string) => void;
+  /** Per-date counterpart to onAddNote — same optional, after-the-fact note, scoped to one
+   *  date's own already-made decision. */
+  onAddDateNote: (submissionId: string, date: string, comment: string) => void;
   onDecide: (submissionId: string, decision: "APPROVED" | "DENIED", comment?: string) => void;
   onDecideDate: (submissionId: string, date: string, decision: "APPROVED" | "DENIED", comment?: string) => void;
   onUndo: (submissionId: string) => void;
@@ -825,10 +903,12 @@ export function Card({
   // the same calendar date on more than one underlying request in principle, and removeDate
   // needs to know exactly which one this confirmation is acting on.
   const [confirmRemoveDate, setConfirmRemoveDate] = useState<{ submissionId: string; date: string } | null>(null);
-  // Per-date deny's own comment box — mirrors the bulk denyComment/denying pair above, just
-  // scoped to whichever date is currently open rather than the whole card.
-  const [denyingDate, setDenyingDate] = useState<string | null>(null);
-  const [denyDateComment, setDenyDateComment] = useState("");
+  // Per-date "add a note" box (CB, Sept 2026: "I shouldn't have to explain myself") — mirrors
+  // the bulk noteText/addingNote pair above, just scoped to whichever date is currently open
+  // rather than the whole card. Tracked by date like adjustingDate below, not just a boolean, so
+  // switching to a different chip closes it automatically.
+  const [addingNoteForDate, setAddingNoteForDate] = useState<string | null>(null);
+  const [dateNoteText, setDateNoteText] = useState("");
   // Per-date "Change date/time" — CB: "click on the date that I want to adjust and... change
   // the date and the time from there," and (QA pass, Sept 2026) confirmed this should let the
   // DATE itself change too, not just the time window on the same day. CB, later: "we shouldn't
@@ -1115,7 +1195,7 @@ export function Card({
             {chips.length > 1 ? "Approve all" : "Approve"}
           </button>
           <button
-            onClick={onDenyToggle}
+            onClick={() => onDecide(solo.id, "DENIED")}
             disabled={busy}
             className="rounded-full bg-white/15 border border-white/35 px-4 py-2 text-sm font-semibold text-white hover:bg-white/25 disabled:opacity-60"
           >
@@ -1126,38 +1206,52 @@ export function Card({
 
       {decideError && <p className="text-xs font-medium text-rose-50 mt-2">{decideError}</p>}
 
-      {denying && solo && (
-        <div className="mt-3 space-y-2.5 bg-white/15 rounded-xl p-3">
-          <textarea
-            value={denyComment}
-            onChange={(e) => onDenyCommentChange(e.target.value)}
-            placeholder="Optional note for the team member…"
-            rows={2}
-            className="w-full rounded-md border border-white/30 bg-white/90 px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-white placeholder:text-muted"
-          />
-          <div className="flex items-center gap-2">
-            {/* Same explicit Cancel as the per-date deny box just below — clicking Deny again
-                above would already toggle this closed (onDenyToggle), but that wasn't an obvious
-                way back, so this spells it out. */}
-            <button
-              type="button"
-              onClick={onDenyToggle}
-              disabled={busy}
-              className="rounded-full bg-white/15 border border-white/35 px-4 py-2 text-sm font-semibold text-white hover:bg-white/25 disabled:opacity-60"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => onDecide(solo.id, "DENIED", denyComment.trim() || undefined)}
-              disabled={busy}
-              className="rounded-full bg-white px-4 py-2 text-sm font-semibold shadow-sm"
-              style={{ color: tone.to }}
-            >
-              Confirm deny
-            </button>
+      {/* CB, Sept 2026: "I shouldn't have to explain myself" — Deny above now fires immediately,
+          same as Approve. This is the optional note, offered afterward instead of gating the
+          click, and only once — before a note exists; editing an existing one isn't supported
+          yet. Only shown on a Denied card, matching CB's own confirmed mockup (Approve doesn't
+          get this affordance). */}
+      {solo && solo.status === "DENIED" && !solo.reviewComment && (
+        addingNote ? (
+          <div className="mt-3 space-y-2.5 bg-white/15 rounded-xl p-3">
+            <textarea
+              value={noteText}
+              onChange={(e) => onNoteTextChange(e.target.value)}
+              placeholder="Optional note for the team member…"
+              rows={2}
+              autoFocus
+              className="w-full rounded-md border border-white/30 bg-white/90 px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-white placeholder:text-muted"
+            />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onAddNoteToggle}
+                disabled={busy}
+                className="rounded-full bg-white/15 border border-white/35 px-4 py-2 text-sm font-semibold text-white hover:bg-white/25 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => noteText.trim() && onAddNote(solo.id, noteText)}
+                disabled={busy || !noteText.trim()}
+                className="rounded-full bg-white px-4 py-2 text-sm font-semibold shadow-sm disabled:opacity-60"
+                style={{ color: tone.to }}
+              >
+                Save note
+              </button>
+            </div>
           </div>
-        </div>
+        ) : (
+          <button
+            type="button"
+            onClick={onAddNoteToggle}
+            className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-white/90 hover:text-white"
+          >
+            <span className="flex items-center justify-center h-4 w-4 rounded-full bg-white/25 text-[11px] leading-none">+</span>
+            Add a note for {employeeName}
+          </button>
+        )
       )}
 
       {/* Correction brief #10 (Sept 2026): the confirmation the brief explicitly asks for —
@@ -1262,48 +1356,6 @@ export function Card({
                       </button>
                     </div>
                   </div>
-                ) : denyingDate === openChip.date ? (
-                  <div className="space-y-2.5">
-                    <textarea
-                      value={denyDateComment}
-                      onChange={(e) => setDenyDateComment(e.target.value)}
-                      placeholder="Optional note for the team member…"
-                      rows={2}
-                      className="w-full rounded-md border border-white/30 bg-white/90 px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-white placeholder:text-muted"
-                    />
-                    <div className="flex items-center gap-2">
-                      {/* CB, Sept 2026: "once you click deny... there's no way to kind of go
-                          back to it" — this used to have no exit except actually confirming the
-                          deny. Cancel here matches the one "Change date/time" already has just
-                          below, and just clears denyingDate so the three-button row (Approve
-                          this date / Deny this date / Change date/time / Message about this
-                          date) comes back exactly as it was. */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setDenyingDate(null);
-                          setDenyDateComment("");
-                        }}
-                        disabled={busy}
-                        className="rounded-full bg-white/15 border border-white/35 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-white/25 disabled:opacity-60"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onDecideDate(openSubmission.id, openChip.date, "DENIED", denyDateComment.trim() || undefined);
-                          setDenyingDate(null);
-                          setDenyDateComment("");
-                        }}
-                        disabled={busy}
-                        className="rounded-full bg-white px-3.5 py-1.5 text-xs font-semibold shadow-sm"
-                        style={{ color: tone.to }}
-                      >
-                        Confirm deny
-                      </button>
-                    </div>
-                  </div>
                 ) : (
                   <div className="flex items-center gap-2 flex-wrap">
                     <button
@@ -1315,9 +1367,13 @@ export function Card({
                     >
                       Approve this date
                     </button>
+                    {/* CB, Sept 2026: "I shouldn't have to explain myself" — fires immediately
+                        now, same as Approve above, instead of opening a comment box first. The
+                        optional note moves to the decided view below, once there's a decision
+                        for it to attach to. */}
                     <button
                       type="button"
-                      onClick={() => setDenyingDate(openChip.date)}
+                      onClick={() => onDecideDate(openSubmission.id, openChip.date, "DENIED")}
                       disabled={busy}
                       className="rounded-full bg-white/15 border border-white/35 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-white/25 disabled:opacity-60"
                     >
@@ -1352,43 +1408,99 @@ export function Card({
                   </div>
                 )
               ) : (
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <p className="text-xs font-medium text-white/90">
-                    {openDecision.status === "APPROVED" ? "This date is approved." : "This date is denied."}
-                    {/* CB, Sept 2026: "I need to see that directly on the card itself once it's
-                        approved" — same reviewer-name surfacing as the card-level status above,
-                        just the per-date counterpart (decidedByName, src/types/index.ts). */}
-                    {openDecision.decidedByName && (
-                      <span className="block text-white mt-0.5">
-                        {openDecision.status === "APPROVED" ? "Approved" : "Denied"} by {openDecision.decidedByName}
-                        {/* Same date/time line as the submission-level "Approved/Denied by" above
-                            — CB, Sept 2026: "I need to know the time and the date." */}
-                        {openDecision.decidedAt && (
-                          <span className="block text-[11px] font-normal text-white/75 mt-0.5">
-                            {formatReviewedAt(openDecision.decidedAt)}
-                          </span>
-                        )}
-                      </span>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <p className="text-xs font-medium text-white/90">
+                      {openDecision.status === "APPROVED" ? "This date is approved." : "This date is denied."}
+                      {/* CB, Sept 2026: "I need to see that directly on the card itself once it's
+                          approved" — same reviewer-name surfacing as the card-level status above,
+                          just the per-date counterpart (decidedByName, src/types/index.ts). */}
+                      {openDecision.decidedByName && (
+                        <span className="block text-white mt-0.5">
+                          {openDecision.status === "APPROVED" ? "Approved" : "Denied"} by {openDecision.decidedByName}
+                          {/* Same date/time line as the submission-level "Approved/Denied by" above
+                              — CB, Sept 2026: "I need to know the time and the date." */}
+                          {openDecision.decidedAt && (
+                            <span className="block text-[11px] font-normal text-white/75 mt-0.5">
+                              {formatReviewedAt(openDecision.decidedAt)}
+                            </span>
+                          )}
+                        </span>
+                      )}
+                      {openDecision.comment && <span className="block italic text-white/80 mt-1">&ldquo;{openDecision.comment}&rdquo;</span>}
+                    </p>
+                    {/* CB, Sept 2026: "even if it's approved, I should still be able to make
+                        adjustments... it's not just final." This date's own decision was already
+                        made while the rest of the submission is still waiting, so the whole-card
+                        Undo above (only shown once the ENTIRE submission is Decided) can't reach
+                        it — this reopens just this one date, leaving every other date's decision
+                        untouched. Hidden once a real shift already exists for this date (task
+                        pushed) — see undecideAvailabilityDate's own doc comment for why that case
+                        goes through Team Schedule instead. */}
+                    {!shiftsByDate.has(`${openSubmission.id}:${openChip.date}`) && (
+                      <button
+                        type="button"
+                        onClick={() => onUndoDate(openSubmission.id, openChip.date)}
+                        disabled={busy}
+                        className="text-xs font-medium text-white/85 hover:text-white underline underline-offset-2 disabled:opacity-50"
+                      >
+                        Undo
+                      </button>
                     )}
-                    {openDecision.comment && <span className="block italic text-white/80 mt-1">&ldquo;{openDecision.comment}&rdquo;</span>}
-                  </p>
-                  {/* CB, Sept 2026: "even if it's approved, I should still be able to make
-                      adjustments... it's not just final." This date's own decision was already
-                      made while the rest of the submission is still waiting, so the whole-card
-                      Undo above (only shown once the ENTIRE submission is Decided) can't reach
-                      it — this reopens just this one date, leaving every other date's decision
-                      untouched. Hidden once a real shift already exists for this date (task
-                      pushed) — see undecideAvailabilityDate's own doc comment for why that case
-                      goes through Team Schedule instead. */}
-                  {!shiftsByDate.has(`${openSubmission.id}:${openChip.date}`) && (
-                    <button
-                      type="button"
-                      onClick={() => onUndoDate(openSubmission.id, openChip.date)}
-                      disabled={busy}
-                      className="text-xs font-medium text-white/85 hover:text-white underline underline-offset-2 disabled:opacity-50"
-                    >
-                      Undo
-                    </button>
+                  </div>
+                  {/* CB, Sept 2026: "I shouldn't have to explain myself" — Deny this date now
+                      fires immediately, so this is the optional note, offered after the fact.
+                      Only once, before a note exists, and only for a denied date — mirrors the
+                      card-level "Add a note" block above exactly. */}
+                  {openDecision.status === "DENIED" && !openDecision.comment && (
+                    addingNoteForDate === openChip.date ? (
+                      <div className="space-y-2">
+                        <textarea
+                          value={dateNoteText}
+                          onChange={(e) => setDateNoteText(e.target.value)}
+                          placeholder="Optional note for the team member…"
+                          rows={2}
+                          autoFocus
+                          className="w-full rounded-md border border-white/30 bg-white/90 px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-white placeholder:text-muted"
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAddingNoteForDate(null);
+                              setDateNoteText("");
+                            }}
+                            disabled={busy}
+                            className="rounded-full bg-white/15 border border-white/35 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-white/25 disabled:opacity-60"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!dateNoteText.trim()) return;
+                              onAddDateNote(openSubmission.id, openChip.date, dateNoteText);
+                              setAddingNoteForDate(null);
+                              setDateNoteText("");
+                            }}
+                            disabled={busy || !dateNoteText.trim()}
+                            className="rounded-full bg-white px-3.5 py-1.5 text-xs font-semibold shadow-sm disabled:opacity-60"
+                            style={{ color: tone.to }}
+                          >
+                            Save note
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setAddingNoteForDate(openChip.date)}
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-white/90 hover:text-white"
+                      >
+                        <span className="flex items-center justify-center h-4 w-4 rounded-full bg-white/25 text-[11px] leading-none">+</span>
+                        Add a note
+                      </button>
+                    )
                   )}
                 </div>
               )}
