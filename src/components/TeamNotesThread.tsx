@@ -44,6 +44,7 @@ export default function TeamNotesThread({
   topicId,
   topicDate,
   placeholder = "Write a message…",
+  fill = false,
   onMessagePosted,
   onRead,
 }: {
@@ -53,6 +54,13 @@ export default function TeamNotesThread({
   topicId?: string;
   topicDate?: string;
   placeholder?: string;
+  /** Desktop two-pane redesign (CB, Sept 2026, approved mockup): renders edge-to-edge, filling
+   *  its parent's height, instead of this thread's usual card chrome (own border/rounded
+   *  corners) and fixed max-height — used by MessagesInboxView's desktop right-hand pane, which
+   *  already supplies the border/background and just needs the thread to fill the space below
+   *  its own header. Defaults to false so every other caller (the employee's own /notes page,
+   *  /team/[employeeId], the admin card views) is completely unaffected. */
+  fill?: boolean;
   /** Fires after a message is successfully posted in this thread — lets a parent that shows a
    *  message-count badge for this same topic (TeamAvailabilityCards, TeamPtoCards,
    *  AvailabilityCalendar, TimesheetView) refresh its count right away instead of waiting for
@@ -148,8 +156,8 @@ export default function TeamNotesThread({
   }
 
   return (
-    <div className="bg-surface border border-border rounded-2xl overflow-hidden">
-      <div className="p-4 space-y-3 max-h-[28rem] overflow-y-auto">
+    <div className={fill ? "h-full flex flex-col" : "bg-surface border border-border rounded-2xl overflow-hidden"}>
+      <div className={fill ? "flex-1 min-h-0 overflow-y-auto p-4 space-y-3" : "p-4 space-y-3 max-h-[28rem] overflow-y-auto"}>
         {loadState === "loading" && (
           <div className="space-y-2">
             {[0, 1].map((i) => (
