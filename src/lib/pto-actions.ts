@@ -121,6 +121,38 @@ export async function decidePtoRequest(
 }
 
 /**
+ * Adds or replaces the reviewer's note on an already-decided PTO request, without touching the
+ * decision itself — same "optional, after the fact" comment as availability's
+ * addAvailabilityReviewComment, once Deny stopped requiring an explanation up front (CB, Sept
+ * 2026: "I shouldn't have to explain myself").
+ */
+export async function addPtoReviewComment(reviewer: CurrentEmployee, requestId: string, comment: string) {
+  const trimmed = comment.trim();
+  if (!trimmed) {
+    throw new InvalidPtoRequestError("A note is required.");
+  }
+  return withRlsContext({ employeeId: reviewer.id, role: reviewer.role }, async (tx) => {
+    const existing = await tx.ptoRequest.findUnique({ where: { id: requestId } });
+    if (!existing || existing.status === "PENDING") {
+      throw new InvalidPtoRequestError("Only a decided request can have a note added.");
+    }
+    const row = await tx.ptoRequest.update({
+      where: { id: requestId },
+      data: { reviewComment: trimmed },
+    });
+    await writeAuditLog(tx, {
+      actorId: reviewer.id,
+      action: "PTO_COMMENT_ADDED",
+      targetType: "PtoRequest",
+      targetId: row.id,
+      newValue: trimmed,
+      comment: trimmed,
+    });
+    return row;
+  });
+}
+
+/**
  * Reviewer walks back a decision they already made — same "unapprove" capability as
  * undecideAvailability, for PTO. Puts the request back to Pending and clears the review
  * fields, so it shows up in the Pending queue again exactly as if it had never been decided.
