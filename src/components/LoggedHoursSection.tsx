@@ -38,6 +38,16 @@ function dateKeyDaysAgo(daysAgo: number): string {
  * accordion header is the real heading when this renders there, so it's passed false. The
  * "Total, last N days" row at the bottom always shows regardless, since that's a real summary
  * rather than a label.
+ *
+ * Redesign (CB, Sept 2026, approved mockup): "I need logged hours to kinda look like" the blue
+ * "This Week" pill + "By day" list on dashboard/week/page.tsx. Added a matching hero pill above
+ * the entries list — same big-number, solid-color "widget" face TimeClockCard's hero variant and
+ * the This Week page both use — summarizing this section's own RECENT_DAYS window. Deliberately
+ * NOT the This Week widget's literal rolling 7 days: this section has always summarized
+ * RECENT_DAYS (90), and CB confirmed keeping that wider window rather than narrowing it to match
+ * This Week exactly. Everything below the hero — the entry rows, status pills, swipe/trash
+ * delete, Returned's "Edit & resubmit" — is unchanged; only the hero above it and the spacing
+ * around it are new.
  */
 export default function LoggedHoursSection({ showHeading = true }: { showHeading?: boolean }) {
   // CB, Sept 2026: "it should only show the times that we selected... a summary of what we
@@ -134,6 +144,8 @@ export default function LoggedHoursSection({ showHeading = true }: { showHeading
     }
   }
 
+  const totalMinutes = entries.reduce((sum, e) => sum + (e.totalMinutes ?? 0), 0);
+
   return (
     <div>
       {showHeading && <h2 className="text-sm font-medium text-muted mb-2">Logged hours</h2>}
@@ -154,62 +166,74 @@ export default function LoggedHoursSection({ showHeading = true }: { showHeading
         </div>
       )}
 
-      {/* CB, Sept 2026: "it should only show the times that we selected... a summary of what
-          we selected" — just the entries that exist, most recent first, same clean card/list
-          look as the time-off list elsewhere on this page (and MyAvailabilityPreview above): a
-          rounded card, divide-y rows, a status pill on the right. No placeholder rows for days
-          nothing happened, and no bordered spreadsheet-style table. TimesheetTable (the plain
-          table) stays as-is for the supervisor's own review view; this is its own rendering so
-          that page is unaffected. */}
       {loadState === "ready" && (
-        <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
-          {[...entries].reverse().map((entry) => {
-            // Mirrors deleteEmployeeTimeEntry's server-side rule exactly: Approved is locked no
-            // matter what, even an old zero-minute mistake — everything else can go if it's
-            // still Awaiting Approval, or has no recorded time at all.
-            const deletable =
-              entry.status !== "APPROVED" && (entry.status === "AWAITING_APPROVAL" || (entry.totalMinutes ?? 0) === 0);
-            const row = (
-              <TimesheetEntryRow
-                entry={entry}
-                correction={{ onSubmit: submitCorrection, busyEntryId, error: correctionError }}
-                del={{
-                  onDelete: deleteEntry,
-                  deletable,
-                  deleting: deletingEntryId === entry.id,
-                  error: deleteErrorEntryId === entry.id ? deleteError : undefined,
-                }}
-              />
-            );
-            // See the `deletable` comment above for the exact rule. The row itself now
-            // always shows its own trash-icon button when deletable (CB, Sept 2026: "aesthetic
-            // almost similar to... the widget where it's... color coded... reads cleanly" — see
-            // TimesheetEntryRow); the swipe gesture stays alongside it as a shortcut, same as
-            // MyAvailabilityPreview and TimeOffRequests both keep a visible button next to their
-            // own swipe action rather than relying on the swipe alone.
-            return deletable ? (
-              <SwipeReveal
-                key={entry.id}
-                actionSide="right"
-                actionLabel="Delete"
-                actionIcon={<TrashIcon className="h-4 w-4" />}
-                actionClassName="bg-rose-600 text-white"
-                busy={deletingEntryId === entry.id}
-                onAction={() => deleteEntry(entry.id)}
-              >
-                {row}
-              </SwipeReveal>
-            ) : (
-              <div key={entry.id}>{row}</div>
-            );
-          })}
-          <div className="px-4 py-3 flex items-center justify-between bg-black/[0.02] text-sm font-medium">
-            <span>Total, last {RECENT_DAYS} days</span>
-            <span className="tabular-nums">
-              {formatMinutes(entries.reduce((sum, e) => sum + (e.totalMinutes ?? 0), 0))}
-            </span>
+        <>
+          {/* Redesign (CB, Sept 2026, approved mockup): same big-number, solid-color "widget"
+              face as the This Week page's own hero pill (dashboard/week/page.tsx) — see this
+              component's own doc comment above for why this stays scoped to RECENT_DAYS rather
+              than a literal rolling week. */}
+          <div className="rounded-3xl p-6 text-white shadow-lg mb-4" style={{ background: "var(--ttc-blue)" }}>
+            <p className="text-xs uppercase tracking-wide text-white/70 mb-1">Total, last {RECENT_DAYS} days</p>
+            <p className="text-5xl font-bold tabular-nums leading-none tracking-tight">{formatMinutes(totalMinutes)}</p>
+            <p className="text-sm font-medium text-white/75 mt-2">
+              {entries.length} {entries.length === 1 ? "entry" : "entries"} logged
+            </p>
           </div>
-        </div>
+
+          {/* CB, Sept 2026: "it should only show the times that we selected... a summary of what
+              we selected" — just the entries that exist, most recent first, same clean card/list
+              look as the time-off list elsewhere on this page (and MyAvailabilityPreview above): a
+              rounded card, divide-y rows, a status pill on the right. No placeholder rows for days
+              nothing happened, and no bordered spreadsheet-style table. TimesheetTable (the plain
+              table) stays as-is for the supervisor's own review view; this is its own rendering so
+              that page is unaffected. */}
+          <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
+            {[...entries].reverse().map((entry) => {
+              // Mirrors deleteEmployeeTimeEntry's server-side rule exactly: Approved is locked no
+              // matter what, even an old zero-minute mistake — everything else can go if it's
+              // still Awaiting Approval, or has no recorded time at all.
+              const deletable =
+                entry.status !== "APPROVED" && (entry.status === "AWAITING_APPROVAL" || (entry.totalMinutes ?? 0) === 0);
+              const row = (
+                <TimesheetEntryRow
+                  entry={entry}
+                  correction={{ onSubmit: submitCorrection, busyEntryId, error: correctionError }}
+                  del={{
+                    onDelete: deleteEntry,
+                    deletable,
+                    deleting: deletingEntryId === entry.id,
+                    error: deleteErrorEntryId === entry.id ? deleteError : undefined,
+                  }}
+                />
+              );
+              // See the `deletable` comment above for the exact rule. The row itself now
+              // always shows its own trash-icon button when deletable (CB, Sept 2026: "aesthetic
+              // almost similar to... the widget where it's... color coded... reads cleanly" — see
+              // TimesheetEntryRow); the swipe gesture stays alongside it as a shortcut, same as
+              // MyAvailabilityPreview and TimeOffRequests both keep a visible button next to their
+              // own swipe action rather than relying on the swipe alone.
+              return deletable ? (
+                <SwipeReveal
+                  key={entry.id}
+                  actionSide="right"
+                  actionLabel="Delete"
+                  actionIcon={<TrashIcon className="h-4 w-4" />}
+                  actionClassName="bg-rose-600 text-white"
+                  busy={deletingEntryId === entry.id}
+                  onAction={() => deleteEntry(entry.id)}
+                >
+                  {row}
+                </SwipeReveal>
+              ) : (
+                <div key={entry.id}>{row}</div>
+              );
+            })}
+            <div className="px-4 py-3 flex items-center justify-between bg-black/[0.02] text-sm font-medium">
+              <span>Total, last {RECENT_DAYS} days</span>
+              <span className="tabular-nums">{formatMinutes(totalMinutes)}</span>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
