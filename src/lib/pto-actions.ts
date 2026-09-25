@@ -146,15 +146,27 @@ export async function listAdminPto(actor: CurrentEmployee): Promise<AdminPtoSumm
   if (!isAdmin(actor)) throw new ForbiddenError();
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    // reviewedBy included alongside employee (Sept 2026, CB: "I like the fact that it has a
+    // person who approved it") — PtoRequest already has this relation in prisma/schema.prisma
+    // (unlike Availability's per-date decisions, which live in a JSON column and need their own
+    // resolveReviewerNames pass), so a direct include is all this needs, pending rows included
+    // even though theirs is always null — simpler than branching the include per query.
+    const reviewerSelect = { select: { firstName: true, lastName: true, preferredName: true } } as const;
     const [pending, decided] = await Promise.all([
       tx.ptoRequest.findMany({
         where: { status: "PENDING" },
-        include: { employee: { select: { firstName: true, lastName: true, preferredName: true } } },
+        include: {
+          employee: { select: { firstName: true, lastName: true, preferredName: true } },
+          reviewedBy: reviewerSelect,
+        },
         orderBy: { createdAt: "asc" },
       }),
       tx.ptoRequest.findMany({
         where: { status: { in: ["APPROVED", "DENIED"] } },
-        include: { employee: { select: { firstName: true, lastName: true, preferredName: true } } },
+        include: {
+          employee: { select: { firstName: true, lastName: true, preferredName: true } },
+          reviewedBy: reviewerSelect,
+        },
         orderBy: { reviewedAt: "desc" },
         take: 200,
       }),
@@ -172,6 +184,9 @@ export async function listAdminPto(actor: CurrentEmployee): Promise<AdminPtoSumm
       status: r.status,
       reviewComment: r.reviewComment,
       reviewedAt: r.reviewedAt ? r.reviewedAt.toISOString() : null,
+      reviewedByName: r.reviewedBy
+        ? `${r.reviewedBy.preferredName || r.reviewedBy.firstName} ${r.reviewedBy.lastName}`
+        : null,
       createdAt: r.createdAt.toISOString(),
     });
 
