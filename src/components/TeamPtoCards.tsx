@@ -5,6 +5,7 @@ import PtoStatusPill from "@/components/PtoStatusPill";
 import TeamNotesThread from "@/components/TeamNotesThread";
 import { ChatIcon } from "@/components/icons";
 import { PTO_TYPE_LABEL, formatDateRange } from "@/lib/time";
+import { formatReviewedAt } from "@/lib/availability-format";
 import { toneForStatus, YOU_TONE } from "@/lib/status-tone";
 import type { AdminPtoRequestDTO, AdminPtoSummaryDTO, TeamNoteTopicCountDTO } from "@/types";
 
@@ -263,6 +264,20 @@ function Card({
                 </>
               )}
             </div>
+            {/* CB, Sept 2026: "I like the fact that it has a person who approved it, but I need
+                to know the time and the date that it was approved as well" — same reviewer-name
+                + date/time treatment TeamAvailabilityCards already shows. reviewedByName is null
+                exactly when isPending is true, so no separate status check needed here either. */}
+            {r.reviewedByName && (
+              <p className="text-xs font-medium text-white mt-0.5">
+                {r.status === "APPROVED" ? "Approved" : "Denied"} by {r.reviewedByName}
+                {r.reviewedAt && (
+                  <span className="block text-[11px] font-normal text-white/75 mt-0.5">
+                    {formatReviewedAt(r.reviewedAt)}
+                  </span>
+                )}
+              </p>
+            )}
           </div>
         </div>
         <span className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center shrink-0" title="Tap below to message about this request">
