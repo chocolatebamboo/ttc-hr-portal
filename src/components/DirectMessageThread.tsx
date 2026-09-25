@@ -144,6 +144,7 @@ export default function DirectMessageThread({
   onInitialRefConsumed,
   onMessagePosted,
   onRead,
+  fill = false,
 }: {
   otherEmployeeId: string;
   viewerId: string;
@@ -167,6 +168,12 @@ export default function DirectMessageThread({
    *  read for the viewer server-side (see its own comment in src/lib/direct-messages.ts). Same
    *  reasoning as TeamNotesThread's own onRead. */
   onRead?: () => void;
+  /** Desktop two-pane redesign (CB, Sept 2026, approved mockup): renders edge-to-edge, filling
+   *  its parent's height, instead of this thread's usual card chrome (own border/rounded
+   *  corners) and fixed max-height — see TeamNotesThread's own `fill` doc comment, which this
+   *  mirrors exactly. Defaults to false so the mobile inline-accordion rendering (and every
+   *  other caller) is completely unaffected. */
+  fill?: boolean;
 }) {
   const [messages, setMessages] = useState<DirectMessageDTO[]>([]);
   const [otherLastReadAt, setOtherLastReadAt] = useState<string | null>(null);
@@ -389,8 +396,8 @@ export default function DirectMessageThread({
   const lastMineId = [...messages].reverse().find((m) => m.senderId === viewerId)?.id ?? null;
 
   return (
-    <div className="bg-surface border border-border rounded-2xl overflow-hidden">
-      <div className="p-4 space-y-3 max-h-[28rem] overflow-y-auto">
+    <div className={fill ? "h-full flex flex-col" : "bg-surface border border-border rounded-2xl overflow-hidden"}>
+      <div className={fill ? "flex-1 min-h-0 overflow-y-auto p-4 space-y-3" : "p-4 space-y-3 max-h-[28rem] overflow-y-auto"}>
         {loadState === "loading" && (
           <div className="space-y-2">
             {[0, 1].map((i) => (
