@@ -196,6 +196,11 @@ export interface PtoRequestDTO {
 export interface AdminPtoRequestDTO extends PtoRequestDTO {
   employeeId: string;
   employeeName: string;
+  /** CB, Sept 2026: "I like the fact that it has a person who approved it" — the reviewer's
+   *  name, resolved server-side in listAdminPto (src/lib/pto-actions.ts) from reviewedById via
+   *  PtoRequest's own `reviewedBy` relation. Null exactly when reviewedAt is null (still
+   *  PENDING, or reopened via Undo) — same convention AvailabilityDTO.reviewedByName uses. */
+  reviewedByName: string | null;
 }
 
 /** GET /api/admin/pto's response — a pending queue for HR to act on, and everything already
@@ -971,74 +976,3 @@ export interface AnnouncementAdminDTO {
  *  for one employee in the chosen period, and nothing more: no rate, no dollar amount, no tax
  *  withholding. See src/lib/payroll.ts for exactly what counts toward each column. */
 export interface PayrollHoursRowDTO {
-  employeeId: string;
-  employeeCode: string;
-  name: string;
-  department: string | null;
-  regularHours: number;
-  vacationHours: number;
-  sickHours: number;
-  personalHours: number;
-  otherLeaveHours: number;
-  totalHours: number;
-}
-
-export interface PayrollHoursReportDTO {
-  startDate: string; // ISO date, e.g. "2026-08-01"
-  endDate: string;
-  rows: PayrollHoursRowDTO[];
-  /** Time entries that overlap the period but aren't Approved yet — their hours are excluded
-   *  from every row above, so a nonzero count here means the export is likely incomplete. */
-  unapprovedEntryCount: number;
-}
-
-/** Phase 4 (client spec, Sept 2026): "a real in-app notification feed" — see Notification's own
- *  doc comment in prisma/schema.prisma for the full list and why each one exists. */
-export type NotificationType =
-  | "SHIFT_CREATED"
-  | "SHIFT_CANCELLED"
-  | "SHIFT_REASSIGNED"
-  | "SHIFT_CHANGE_APPROVED"
-  | "SHIFT_REQUEST_DECLINED"
-  | "SHIFT_REQUEST_RECEIVED"
-  | "AVAILABILITY_APPROVED"
-  | "AVAILABILITY_DENIED"
-  | "AVAILABILITY_ADJUSTMENT_PROPOSED"
-  | "PTO_APPROVED"
-  | "PTO_DENIED"
-  | "DATE_TASK_ASSIGNED"
-  | "DATE_TASK_APPROVED"
-  | "DATE_TASK_RETURNED";
-
-export interface NotificationDTO {
-  id: string;
-  type: NotificationType;
-  title: string;
-  body: string | null;
-  targetType: string;
-  targetId: string;
-  read: boolean;
-  createdAt: string; // ISO
-}
-
-/** One row of Reports > Activity History (client spec, Sept 2026: "Reports and Activity History
- *  views") — admin-only reading of the existing AuditLog table (prisma/schema.prisma), which
- *  every phase from 1 onward has already been writing to. `actorName`/`targetLabel` are resolved
- *  server-side (src/lib/activity.ts) so the UI never has to re-fetch the actor or target record
- *  just to render a readable row. */
-export interface ActivityLogEntryDTO {
-  id: string;
-  actorId: string;
-  actorName: string;
-  action: string;
-  targetType: string;
-  targetId: string;
-  /** A short human label for what targetId actually refers to, when it can be resolved (e.g. a
-   *  Shift's own employee name + date) — falls back to targetType if the target row is gone or
-   *  isn't a type this view knows how to label yet. */
-  targetLabel: string;
-  oldValue: string | null;
-  newValue: string | null;
-  comment: string | null;
-  createdAt: string; // ISO
-}
