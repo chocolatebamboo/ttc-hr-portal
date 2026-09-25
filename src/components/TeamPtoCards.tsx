@@ -48,8 +48,15 @@ export default function TeamPtoCards({ viewerId }: { viewerId: string }) {
   const [summary, setSummary] = useState<AdminPtoSummaryDTO | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [denyingId, setDenyingId] = useState<string | null>(null);
-  const [denyComment, setDenyComment] = useState("");
+  // CB, Sept 2026: "I shouldn't have to explain myself" — Deny now fires immediately, matching
+  // Approve, same change as TeamAvailabilityCards. This is the optional note, offered afterward
+  // instead of gating the click: which request (if any) has its note box open, the text in it,
+  // and a small error slot for a failed save (decide()/undo() below don't otherwise surface
+  // errors, but silently losing a typed note is worth telling CB about).
+  const [addingNoteId, setAddingNoteId] = useState<string | null>(null);
+  const [noteText, setNoteText] = useState("");
+  const [noteError, setNoteError] = useState<string | undefined>();
+  const [noteErrorId, setNoteErrorId] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [messageCounts, setMessageCounts] = useState<Map<string, number>>(new Map());
 
@@ -95,8 +102,6 @@ export default function TeamPtoCards({ viewerId }: { viewerId: string }) {
       });
     } finally {
       setBusyId(null);
-      setDenyingId(null);
-      setDenyComment("");
       load();
     }
   }
@@ -108,6 +113,37 @@ export default function TeamPtoCards({ viewerId }: { viewerId: string }) {
     } finally {
       setBusyId(null);
       load();
+    }
+  }
+
+  // CB, Sept 2026: "if I want to make a comment, that should be an optional thing" — now that
+  // Deny fires immediately with no comment step, this is that comment, added afterward instead
+  // of gating the click. Only valid once the request is already decided (see
+  // addPtoReviewComment's own guard in src/lib/pto-actions.ts).
+  async function addNote(id: string, comment: string) {
+    setBusyId(id);
+    setNoteError(undefined);
+    setNoteErrorId(null);
+    try {
+      const res = await fetch(`/api/pto/requests/${id}/comment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setNoteError(data.error ?? "Unable to save that note. Please try again.");
+        setNoteErrorId(id);
+        return;
+      }
+      setAddingNoteId(null);
+      setNoteText("");
+      load();
+    } catch {
+      setNoteError("Couldn't reach the server. Check your connection and try again.");
+      setNoteErrorId(id);
+    } finally {
+      setBusyId(null);
     }
   }
 
@@ -148,13 +184,15 @@ export default function TeamPtoCards({ viewerId }: { viewerId: string }) {
                 row={r}
                 viewerId={viewerId}
                 busy={busyId === r.id}
-                denying={denyingId === r.id}
-                denyComment={denyComment}
+                addingNote={addingNoteId === r.id}
+                noteText={noteText}
+                noteError={noteErrorId === r.id ? noteError : undefined}
                 open={openId === r.id}
                 messageCounts={messageCounts}
                 onToggleOpen={() => setOpenId(openId === r.id ? null : r.id)}
-                onDenyToggle={() => setDenyingId(denyingId === r.id ? null : r.id)}
-                onDenyCommentChange={setDenyComment}
+                onAddNoteToggle={() => setAddingNoteId(addingNoteId === r.id ? null : r.id)}
+                onNoteTextChange={setNoteText}
+                onAddNote={addNote}
                 onDecide={decide}
                 onUndo={undo}
                 onMessagePosted={loadCounts}
@@ -176,13 +214,15 @@ export default function TeamPtoCards({ viewerId }: { viewerId: string }) {
                 row={r}
                 viewerId={viewerId}
                 busy={busyId === r.id}
-                denying={false}
-                denyComment=""
+                addingNote={addingNoteId === r.id}
+                noteText={noteText}
+                noteError={noteErrorId === r.id ? noteError : undefined}
                 open={openId === r.id}
                 messageCounts={messageCounts}
                 onToggleOpen={() => setOpenId(openId === r.id ? null : r.id)}
-                onDenyToggle={() => {}}
-                onDenyCommentChange={() => {}}
+                onAddNoteToggle={() => setAddingNoteId(addingNoteId === r.id ? null : r.id)}
+                onNoteTextChange={setNoteText}
+                onAddNote={addNote}
                 onDecide={() => {}}
                 onUndo={undo}
                 onMessagePosted={loadCounts}
@@ -199,13 +239,15 @@ function Card({
   row: r,
   viewerId,
   busy,
-  denying,
-  denyComment,
+  addingNote,
+  noteText,
+  noteError,
   open,
   messageCounts,
   onToggleOpen,
-  onDenyToggle,
-  onDenyCommentChange,
+  onAddNoteToggle,
+  onNoteTextChange,
+  onAddNote,
   onDecide,
   onUndo,
   onMessagePosted,
@@ -213,13 +255,21 @@ function Card({
   row: AdminPtoRequestDTO;
   viewerId: string;
   busy: boolean;
-  denying: boolean;
-  denyComment: string;
+  /** CB, Sept 2026: "I shouldn't have to explain myself" — Deny fires immediately now, same as
+   *  Approve (onDecide below), so these no longer gate the click. They drive the OPTIONAL note,
+   *  offered afterward instead — whether this card's note box is open, the text in it, and a
+   *  failed-save message. */
+  addingNote: boolean;
+  noteText: string;
+  noteError?: string;
   open: boolean;
   messageCounts: Map<string, number>;
   onToggleOpen: () => void;
-  onDenyToggle: () => void;
-  onDenyCommentChange: (v: string) => void;
+  onAddNoteToggle: () => void;
+  onNoteTextChange: (v: string) => void;
+  /** Saves the note typed into the box above onto an already-decided request — see
+   *  addPtoReviewComment's own doc comment in src/lib/pto-actions.ts. */
+  onAddNote: (id: string, comment: string) => void;
   onDecide: (id: string, decision: "APPROVED" | "DENIED", comment?: string) => void;
   onUndo: (id: string) => void;
   onMessagePosted: () => void;
@@ -327,7 +377,7 @@ function Card({
             Approve
           </button>
           <button
-            onClick={onDenyToggle}
+            onClick={() => onDecide(r.id, "DENIED")}
             disabled={busy}
             className="rounded-full bg-white/15 border border-white/35 px-4 py-2 text-sm font-semibold text-white hover:bg-white/25 disabled:opacity-60"
           >
@@ -336,36 +386,52 @@ function Card({
         </div>
       )}
 
-      {denying && (
-        <div className="mt-3 space-y-2.5 bg-white/15 rounded-xl p-3">
-          <textarea
-            value={denyComment}
-            onChange={(e) => onDenyCommentChange(e.target.value)}
-            placeholder="Optional note for the team member…"
-            rows={2}
-            className="w-full rounded-md border border-white/30 bg-white/90 px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-white placeholder:text-muted"
-          />
-          <div className="flex items-center gap-2">
-            {/* Same "no way back" fix as TeamAvailabilityCards' deny box — CB, Sept 2026. */}
-            <button
-              type="button"
-              onClick={onDenyToggle}
-              disabled={busy}
-              className="rounded-full bg-white/15 border border-white/35 px-4 py-2 text-sm font-semibold text-white hover:bg-white/25 disabled:opacity-60"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => onDecide(r.id, "DENIED", denyComment.trim() || undefined)}
-              disabled={busy}
-              className="rounded-full bg-white px-4 py-2 text-sm font-semibold shadow-sm"
-              style={{ color: tone.to }}
-            >
-              Confirm deny
-            </button>
+      {/* CB, Sept 2026: "I shouldn't have to explain myself" — Deny above now fires immediately,
+          same as Approve. This is the optional note, offered afterward instead of gating the
+          click, and only once — before a note exists; editing an existing one isn't supported
+          yet. Same pattern as TeamAvailabilityCards' matching "Add a note" block. */}
+      {r.status === "DENIED" && !r.reviewComment && (
+        addingNote ? (
+          <div className="mt-3 space-y-2.5 bg-white/15 rounded-xl p-3">
+            <textarea
+              value={noteText}
+              onChange={(e) => onNoteTextChange(e.target.value)}
+              placeholder="Optional note for the team member…"
+              rows={2}
+              autoFocus
+              className="w-full rounded-md border border-white/30 bg-white/90 px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-white placeholder:text-muted"
+            />
+            {noteError && <p className="text-xs font-medium text-rose-50">{noteError}</p>}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onAddNoteToggle}
+                disabled={busy}
+                className="rounded-full bg-white/15 border border-white/35 px-4 py-2 text-sm font-semibold text-white hover:bg-white/25 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => noteText.trim() && onAddNote(r.id, noteText)}
+                disabled={busy || !noteText.trim()}
+                className="rounded-full bg-white px-4 py-2 text-sm font-semibold shadow-sm disabled:opacity-60"
+                style={{ color: tone.to }}
+              >
+                Save note
+              </button>
+            </div>
           </div>
-        </div>
+        ) : (
+          <button
+            type="button"
+            onClick={onAddNoteToggle}
+            className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-white/90 hover:text-white"
+          >
+            <span className="flex items-center justify-center h-4 w-4 rounded-full bg-white/25 text-[11px] leading-none">+</span>
+            Add a note for {r.employeeName}
+          </button>
+        )
       )}
 
       {open && (
