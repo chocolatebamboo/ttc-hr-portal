@@ -435,7 +435,7 @@ export { useTeamAvailabilityQueue };
  *  one submission (see groupByEmployee below), in which case Card renders it identically to how
  *  a single row always has; only a genuinely merged group (the same employee with more than one
  *  submission in this section) changes anything visible — see Card's own doc comment. */
-type FolderGroup = {
+export type FolderGroup = {
   employeeId: string;
   employeeName: string;
   submissions: AdminAvailabilityDTO[];
@@ -451,8 +451,13 @@ type FolderGroup = {
  * FIRST row in it (Pending stays oldest-submitted-first, Decided stays most-recently-reviewed-
  * first — see listAdminAvailability's own orderBy in src/lib/availability.ts). A person with
  * only one submission in this section — the normal case — produces a group of exactly one.
+ *
+ * Exported (round two, Sept 2026) so TeamAvailabilityRequestsSection's dashboard widget can
+ * group its own Pending rows the same way — CB: "I'm still seeing a separate card for each
+ * schedule [on the homepage widget]. These should be grouped into one card, similar to how they
+ * appear on the Availability page." The first pass only reached this file's own render below.
  */
-function groupByEmployee(rows: AdminAvailabilityDTO[]): FolderGroup[] {
+export function groupByEmployee(rows: AdminAvailabilityDTO[]): FolderGroup[] {
   const order: string[] = [];
   const byEmployee = new Map<string, AdminAvailabilityDTO[]>();
   for (const row of rows) {
