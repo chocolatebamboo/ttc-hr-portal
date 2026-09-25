@@ -821,7 +821,10 @@ export function Card({
   const fullyDecided = solo ? allDatesDecided(solo.dateDecisions) : false;
 
   const [editingDates, setEditingDates] = useState(false);
-  const [confirmRemoveDate, setConfirmRemoveDate] = useState<string | null>(null);
+  // Carries which submission the date belongs to, not just the date — a merged card can have
+  // the same calendar date on more than one underlying request in principle, and removeDate
+  // needs to know exactly which one this confirmation is acting on.
+  const [confirmRemoveDate, setConfirmRemoveDate] = useState<{ submissionId: string; date: string } | null>(null);
   // Per-date deny's own comment box — mirrors the bulk denyComment/denying pair above, just
   // scoped to whichever date is currently open rather than the whole card.
   const [denyingDate, setDenyingDate] = useState<string | null>(null);
@@ -876,10 +879,16 @@ export function Card({
   // CB, Sept 2026: the per-date minus lives behind an Edit/Done toggle so it's opt-in, not
   // sitting on every card by default. Eligible on the same PENDING/DENIED requests
   // removeAvailabilityDateForReview allows — a Decided-but-Approved card never gets this.
-  // Folder-card grouping: scoped to the unmerged case only — a merged card's dates already
-  // belong to different submissions, each with their own status, so "trim a date off THIS
-  // request" only has one unambiguous request to mean while there's just one.
-  const canEditDates = solo !== null && (solo.status === "PENDING" || solo.status === "DENIED") && chips.length > 1;
+  // Folder-card grouping, correction (Sept 2026): each chip already remembers which submission
+  // it belongs to (FolderChip.submissionId) and onRemoveDate already takes a submissionId, so a
+  // merged card can offer this per-chip exactly like a solo one does — there's no real ambiguity
+  // once the button lives on the individual chip. `editableSubmissionIds` is which of this
+  // card's underlying submissions are eligible at all; the Edit toggle itself shows once at
+  // least one chip qualifies, and the "−" only renders on chips that do.
+  const editableSubmissionIds = new Set(
+    submissions.filter((s) => s.status === "PENDING" || s.status === "DENIED").map((s) => s.id)
+  );
+  const canEditDates = chips.length > 1 && chips.some((c) => editableSubmissionIds.has(c.submissionId));
 
   function startAdjustDate(date: string, seedStart: string, seedEnd: string) {
     setAdjustingDate(date);
@@ -1019,12 +1028,12 @@ export function Card({
                   <span className={`text-xs font-semibold ${active ? "" : "text-white"}`}>{c.dateLabel}</span>
                   <span className={`text-[11px] ${active ? "opacity-70" : "text-white/80"}`}>{c.timeLabel}</span>
                 </button>
-                {editingDates && (
+                {editingDates && editableSubmissionIds.has(c.submissionId) && (
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      setConfirmRemoveDate(c.date);
+                      setConfirmRemoveDate({ submissionId: c.submissionId, date: c.date });
                     }}
                     aria-label={`Remove ${c.dateLabel}`}
                     className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-rose-600 text-white text-xs leading-none flex items-center justify-center border-2 shadow-sm"
@@ -1041,10 +1050,15 @@ export function Card({
         <p className="text-sm text-white/80 mt-2">No dates marked available.</p>
       )}
 
-      {editingDates && confirmRemoveDate && solo && (
+      {editingDates && confirmRemoveDate && (
         <div className="mt-2.5 bg-black/20 rounded-xl p-3">
           <p className="text-sm font-semibold text-white">
-            Remove {chips.find((c) => c.date === confirmRemoveDate)?.dateLabel} from this request?
+            Remove{" "}
+            {
+              chips.find((c) => c.submissionId === confirmRemoveDate.submissionId && c.date === confirmRemoveDate.date)
+                ?.dateLabel
+            }{" "}
+            from this request?
           </p>
           <p className="text-xs text-white/80 mt-1">
             Just this date drops off, the rest of the request stays exactly as it is. {employeeName} isn&apos;t notified.
@@ -1061,7 +1075,7 @@ export function Card({
             <button
               type="button"
               onClick={() => {
-                onRemoveDate(solo.id, confirmRemoveDate);
+                onRemoveDate(confirmRemoveDate.submissionId, confirmRemoveDate.date);
                 setConfirmRemoveDate(null);
               }}
               disabled={busy}
