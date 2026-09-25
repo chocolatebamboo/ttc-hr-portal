@@ -337,22 +337,34 @@ function Card({
       )}
 
       {denying && (
-        <div className="mt-3 flex flex-col sm:flex-row gap-2 bg-white/15 rounded-xl p-3">
+        <div className="mt-3 space-y-2.5 bg-white/15 rounded-xl p-3">
           <textarea
             value={denyComment}
             onChange={(e) => onDenyCommentChange(e.target.value)}
             placeholder="Optional note for the team member…"
             rows={2}
-            className="flex-1 rounded-md border border-white/30 bg-white/90 px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-white placeholder:text-muted"
+            className="w-full rounded-md border border-white/30 bg-white/90 px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-white placeholder:text-muted"
           />
-          <button
-            onClick={() => onDecide(r.id, "DENIED", denyComment.trim() || undefined)}
-            disabled={busy}
-            className="rounded-full bg-white px-4 py-2 text-sm font-semibold self-start shadow-sm"
-            style={{ color: tone.to }}
-          >
-            Confirm deny
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Same "no way back" fix as TeamAvailabilityCards' deny box — CB, Sept 2026. */}
+            <button
+              type="button"
+              onClick={onDenyToggle}
+              disabled={busy}
+              className="rounded-full bg-white/15 border border-white/35 px-4 py-2 text-sm font-semibold text-white hover:bg-white/25 disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => onDecide(r.id, "DENIED", denyComment.trim() || undefined)}
+              disabled={busy}
+              className="rounded-full bg-white px-4 py-2 text-sm font-semibold shadow-sm"
+              style={{ color: tone.to }}
+            >
+              Confirm deny
+            </button>
+          </div>
         </div>
       )}
 
