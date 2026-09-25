@@ -37,6 +37,25 @@ function toDTO(row: NotificationRow): NotificationDTO {
  * should never have existed either. Same "write it inside the same tx as the audit log" shape
  * writeShiftAuditLog already uses in src/lib/shifts.ts, just for the newer recipient-facing
  * table instead of (or, at the four new call sites in phase 4, alongside) AuditLog.
+ *
+ * Hotfix (Sept 2026): switched from tx.notification.create() to createMany() — the exact same
+ * fix, for the exact same reason, as src/lib/audit-log.ts's own hotfix (see that file's doc
+ * comment for the full mechanism). Prisma's create() compiles to `INSERT ... RETURNING`, and
+ * RETURNING is subject to the table's SELECT policy, not just its INSERT with-check — so
+ * Postgres re-checks the just-inserted row against notification_select (prisma/rls.sql), which
+ * is `"recipientId" = current_employee_id()`. A notification is *always* written for someone
+ * other than the actor doing the reviewing/approving/denying (that's the whole point of this
+ * table — this doc comment says so two paragraphs up), so recipientId never equals the acting
+ * reviewer's own current_employee_id(), and every single write failed with "new row violates
+ * row-level security policy for table \"Notification\"" (Postgres code 42501) — silently
+ * rolling back the entire enclosing transaction (the approval/denial/shift/PTO/task action
+ * itself, and its audit log entry, included) and surfacing as the generic "Something went
+ * wrong" error across every flow that calls this function. createMany() never issues RETURNING
+ * (it returns only a row count), so only notification_insert's `with check (true)` applies —
+ * same row lands either way, same recipient-only read access afterward, just no attempt to
+ * hand the row back to a caller who was never allowed to read someone else's notification in
+ * the first place. Confirmed directly against the live database (both the failure and the fix)
+ * before shipping this.
  */
 export async function writeNotification(
   tx: PrismaClient,
@@ -49,15 +68,17 @@ export async function writeNotification(
     targetId: string;
   }
 ): Promise<void> {
-  await tx.notification.create({
-    data: {
-      recipientId: params.recipientId,
-      type: params.type,
-      title: params.title,
-      body: params.body ?? null,
-      targetType: params.targetType,
-      targetId: params.targetId,
-    },
+  await tx.notification.createMany({
+    data: [
+      {
+        recipientId: params.recipientId,
+        type: params.type,
+        title: params.title,
+        body: params.body ?? null,
+        targetType: params.targetType,
+        targetId: params.targetId,
+      },
+    ],
   });
 }
 
