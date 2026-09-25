@@ -18,6 +18,20 @@ export function formatSlotDate(dateKey: string): string {
   });
 }
 
+/** Full ISO timestamp -> "Sep 24 at 4:12 PM" — the secondary line under "Approved by [name]" /
+ *  "Denied by [name]" on TeamAvailabilityCards and TeamPtoCards. CB, Sept 2026: "I like the
+ *  fact that it has a person who approved it, but I need to know the time and the date that it
+ *  was approved as well." Deliberately shorter than formatSlotDate (no weekday, no year) since
+ *  it always sits right next to who did it and right after the action happened — the year and
+ *  day-of-week would be redundant noise on a line this small. Renders in the viewer's own local
+ *  time zone, same as every other date/time display in this app. */
+export function formatReviewedAt(iso: string): string {
+  const d = new Date(iso);
+  const datePart = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const timePart = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${datePart} at ${timePart}`;
+}
+
 /** One slot per line, earliest date first — "Thu, Sep 17: 9:00 AM – 5:00 PM". */
 export function describeSlots(slots: AvailabilitySlot[]): string[] {
   return [...slots]
