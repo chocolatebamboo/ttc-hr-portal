@@ -1127,22 +1127,36 @@ export function Card({
       {decideError && <p className="text-xs font-medium text-rose-50 mt-2">{decideError}</p>}
 
       {denying && solo && (
-        <div className="mt-3 flex flex-col sm:flex-row gap-2 bg-white/15 rounded-xl p-3">
+        <div className="mt-3 space-y-2.5 bg-white/15 rounded-xl p-3">
           <textarea
             value={denyComment}
             onChange={(e) => onDenyCommentChange(e.target.value)}
             placeholder="Optional note for the team member…"
             rows={2}
-            className="flex-1 rounded-md border border-white/30 bg-white/90 px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-white placeholder:text-muted"
+            className="w-full rounded-md border border-white/30 bg-white/90 px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-white placeholder:text-muted"
           />
-          <button
-            onClick={() => onDecide(solo.id, "DENIED", denyComment.trim() || undefined)}
-            disabled={busy}
-            className="rounded-full bg-white px-4 py-2 text-sm font-semibold self-start shadow-sm"
-            style={{ color: tone.to }}
-          >
-            Confirm deny
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Same explicit Cancel as the per-date deny box just below — clicking Deny again
+                above would already toggle this closed (onDenyToggle), but that wasn't an obvious
+                way back, so this spells it out. */}
+            <button
+              type="button"
+              onClick={onDenyToggle}
+              disabled={busy}
+              className="rounded-full bg-white/15 border border-white/35 px-4 py-2 text-sm font-semibold text-white hover:bg-white/25 disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => onDecide(solo.id, "DENIED", denyComment.trim() || undefined)}
+              disabled={busy}
+              className="rounded-full bg-white px-4 py-2 text-sm font-semibold shadow-sm"
+              style={{ color: tone.to }}
+            >
+              Confirm deny
+            </button>
+          </div>
         </div>
       )}
 
@@ -1249,26 +1263,46 @@ export function Card({
                     </div>
                   </div>
                 ) : denyingDate === openChip.date ? (
-                  <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="space-y-2.5">
                     <textarea
                       value={denyDateComment}
                       onChange={(e) => setDenyDateComment(e.target.value)}
                       placeholder="Optional note for the team member…"
                       rows={2}
-                      className="flex-1 rounded-md border border-white/30 bg-white/90 px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-white placeholder:text-muted"
+                      className="w-full rounded-md border border-white/30 bg-white/90 px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-white placeholder:text-muted"
                     />
-                    <button
-                      onClick={() => {
-                        onDecideDate(openSubmission.id, openChip.date, "DENIED", denyDateComment.trim() || undefined);
-                        setDenyingDate(null);
-                        setDenyDateComment("");
-                      }}
-                      disabled={busy}
-                      className="rounded-full bg-white px-3.5 py-1.5 text-xs font-semibold self-start shadow-sm"
-                      style={{ color: tone.to }}
-                    >
-                      Confirm deny
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {/* CB, Sept 2026: "once you click deny... there's no way to kind of go
+                          back to it" — this used to have no exit except actually confirming the
+                          deny. Cancel here matches the one "Change date/time" already has just
+                          below, and just clears denyingDate so the three-button row (Approve
+                          this date / Deny this date / Change date/time / Message about this
+                          date) comes back exactly as it was. */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDenyingDate(null);
+                          setDenyDateComment("");
+                        }}
+                        disabled={busy}
+                        className="rounded-full bg-white/15 border border-white/35 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-white/25 disabled:opacity-60"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onDecideDate(openSubmission.id, openChip.date, "DENIED", denyDateComment.trim() || undefined);
+                          setDenyingDate(null);
+                          setDenyDateComment("");
+                        }}
+                        disabled={busy}
+                        className="rounded-full bg-white px-3.5 py-1.5 text-xs font-semibold shadow-sm"
+                        style={{ color: tone.to }}
+                      >
+                        Confirm deny
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <div className="flex items-center gap-2 flex-wrap">
