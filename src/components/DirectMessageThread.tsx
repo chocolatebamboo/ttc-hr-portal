@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { DownloadIcon, ChecklistIcon, CalendarIcon, ReplyIcon, LockIcon } from "@/components/icons";
+import { DownloadIcon, ChecklistIcon, CalendarIcon, LockIcon, ClockIcon, ChatIcon } from "@/components/icons";
 import { QUICK_REACTION_EMOJIS } from "@/types";
-import type { DirectMessageDTO, DirectMessageThreadDTO, DirectoryEntryDTO } from "@/types";
+import type { DirectMessageDTO, DirectMessageThreadDTO, DirectScheduledMessageDTO, DirectoryEntryDTO } from "@/types";
 
 /** What a "Message about this date" link (Phase 5d) or an already-sent message's own `ref`
  *  actually is today — only ever AVAILABILITY_DATE from the client side (see postMessage's own
@@ -28,10 +28,8 @@ function formatRefDate(dateKey: string): string {
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
-/** A one-line preview of a message's content — used for both the reply-preview card rendered
- *  above a message that quotes another one, and the "replying to…" draft banner above the
- *  compose box. Mirrors how `m.body`/`m.hasAttachment` already render in the bubble itself, just
- *  squeezed to one line. */
+/** A one-line preview of a message's content — used for the "Scheduled" queue list. Mirrors how
+ *  `m.body`/`m.hasAttachment` already render in the bubble itself, just squeezed to one line. */
 function previewText(m: { body: string; hasAttachment: boolean; attachmentName?: string | null }): string {
   if (m.body) return m.body;
   if (m.hasAttachment) return m.attachmentName || "Attachment";
@@ -77,6 +75,258 @@ function detectMentionTrigger(text: string, cursor: number): { start: number; qu
   return { start: at, query };
 }
 
+/** "today at 3:45 PM" / "Sep 28 at 9:00 AM" style label for a pending scheduled message — just
+ *  enough precision to tell it apart from another one queued the same day, without pulling in a
+ *  date library for one small label. */
+function formatScheduledFor(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  if (sameDay) return `today at ${time}`;
+  const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return `${date} at ${time}`;
+}
+
+/** A message's always-visible quick-reaction row (Sept 2026 reply-chain redesign, CB-confirmed:
+ *  "always-visible row" rather than the previous tap/hover-to-reveal toolbar). All six
+ *  QUICK_REACTION_EMOJIS render every time, not just the ones already in use — tapping one
+ *  toggles it on/off for the viewer; a count badge only shows once someone's actually reacted.
+ *  Shared between a top-level message and a reply inside an open thread panel, so this is its
+ *  own small component rather than inlined twice. */
+function ReactionRow({
+  reactions,
+  busy,
+  onToggle,
+}: {
+  reactions: DirectMessageDTO["reactions"];
+  busy: boolean;
+  onToggle: (emoji: string) => void;
+}) {
+  const byEmoji = new Map(reactions.map((r) => [r.emoji, r]));
+  return (
+    <div className="flex flex-wrap gap-1 mt-1">
+      {QUICK_REACTION_EMOJIS.map((emoji) => {
+        const r = byEmoji.get(emoji);
+        return (
+          <button
+            key={emoji}
+            type="button"
+            onClick={() => onToggle(emoji)}
+            disabled={busy}
+            className={`flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs disabled:opacity-60 ${
+              r?.reactedByMe ? "bg-accent/15 border-accent" : "bg-black/[0.03] border-border hover:bg-black/[0.06]"
+            }`}
+          >
+            <span>{emoji}</span>
+            {r && r.count > 0 && <span className="font-medium text-muted">{r.count}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The small text-link action row under a message — Reply (or "N replies →" once a thread
+ *  exists), Add internal note (staff only), Schedule message. Sept 2026 reply-chain redesign:
+ *  replaces the old floating icon-only toolbar that used to open on tap/hover above the bubble
+ *  (that toolbar's `-top-11` positioning is also what caused the mobile clipping bug fixed
+ *  earlier this same round — an always-in-flow row like this can't be clipped by the thread's
+ *  own scroll container the way an absolutely-positioned one poking above it could). "Schedule
+ *  message" always opens the SAME shared composer at the bottom of the whole thread (see
+ *  `onSchedule` below) — it starts a new message to this conversation, not a reply anchored to
+ *  whichever message's row you tapped it from; the mockup put one "Schedule message" entry per
+ *  message, but there's only ever one thing to schedule (a fresh message), so this keeps a single
+ *  shared composer rather than duplicating scheduling state per message. */
+function MessageActionRow({
+  replyCount,
+  canUseInternalNotes,
+  onReply,
+  onNote,
+  onSchedule,
+}: {
+  replyCount?: number;
+  canUseInternalNotes: boolean;
+  onReply?: () => void;
+  onNote: () => void;
+  onSchedule: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs font-medium text-muted">
+      {onReply && (
+        <button type="button" onClick={onReply} className="flex items-center gap-1 hover:text-accent-ink">
+          <ChatIcon className="h-3.5 w-3.5" />
+          {replyCount && replyCount > 0 ? `${replyCount} ${replyCount === 1 ? "reply" : "replies"} →` : "Reply"}
+        </button>
+      )}
+      {canUseInternalNotes && (
+        <button type="button" onClick={onNote} className="flex items-center gap-1 hover:text-accent-ink">
+          <LockIcon className="h-3 w-3" />
+          Add internal note
+        </button>
+      )}
+      <button type="button" onClick={onSchedule} className="flex items-center gap-1 hover:text-accent-ink">
+        <ClockIcon className="h-3.5 w-3.5" />
+        Schedule message
+      </button>
+    </div>
+  );
+}
+
+/** One message bubble — shared between the main list (top-level messages) and the thread panel
+ *  (a root plus its replies), so the bubble/attachment/mention/timestamp markup isn't written
+ *  twice. A real top-level component (not one nested inside DirectMessageThread's own body) —
+ *  everything it needs comes in as a prop rather than a closure, so its internal state (the
+ *  note-draft textarea, in particular) doesn't get reset on every parent re-render the way a
+ *  function defined inside another component's render would. `actions` renders whatever
+ *  MessageActionRow the caller wants under it (different for a top-level message vs. one
+ *  already inside an open thread — see DirectMessageThread's own call sites below). */
+function MessageBubble({
+  m,
+  viewerId,
+  directoryNames,
+  reactingId,
+  onToggleReaction,
+  downloadingId,
+  onDownload,
+  canUseInternalNotes,
+  noteDraftId,
+  noteDraftBody,
+  noteSubmitting,
+  onNoteDraftBodyChange,
+  onCancelNoteDraft,
+  onSubmitNote,
+  isLastMine,
+  otherLastReadAt,
+  actions,
+}: {
+  m: DirectMessageDTO;
+  viewerId: string;
+  directoryNames: string[];
+  reactingId: string | null;
+  onToggleReaction: (messageId: string, emoji: string) => void;
+  downloadingId: string | null;
+  onDownload: (messageId: string) => void;
+  canUseInternalNotes: boolean;
+  noteDraftId: string | null;
+  noteDraftBody: string;
+  noteSubmitting: boolean;
+  onNoteDraftBodyChange: (value: string) => void;
+  onCancelNoteDraft: () => void;
+  onSubmitNote: (messageId: string) => void;
+  isLastMine: boolean;
+  otherLastReadAt: string | null;
+  actions: React.ReactNode;
+}) {
+  const mine = m.senderId === viewerId;
+  return (
+    <div className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
+      {m.ref &&
+        (() => {
+          const RefIcon = m.ref!.type === "AVAILABILITY_DATE" ? CalendarIcon : ChecklistIcon;
+          const refKind = m.ref!.type === "AVAILABILITY_DATE" ? "Availability" : "Task";
+          return (
+            <div className="max-w-[80%] mb-1 rounded-xl border border-border bg-surface px-3 py-2 shadow-sm">
+              <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
+                <RefIcon className="h-3 w-3" />
+                {refKind}
+                {m.ref!.date ? ` · ${formatRefDate(m.ref!.date)}` : ""}
+              </div>
+              <p className="text-xs font-semibold mt-0.5">{m.ref!.label}</p>
+            </div>
+          );
+        })()}
+      <div
+        className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 ${mine ? "text-white" : "bg-black/[0.04]"}`}
+        style={mine ? { background: "var(--ttc-blue)" } : undefined}
+      >
+        {!mine && <p className="text-xs font-semibold mb-0.5">{m.senderName}</p>}
+        {m.body && (
+          <p className="text-sm whitespace-pre-wrap break-words">
+            {splitMentions(m.body, directoryNames).map((part, i) =>
+              part.isMention ? (
+                <span
+                  key={i}
+                  className={`font-semibold ${mine ? "underline decoration-white/50 underline-offset-2" : ""}`}
+                  style={!mine ? { color: "var(--ttc-blue-ink)" } : undefined}
+                >
+                  {part.text}
+                </span>
+              ) : (
+                <span key={i}>{part.text}</span>
+              )
+            )}
+          </p>
+        )}
+        {m.hasAttachment && (
+          <button
+            onClick={() => onDownload(m.id)}
+            disabled={downloadingId === m.id}
+            className={`mt-1.5 flex items-center gap-1.5 text-xs font-medium underline ${mine ? "text-white/90" : "text-accent-ink"}`}
+          >
+            <DownloadIcon className="h-3.5 w-3.5" />
+            {m.attachmentName ?? "Attachment"}
+          </button>
+        )}
+        <p className={`text-[11px] mt-1 ${mine ? "text-white/70" : "text-muted"}`}>{formatMessageTime(m.createdAt)}</p>
+      </div>
+
+      <div className={mine ? "self-end" : "self-start"}>
+        <ReactionRow reactions={m.reactions} busy={reactingId === m.id} onToggle={(emoji) => onToggleReaction(m.id, emoji)} />
+        {actions}
+      </div>
+
+      {canUseInternalNotes && (m.comments.length > 0 || noteDraftId === m.id) && (
+        <div className="max-w-[86%] mt-1 rounded-xl border border-dashed border-border bg-black/[0.025] px-3 py-2">
+          {m.comments.length > 0 && (
+            <div className={`space-y-2 ${noteDraftId === m.id ? "mb-2" : ""}`}>
+              {m.comments.map((c) => (
+                <div key={c.id}>
+                  <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-muted">
+                    <LockIcon className="h-2.5 w-2.5" />
+                    Internal note
+                  </p>
+                  <p className="text-xs mt-0.5">{c.body}</p>
+                  <p className="text-[10px] text-muted mt-0.5">
+                    {c.authorName} · {formatMessageTime(c.createdAt)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+          {noteDraftId === m.id && (
+            <div className="space-y-1.5">
+              <textarea
+                autoFocus
+                value={noteDraftBody}
+                onChange={(e) => onNoteDraftBodyChange(e.target.value)}
+                placeholder="Note for staff only…"
+                rows={2}
+                className="w-full rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-accent resize-none"
+              />
+              <div className="flex items-center justify-end gap-3">
+                <button type="button" onClick={onCancelNoteDraft} className="text-xs text-muted hover:text-accent-ink">
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSubmitNote(m.id)}
+                  disabled={noteSubmitting || !noteDraftBody.trim()}
+                  className="btn-primary text-xs px-3 py-1.5"
+                >
+                  {noteSubmitting ? "Posting…" : "Post note"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {isLastMine && otherLastReadAt && m.createdAt <= otherLastReadAt && <p className="text-[10px] text-muted mt-0.5">Seen</p>}
+    </div>
+  );
+}
+
 /**
  * CB, Sept 2026: "instead of notes, I want it to be messages, and the functionality needs to
  * appear almost like any text message... look up members and send them individual messages...
@@ -92,49 +342,24 @@ function detectMentionTrigger(text: string, cursor: number): { start: number; qu
  * message that I sent [to reply to it]. I should have the options to include emojis to react to
  * other people's replies. I should be able to see also when they read the message on their side.
  * And then also I should be able to reply to a specific message within the message thread."
- * Confirmed scope (DMs only, a quick ~6-emoji set, quoted inline replies rather than nested
- * threads): tapping a bubble opens a small action row (react / reply) for that one message;
- * `replyingTo` seeds a draft banner above the compose box, cleared on send; reactions render as
- * tap-to-toggle pills under the bubble, same tap-to-toggle shape server-side (toggleReaction in
- * src/lib/direct-messages.ts); and `otherLastReadAt` (from the GET response, see
- * DirectMessageThreadDTO's own doc comment in src/types/index.ts) drives a "Seen" mark under the
- * last message the viewer sent that the other person has already read — iMessage's own read-
- * receipt convention, not a mark on every message.
  *
- * Phase 5b (CB, Sept 2026): "replies should appear within the relevant message thread... show a
- * visible connecting line between the messages, so the conversation is easy to follow" and
- * "hovering over a message should show quick emoji reactions." Two changes on top of the above,
- * both purely presentational — no new endpoints, no DTO changes: (1) a small elbow connector
- * renders next to a reply's existing quoted-preview card, pointing back at what it's answering,
- * rather than the card standing alone; (2) the react/reply row (still the same six
- * QUICK_REACTION_EMOJIS + reply) now floats above the bubble as its own pill, shown on hover for
- * desktop pointer users and still reachable by tapping the bubble on touch devices, where hover
- * doesn't apply — `activeMessageId` drives that tap-open state exactly as before, hover is added
- * on top via CSS (:group-hover), not a second piece of state. Internal-comment and create-task
- * actions are NOT in this toolbar yet — those land in their own later phases and slot into this
- * same pill once built, rather than shipping inert buttons now.
+ * Phase 5b/5c (Sept 2026): quick-emoji reactions, an @mention autocomplete, and staff-only
+ * internal notes, first shipped as a hover/tap-to-reveal floating toolbar above each bubble.
  *
- * Phase 5c (CB, Sept 2026): "hovering over a message should show quick emoji reactions and an
- * option to add an internal comment. Team members should also be able to mention a colleague by
- * typing @ followed by their name." Two independent additions on top of 5b: (1) a fourth toolbar
- * action (lock icon), staff-only per `canUseInternalNotes` — opens a small note composer under
- * that message; posted notes render in their own dashed staff-only panel, never inside the real
- * bubble stream, and the whole action is simply absent from the toolbar for a plain team member
- * rather than shown disabled (see addComment's own doc comment in src/lib/direct-messages.ts for
- * why — the server never lets them learn a note exists either); (2) an @mention autocomplete in
- * the compose box, backed by the same /api/directory list NewMessagePicker already uses for "New
- * message." A mention is stored as plain `@Full Name` text (no structured id, no notification) —
- * splitMentions above only highlights it in a sent bubble when it matches a real directory name,
- * so this needed no DTO or schema change on the sending side at all.
- *
- * Phase 5d (CB, Sept 2026): "chat icons on availability requests linked to specific dates" — a
- * date-scoped chat button (TeamAvailabilityCards' openChatForDate) can open this thread with a
- * reference already attached, seeded from `initialRef` into the same `attachedRef` state a
- * message-scoped reply already uses for `replyingTo` — an attach-chip renders above the compose
- * box showing what's about to go out, clearable before sending, and rides along on the next send
- * as `refType`/`refId`/`refDate`. `onInitialRefConsumed` tells the parent (which owns the actual
- * URL-derived value) that it's been captured, so it can clear its own copy and a later reopen of
- * this or any other thread never inherits a stale reference from an earlier date-chat click.
+ * Reply-chain redesign (Sept 2026, "Reply chain" mockup CB confirmed for deployment — "fix now
+ * its supposed to look like the mockup"): three confirmed changes on top of all of the above,
+ * replacing the 5b/5c toolbar entirely:
+ *   1. Reactions are now an ALWAYS-VISIBLE row under every message (not tap/hover-to-reveal).
+ *   2. Replies now group into a collapsed "N replies →" thread under their top-level message
+ *      (Slack-thread style) instead of each reply showing its own inline quoted-preview card —
+ *      see DirectMessageDTO's own `chainRootId`/`replyCount` doc comments in src/types/index.ts
+ *      for how the flat `messages` array gets grouped into threads. Tapping it opens the panel
+ *      below: a full-viewport blurred-backdrop overlay with the root message, its replies, and
+ *      a reply box that always targets that same root.
+ *   3. "Schedule message" — genuinely new, wasn't built before this round. Composing a message
+ *      can be scheduled for a future date/time instead of sent immediately; see the compose
+ *      form's own scheduling toggle below and DirectScheduledMessageDTO's doc comment in
+ *      src/types/index.ts for how a still-pending one stays invisible until it goes out.
  */
 export default function DirectMessageThread({
   otherEmployeeId,
@@ -176,6 +401,7 @@ export default function DirectMessageThread({
   fill?: boolean;
 }) {
   const [messages, setMessages] = useState<DirectMessageDTO[]>([]);
+  const [scheduled, setScheduled] = useState<DirectScheduledMessageDTO[]>([]);
   const [otherLastReadAt, setOtherLastReadAt] = useState<string | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [body, setBody] = useState("");
@@ -183,12 +409,6 @@ export default function DirectMessageThread({
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  // Which message's own react/reply action row is open — at most one at a time, closed again
-  // the moment either action is taken.
-  const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
-  // The message currently being replied to, if any — seeds the draft banner above the compose
-  // box and rides along on the next send as `replyToId`.
-  const [replyingTo, setReplyingTo] = useState<DirectMessageDTO | null>(null);
   // Phase 5d: the reference about to ride along on the next send, if any — seeded once from
   // `initialRef` below, cleared on send (or manually via the attach-chip's own Cancel).
   const [attachedRef, setAttachedRef] = useState<AttachedRef | null>(initialRef ?? null);
@@ -196,7 +416,8 @@ export default function DirectMessageThread({
   // picker while it's happening, same narrow busy-scoping every other list in this app uses.
   const [reactingId, setReactingId] = useState<string | null>(null);
   // Phase 5c: which message's internal-note composer is open, and its in-progress text — at
-  // most one at a time, same "one draft slot" shape `replyingTo` already uses.
+  // most one at a time, same "one draft slot" shape every other single-item draft in this
+  // component uses (e.g. `threadPanelRootId` further down).
   const [noteDraftId, setNoteDraftId] = useState<string | null>(null);
   const [noteDraftBody, setNoteDraftBody] = useState("");
   const [noteSubmitting, setNoteSubmitting] = useState(false);
@@ -205,6 +426,23 @@ export default function DirectMessageThread({
   const [directory, setDirectory] = useState<DirectoryEntryDTO[]>([]);
   // The active "@query" mid-type in the compose box, if any — see detectMentionTrigger above.
   const [mentionTrigger, setMentionTrigger] = useState<{ start: number; query: string } | null>(null);
+  // Reply-chain redesign: which top-level message's thread panel is open, if any.
+  const [threadPanelRootId, setThreadPanelRootId] = useState<string | null>(null);
+  const [threadReplyBody, setThreadReplyBody] = useState("");
+  const [threadSending, setThreadSending] = useState(false);
+  const [threadSendError, setThreadSendError] = useState("");
+  // "Schedule message" (Sept 2026): toggles the main compose form's Send button into "Schedule"
+  // — a `datetime-local` input appears alongside it. Opened either directly or via any message's
+  // own "Schedule message" action link (MessageActionRow above).
+  const [schedulingOpen, setSchedulingOpen] = useState(false);
+  const [scheduleWhen, setScheduleWhen] = useState("");
+  // The earliest pickable moment for the `datetime-local` input's `min` — computed once, in the
+  // event handler that opens the picker (openSchedulingComposer below), never during render:
+  // reading the current time while rendering is an impure call React's own rules disallow (it
+  // would make the component's output depend on when it happened to re-render, not just its
+  // props/state), so this is a plain snapshot taken at the moment the sender opens the picker.
+  const [scheduleMin, setScheduleMin] = useState("");
+  const [cancelingScheduledId, setCancelingScheduledId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -216,6 +454,7 @@ export default function DirectMessageThread({
       if (!res.ok) throw new Error();
       const data: DirectMessageThreadDTO = await res.json();
       setMessages(data.messages);
+      setScheduled(data.scheduled);
       setOtherLastReadAt(data.otherLastReadAt);
       setLoadState("ready");
       onRead?.();
@@ -269,9 +508,37 @@ export default function DirectMessageThread({
     return pool.slice(0, 5);
   }, [mentionTrigger, directory]);
 
+  // Reply-chain redesign: the flat `messages` array grouped into threads — every top-level
+  // message (chainRootId === null) in display order, and a lookup from a root's id to its own
+  // replies (also in order, since `messages` itself already comes back oldest-first). A reply
+  // never appears in `topLevel` — it only ever renders inside its own thread's panel below.
+  const topLevel = useMemo(() => messages.filter((m) => m.chainRootId === null), [messages]);
+  const repliesByRoot = useMemo(() => {
+    const map = new Map<string, DirectMessageDTO[]>();
+    for (const m of messages) {
+      if (!m.chainRootId) continue;
+      const arr = map.get(m.chainRootId) ?? [];
+      arr.push(m);
+      map.set(m.chainRootId, arr);
+    }
+    return map;
+  }, [messages]);
+  const threadPanelRoot = threadPanelRootId ? messages.find((m) => m.id === threadPanelRootId) ?? null : null;
+  const threadPanelReplies = threadPanelRootId ? repliesByRoot.get(threadPanelRootId) ?? [] : [];
+
+  function openSchedulingComposer() {
+    setSchedulingOpen(true);
+    setScheduleMin(new Date(Date.now() + 60000).toISOString().slice(0, 16));
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }
+
   async function handleSend(e: React.FormEvent) {
     e.preventDefault();
     if (!body.trim() && !file) return;
+    if (schedulingOpen && !scheduleWhen) {
+      setSendError("Pick a date and time to schedule this for.");
+      return;
+    }
 
     setSending(true);
     setSendError("");
@@ -279,11 +546,13 @@ export default function DirectMessageThread({
       const form = new FormData();
       form.set("body", body);
       if (file) form.set("file", file);
-      if (replyingTo) form.set("replyToId", replyingTo.id);
       if (attachedRef) {
         form.set("refType", attachedRef.type);
         form.set("refId", attachedRef.id);
         form.set("refDate", attachedRef.date);
+      }
+      if (schedulingOpen && scheduleWhen) {
+        form.set("scheduledFor", new Date(scheduleWhen).toISOString());
       }
 
       const res = await fetch(`/api/messages/dm/${otherEmployeeId}`, { method: "POST", body: form });
@@ -294,9 +563,10 @@ export default function DirectMessageThread({
       }
       setBody("");
       setFile(null);
-      setReplyingTo(null);
       setAttachedRef(null);
       setMentionTrigger(null);
+      setSchedulingOpen(false);
+      setScheduleWhen("");
       if (fileInputRef.current) fileInputRef.current.value = "";
       load();
       onMessagePosted?.();
@@ -304,6 +574,30 @@ export default function DirectMessageThread({
       setSendError("Couldn't reach the server. Check your connection and try again.");
     } finally {
       setSending(false);
+    }
+  }
+
+  async function handleThreadReply(rootId: string) {
+    if (!threadReplyBody.trim()) return;
+    setThreadSending(true);
+    setThreadSendError("");
+    try {
+      const form = new FormData();
+      form.set("body", threadReplyBody);
+      form.set("replyToId", rootId);
+      const res = await fetch(`/api/messages/dm/${otherEmployeeId}`, { method: "POST", body: form });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setThreadSendError(data.error ?? "Couldn't send that. Please try again.");
+        return;
+      }
+      setThreadReplyBody("");
+      load();
+      onMessagePosted?.();
+    } catch {
+      setThreadSendError("Couldn't reach the server. Check your connection and try again.");
+    } finally {
+      setThreadSending(false);
     }
   }
 
@@ -322,7 +616,6 @@ export default function DirectMessageThread({
 
   async function toggleReaction(messageId: string, emoji: string) {
     setReactingId(messageId);
-    setActiveMessageId(null);
     try {
       const res = await fetch(`/api/messages/dm/${otherEmployeeId}/${messageId}/react`, {
         method: "POST",
@@ -338,37 +631,10 @@ export default function DirectMessageThread({
     }
   }
 
-  function startReply(m: DirectMessageDTO) {
-    setReplyingTo(m);
-    setActiveMessageId(null);
-  }
-
-  /** Splices the picked directory entry's name into the compose box in place of the "@query"
-   *  that triggered the dropdown, then puts the cursor right after it — same "insert and keep
-   *  typing" flow as every other @mention composer. */
-  function pickMention(entry: DirectoryEntryDTO) {
-    if (!mentionTrigger) return;
-    const before = body.slice(0, mentionTrigger.start);
-    const after = body.slice(mentionTrigger.start + 1 + mentionTrigger.query.length);
-    const inserted = `@${entry.name} `;
-    const next = `${before}${inserted}${after}`;
-    setBody(next);
-    setMentionTrigger(null);
-    requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (!el) return;
-      const cursor = before.length + inserted.length;
-      el.focus();
-      el.setSelectionRange(cursor, cursor);
-    });
-  }
-
-  // Phase 5c: opens/closes a message's internal-note composer — at most one open at a time,
-  // same one-draft-slot shape startReply uses for replies.
+  // Phase 5c: opens/closes a message's internal-note composer — at most one open at a time.
   function toggleNoteDraft(m: DirectMessageDTO) {
     setNoteDraftId(noteDraftId === m.id ? null : m.id);
     setNoteDraftBody("");
-    setActiveMessageId(null);
   }
 
   async function submitNote(messageId: string) {
@@ -391,23 +657,45 @@ export default function DirectMessageThread({
     }
   }
 
+  async function cancelScheduled(id: string) {
+    setCancelingScheduledId(id);
+    try {
+      const res = await fetch(`/api/messages/dm/${otherEmployeeId}/scheduled/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        setScheduled((prev) => prev.filter((s) => s.id !== id));
+      }
+    } finally {
+      setCancelingScheduledId(null);
+    }
+  }
+
+  /** Splices the picked directory entry's name into the compose box in place of the "@query"
+   *  that triggered the dropdown, then puts the cursor right after it — same "insert and keep
+   *  typing" flow as every other @mention composer. */
+  function pickMention(entry: DirectoryEntryDTO) {
+    if (!mentionTrigger) return;
+    const before = body.slice(0, mentionTrigger.start);
+    const after = body.slice(mentionTrigger.start + 1 + mentionTrigger.query.length);
+    const inserted = `@${entry.name} `;
+    const next = `${before}${inserted}${after}`;
+    setBody(next);
+    setMentionTrigger(null);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      const cursor = before.length + inserted.length;
+      el.focus();
+      el.setSelectionRange(cursor, cursor);
+    });
+  }
+
   // The last message the viewer themselves sent — the one and only bubble a "Seen" mark can ever
   // appear under, same as a normal texting app never stamping every message with its own receipt.
   const lastMineId = [...messages].reverse().find((m) => m.senderId === viewerId)?.id ?? null;
 
   return (
     <div className={fill ? "h-full flex flex-col" : "bg-surface border border-border rounded-2xl overflow-hidden"}>
-      {/* Sept 2026: pt-14 (not plain p-4's pt-4) on purpose — the react/reply/note toolbar
-          floats 44px (-top-11) above whichever bubble is open, and without enough headroom
-          above the very first message in the thread, this box's own overflow-y-auto clips
-          that toolbar out of view entirely (not just visually crowded — genuinely invisible,
-          no amount of scrolling reveals it, since there's nothing above the container's own
-          top edge to scroll to). Every later message has a previous bubble above it to
-          overlap into instead, so only the first one was actually broken — but on the
-          mobile accordion view (this component without `fill`, capped at max-h-[28rem]) the
-          first message is exactly what's on screen right after opening a thread, which is
-          almost certainly why CB's phone showed no toolbar at all. */}
-      <div className={fill ? "flex-1 min-h-0 overflow-y-auto pt-14 px-4 pb-4 space-y-3" : "pt-14 px-4 pb-4 space-y-3 max-h-[28rem] overflow-y-auto"}>
+      <div className={fill ? "flex-1 min-h-0 overflow-y-auto p-4 space-y-3" : "p-4 space-y-3 max-h-[28rem] overflow-y-auto"}>
         {loadState === "loading" && (
           <div className="space-y-2">
             {[0, 1].map((i) => (
@@ -420,219 +708,76 @@ export default function DirectMessageThread({
           <div className="text-sm text-accent">Unable to load this conversation. Please try again or contact support.</div>
         )}
 
-        {loadState === "ready" && messages.length === 0 && (
+        {loadState === "ready" && topLevel.length === 0 && (
           <div className="text-sm text-muted">No messages yet — say hello.</div>
         )}
 
         {loadState === "ready" &&
-          messages.map((m) => {
-            const mine = m.senderId === viewerId;
-            return (
-              <div key={m.id} className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
-                {m.ref &&
-                  (() => {
-                    const RefIcon = m.ref.type === "AVAILABILITY_DATE" ? CalendarIcon : ChecklistIcon;
-                    const refKind = m.ref.type === "AVAILABILITY_DATE" ? "Availability" : "Task";
-                    return (
-                      <div className="max-w-[80%] mb-1 rounded-xl border border-border bg-surface px-3 py-2 shadow-sm">
-                        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
-                          <RefIcon className="h-3 w-3" />
-                          {refKind}
-                          {m.ref.date ? ` · ${formatRefDate(m.ref.date)}` : ""}
-                        </div>
-                        <p className="text-xs font-semibold mt-0.5">{m.ref.label}</p>
-                      </div>
-                    );
-                  })()}
-                {m.replyTo && (
-                  <div className="relative max-w-[80%] mb-1 pl-5">
-                    <ReplyIcon aria-hidden="true" className="absolute left-0 top-1 h-3.5 w-3.5 text-muted" />
-                    <div className="rounded-xl border border-border bg-surface px-3 py-2 shadow-sm">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">
-                        {messages.find((msg) => msg.id === m.replyTo!.id)?.senderId === viewerId
-                          ? "You"
-                          : m.replyTo.senderName}
-                      </p>
-                      <p className="text-xs text-muted truncate">{previewText(m.replyTo)}</p>
-                    </div>
-                  </div>
-                )}
-                <div className="group/msg relative">
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setActiveMessageId(activeMessageId === m.id ? null : m.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        setActiveMessageId(activeMessageId === m.id ? null : m.id);
-                      }
-                    }}
-                    className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 cursor-pointer ${mine ? "text-white" : "bg-black/[0.04]"}`}
-                    style={mine ? { background: "var(--ttc-blue)" } : undefined}
-                  >
-                    {!mine && <p className="text-xs font-semibold mb-0.5">{m.senderName}</p>}
-                    {m.body && (
-                      <p className="text-sm whitespace-pre-wrap break-words">
-                        {splitMentions(m.body, directoryNames).map((part, i) =>
-                          part.isMention ? (
-                            <span
-                              key={i}
-                              className={`font-semibold ${mine ? "underline decoration-white/50 underline-offset-2" : ""}`}
-                              style={!mine ? { color: "var(--ttc-blue-ink)" } : undefined}
-                            >
-                              {part.text}
-                            </span>
-                          ) : (
-                            <span key={i}>{part.text}</span>
-                          )
-                        )}
-                      </p>
-                    )}
-                    {m.hasAttachment && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDownload(m.id);
-                        }}
-                        disabled={downloadingId === m.id}
-                        className={`mt-1.5 flex items-center gap-1.5 text-xs font-medium underline ${mine ? "text-white/90" : "text-accent-ink"}`}
-                      >
-                        <DownloadIcon className="h-3.5 w-3.5" />
-                        {m.attachmentName ?? "Attachment"}
-                      </button>
-                    )}
-                    <p className={`text-[11px] mt-1 ${mine ? "text-white/70" : "text-muted"}`}>{formatMessageTime(m.createdAt)}</p>
-                  </div>
-
-                  <div
-                    className={`absolute -top-11 ${mine ? "right-0" : "left-0"} z-10 flex items-center gap-0.5 rounded-full px-1.5 py-1 shadow-lg transition-opacity ${
-                      activeMessageId === m.id
-                        ? "opacity-100"
-                        : "opacity-0 pointer-events-none group-hover/msg:opacity-100 group-hover/msg:pointer-events-auto"
-                    }`}
-                    style={{ background: "var(--foreground)" }}
-                  >
-                    {QUICK_REACTION_EMOJIS.map((emoji) => (
-                      <button
-                        key={emoji}
-                        type="button"
-                        onClick={() => toggleReaction(m.id, emoji)}
-                        disabled={reactingId === m.id}
-                        className="h-7 w-7 rounded-full hover:bg-white/[0.14] flex items-center justify-center text-sm disabled:opacity-60"
-                      >
-                        {emoji}
-                      </button>
-                    ))}
-                    <span className="w-px h-5 bg-white/20 mx-0.5" />
-                    <button
-                      type="button"
-                      onClick={() => startReply(m)}
-                      aria-label="Reply"
-                      title="Reply"
-                      className="h-7 w-7 rounded-full hover:bg-white/[0.14] flex items-center justify-center text-white/85"
-                    >
-                      <ReplyIcon className="h-3.5 w-3.5" />
-                    </button>
-                    {canUseInternalNotes && (
-                      <>
-                        <span className="w-px h-5 bg-white/20 mx-0.5" />
-                        <button
-                          type="button"
-                          onClick={() => toggleNoteDraft(m)}
-                          aria-label="Add internal note"
-                          title="Add internal note"
-                          className="h-7 w-7 rounded-full hover:bg-white/[0.14] flex items-center justify-center text-white/85"
-                        >
-                          <LockIcon className="h-3.5 w-3.5" />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                {m.reactions.length > 0 && (
-                  <div className={`flex flex-wrap gap-1 mt-1 ${mine ? "justify-end" : "justify-start"}`}>
-                    {m.reactions.map((r) => (
-                      <button
-                        key={r.emoji}
-                        type="button"
-                        onClick={() => toggleReaction(m.id, r.emoji)}
-                        disabled={reactingId === m.id}
-                        className={`flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs disabled:opacity-60 ${
-                          r.reactedByMe ? "bg-accent/15 border-accent" : "bg-black/[0.03] border-border hover:bg-black/[0.06]"
-                        }`}
-                      >
-                        <span>{r.emoji}</span>
-                        <span className="font-medium text-muted">{r.count}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {canUseInternalNotes && (m.comments.length > 0 || noteDraftId === m.id) && (
-                  <div className="max-w-[86%] mt-1 rounded-xl border border-dashed border-border bg-black/[0.025] px-3 py-2">
-                    {m.comments.length > 0 && (
-                      <div className={`space-y-2 ${noteDraftId === m.id ? "mb-2" : ""}`}>
-                        {m.comments.map((c) => (
-                          <div key={c.id}>
-                            <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-muted">
-                              <LockIcon className="h-2.5 w-2.5" />
-                              Internal note
-                            </p>
-                            <p className="text-xs mt-0.5">{c.body}</p>
-                            <p className="text-[10px] text-muted mt-0.5">
-                              {c.authorName} · {formatMessageTime(c.createdAt)}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {noteDraftId === m.id && (
-                      <div className="space-y-1.5">
-                        <textarea
-                          autoFocus
-                          value={noteDraftBody}
-                          onChange={(e) => setNoteDraftBody(e.target.value)}
-                          placeholder="Note for staff only…"
-                          rows={2}
-                          className="w-full rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-accent resize-none"
-                        />
-                        <div className="flex items-center justify-end gap-3">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setNoteDraftId(null);
-                              setNoteDraftBody("");
-                            }}
-                            className="text-xs text-muted hover:text-accent-ink"
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => submitNote(m.id)}
-                            disabled={noteSubmitting || !noteDraftBody.trim()}
-                            className="btn-primary text-xs px-3 py-1.5"
-                          >
-                            {noteSubmitting ? "Posting…" : "Post note"}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {m.id === lastMineId && otherLastReadAt && m.createdAt <= otherLastReadAt && (
-                  <p className="text-[10px] text-muted mt-0.5">Seen</p>
-                )}
-              </div>
-            );
-          })}
+          topLevel.map((m) => (
+            <MessageBubble
+              key={m.id}
+              m={m}
+              viewerId={viewerId}
+              directoryNames={directoryNames}
+              reactingId={reactingId}
+              onToggleReaction={toggleReaction}
+              downloadingId={downloadingId}
+              onDownload={handleDownload}
+              canUseInternalNotes={canUseInternalNotes}
+              noteDraftId={noteDraftId}
+              noteDraftBody={noteDraftBody}
+              noteSubmitting={noteSubmitting}
+              onNoteDraftBodyChange={setNoteDraftBody}
+              onCancelNoteDraft={() => {
+                setNoteDraftId(null);
+                setNoteDraftBody("");
+              }}
+              onSubmitNote={submitNote}
+              isLastMine={m.id === lastMineId}
+              otherLastReadAt={otherLastReadAt}
+              actions={
+                <MessageActionRow
+                  replyCount={m.replyCount}
+                  canUseInternalNotes={canUseInternalNotes}
+                  onReply={() => setThreadPanelRootId(m.id)}
+                  onNote={() => toggleNoteDraft(m)}
+                  onSchedule={openSchedulingComposer}
+                />
+              }
+            />
+          ))}
         <div ref={bottomRef} />
       </div>
 
+      {/* "Schedule message" (Sept 2026): the sender's own still-pending queue for this thread —
+          never anyone else's (the API only ever returns the caller's own). Shown above the
+          compose box so it reads as "what's about to go out" rather than mixed in with delivered
+          messages. */}
+      {scheduled.length > 0 && (
+        <div className="border-t border-border bg-black/[0.015] px-3 py-2 space-y-1.5">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Scheduled</p>
+          {scheduled.map((s) => (
+            <div key={s.id} className="flex items-center justify-between gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5">
+              <div className="min-w-0">
+                <p className="text-xs truncate">{previewText(s)}</p>
+                <p className="text-[10px] text-muted">Sends {formatScheduledFor(s.scheduledFor)}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => cancelScheduled(s.id)}
+                disabled={cancelingScheduledId === s.id}
+                className="text-xs text-muted hover:text-accent-ink shrink-0 disabled:opacity-60"
+              >
+                {cancelingScheduledId === s.id ? "Canceling…" : "Cancel"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <form onSubmit={handleSend} className="border-t border-border p-3 space-y-2">
+        {/* Phase 5d: what's about to go out, from a "Message about this date" link — cleared by
+            its own Cancel, or automatically once the message that carries it actually sends. */}
         {attachedRef && (
           <div
             className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2"
@@ -653,24 +798,13 @@ export default function DirectMessageThread({
             </button>
           </div>
         )}
-        {replyingTo && (
-          <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-black/[0.02] px-3 py-2">
-            <div className="min-w-0">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">
-                Replying to {replyingTo.senderId === viewerId ? "yourself" : replyingTo.senderName}
-              </p>
-              <p className="text-xs text-muted truncate">{previewText(replyingTo)}</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setReplyingTo(null)}
-              className="text-xs text-muted hover:text-accent-ink shrink-0"
-            >
-              Cancel
-            </button>
-          </div>
-        )}
         <div className="relative">
+          {/* Phase 5c: @mention dropdown — CB, "team members should also be able to mention a
+              colleague by typing @ followed by their name." Floats above the compose box (same
+              place a mention dropdown always sits, so it can open even on the very first line)
+              rather than trying to track on-screen caret coordinates inside a plain textarea,
+              which would need a much heavier composer than this app has anywhere else. Closed
+              on blur with a short delay so a click on a suggestion still registers first. */}
           {mentionTrigger && mentionSuggestions.length > 0 && (
             <div className="absolute left-1 bottom-full mb-1.5 w-64 max-w-[90vw] rounded-xl border border-border bg-surface shadow-lg p-1.5 z-20">
               {mentionSuggestions.map((entry) => (
@@ -708,6 +842,8 @@ export default function DirectMessageThread({
               setMentionTrigger(detectMentionTrigger(value, e.target.selectionStart ?? value.length));
             }}
             onBlur={() => {
+              // A click on a suggestion is a mousedown-prevented button (above), so this timeout
+              // only ever fires for a REAL blur — clicking away, tabbing off, etc.
               setTimeout(() => setMentionTrigger(null), 150);
             }}
             placeholder="Text message…"
@@ -715,6 +851,31 @@ export default function DirectMessageThread({
             className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent resize-none"
           />
         </div>
+        {/* "Schedule message" (Sept 2026) — toggled open from here or from any message's own
+            "Schedule message" action link (MessageActionRow). Turns the Send button below into
+            "Schedule" for this one send. */}
+        {schedulingOpen && (
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-black/[0.02] px-3 py-2">
+            <ClockIcon className="h-3.5 w-3.5 shrink-0 text-muted" />
+            <input
+              type="datetime-local"
+              value={scheduleWhen}
+              onChange={(e) => setScheduleWhen(e.target.value)}
+              min={scheduleMin}
+              className="flex-1 min-w-0 rounded-lg border border-border bg-surface px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-accent"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                setSchedulingOpen(false);
+                setScheduleWhen("");
+              }}
+              className="text-xs text-muted hover:text-accent-ink shrink-0"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
         {sendError && <p className="text-xs text-accent">{sendError}</p>}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
@@ -737,11 +898,113 @@ export default function DirectMessageThread({
               </button>
             )}
           </div>
-          <button type="submit" disabled={sending || (!body.trim() && !file)} className="btn-primary text-sm px-4 py-2 shrink-0">
-            {sending ? "Sending…" : "Send"}
+          <button
+            type="submit"
+            disabled={sending || (!body.trim() && !file) || (schedulingOpen && !scheduleWhen)}
+            className="btn-primary text-sm px-4 py-2 shrink-0"
+          >
+            {sending ? (schedulingOpen ? "Scheduling…" : "Sending…") : schedulingOpen ? "Schedule" : "Send"}
           </button>
         </div>
       </form>
+
+      {/* Reply-chain redesign (Sept 2026, "Reply chain" mockup): "the reply/thread view now
+          expands in place right at the message, background blurred behind it — no separate
+          screen — and the reply box lives at the bottom of that same panel." A fixed, full-
+          viewport overlay rather than confined to this component's own (possibly small,
+          possibly not-`fill`) box, since the mockup's blur treats the whole screen behind it as
+          the backdrop — the thread panel is the one piece of this component that deliberately
+          escapes its own container. */}
+      {threadPanelRoot && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-0 sm:p-4">
+          <div className="w-full sm:max-w-md sm:rounded-2xl bg-surface shadow-xl flex flex-col max-h-[85vh] sm:max-h-[80vh]">
+            <div className="flex items-center gap-2 border-b border-border px-4 py-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => setThreadPanelRootId(null)}
+                className="text-sm text-muted hover:text-accent-ink"
+              >
+                ← Back
+              </button>
+              <p className="text-sm font-semibold">Thread</p>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
+              <MessageBubble
+                m={threadPanelRoot}
+                viewerId={viewerId}
+                directoryNames={directoryNames}
+                reactingId={reactingId}
+                onToggleReaction={toggleReaction}
+                downloadingId={downloadingId}
+                onDownload={handleDownload}
+                canUseInternalNotes={canUseInternalNotes}
+                noteDraftId={noteDraftId}
+                noteDraftBody={noteDraftBody}
+                noteSubmitting={noteSubmitting}
+                onNoteDraftBodyChange={setNoteDraftBody}
+                onCancelNoteDraft={() => {
+                  setNoteDraftId(null);
+                  setNoteDraftBody("");
+                }}
+                onSubmitNote={submitNote}
+                isLastMine={threadPanelRoot.id === lastMineId}
+                otherLastReadAt={otherLastReadAt}
+                actions={null}
+              />
+              {threadPanelReplies.length > 0 && <div className="border-t border-dashed border-border" />}
+              {threadPanelReplies.map((r) => (
+                <MessageBubble
+                  key={r.id}
+                  m={r}
+                  viewerId={viewerId}
+                  directoryNames={directoryNames}
+                  reactingId={reactingId}
+                  onToggleReaction={toggleReaction}
+                  downloadingId={downloadingId}
+                  onDownload={handleDownload}
+                  canUseInternalNotes={canUseInternalNotes}
+                  noteDraftId={noteDraftId}
+                  noteDraftBody={noteDraftBody}
+                  noteSubmitting={noteSubmitting}
+                  onNoteDraftBodyChange={setNoteDraftBody}
+                  onCancelNoteDraft={() => {
+                    setNoteDraftId(null);
+                    setNoteDraftBody("");
+                  }}
+                  onSubmitNote={submitNote}
+                  isLastMine={r.id === lastMineId}
+                  otherLastReadAt={otherLastReadAt}
+                  actions={
+                    canUseInternalNotes ? (
+                      <MessageActionRow canUseInternalNotes onNote={() => toggleNoteDraft(r)} onSchedule={openSchedulingComposer} />
+                    ) : null
+                  }
+                />
+              ))}
+            </div>
+            <div className="border-t border-border p-3 space-y-1.5 shrink-0">
+              {threadSendError && <p className="text-xs text-accent">{threadSendError}</p>}
+              <div className="flex items-center gap-2">
+                <textarea
+                  value={threadReplyBody}
+                  onChange={(e) => setThreadReplyBody(e.target.value)}
+                  placeholder="Reply in thread…"
+                  rows={1}
+                  className="flex-1 min-w-0 rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent resize-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleThreadReply(threadPanelRoot.id)}
+                  disabled={threadSending || !threadReplyBody.trim()}
+                  className="btn-primary text-sm px-4 py-2 shrink-0"
+                >
+                  {threadSending ? "Sending…" : "Send"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
