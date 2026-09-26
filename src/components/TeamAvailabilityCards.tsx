@@ -1297,10 +1297,18 @@ export function Card({
       {openChip && openSubmission && (
         <div className="mt-3.5 space-y-3.5">
           {/* This one date's own decision — approve/deny it individually, propose a different
-              time for just this date, or (once decided) see the outcome. Only offered while the
-              date's OWN submission is still Pending; a Decided card's dates are all already
-              resolved. */}
-          {openSubmission.status === "PENDING" && openDecision && (
+              time for just this date, or (once decided) see the outcome, with an Undo to reopen
+              it. CB, Sept 2026: "I see that like that last one isn't approved I should be able to
+              approve it now" — this used to also require openSubmission.status === "PENDING",
+              which meant a date on a fully-Decided card (every date already resolved,
+              allDatesDecided in src/lib/availability.ts) rendered nothing here at all: no status
+              text, no Undo, no way back in. Since the submission can only leave PENDING once
+              EVERY date has its own non-PENDING decision, openDecision is guaranteed to already
+              be in the "decided" branch below whenever the submission itself is Decided — so
+              dropping that extra check only ever exposes the decided view (never re-exposes the
+              Approve/Deny buttons on an already-fully-Decided card), and restores the Undo button
+              needed to reopen and re-approve a date like this one. */}
+          {openDecision && (
             <div className="bg-white/15 rounded-xl p-3 space-y-2.5">
               {openDecision.status === "PENDING" ? (
                 adjustingDate === openChip.date ? (
@@ -1551,7 +1559,7 @@ export function Card({
               <ChecklistIcon className="h-3.5 w-3.5 text-white/80" />
               {openChip.dateLabel} — tasks
             </p>
-            <DateTasksPanel employeeId={employeeId} taskDate={openChip.date} viewerId={viewerId} />
+            <DateTasksPanel employeeId={employeeId} taskDate={openChip.date} viewerId={viewerId} onColor />
           </div>
         </div>
       )}
