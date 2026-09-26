@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { DownloadIcon, ChecklistIcon, CalendarIcon, LockIcon, ClockIcon, ChatIcon } from "@/components/icons";
 import { QUICK_REACTION_EMOJIS } from "@/types";
 import type { DirectMessageDTO, DirectMessageThreadDTO, DirectScheduledMessageDTO, DirectoryEntryDTO } from "@/types";
@@ -88,12 +89,18 @@ function formatScheduledFor(iso: string): string {
   return `${date} at ${time}`;
 }
 
-/** A message's always-visible quick-reaction row (Sept 2026 reply-chain redesign, CB-confirmed:
- *  "always-visible row" rather than the previous tap/hover-to-reveal toolbar). All six
- *  QUICK_REACTION_EMOJIS render every time, not just the ones already in use — tapping one
- *  toggles it on/off for the viewer; a count badge only shows once someone's actually reacted.
- *  Shared between a top-level message and a reply inside an open thread panel, so this is its
- *  own small component rather than inlined twice. */
+/** A message's quick-reaction row. All six QUICK_REACTION_EMOJIS render every time, not just the
+ *  ones already in use — tapping one toggles it on/off for the viewer; a count badge only shows
+ *  once someone's actually reacted. Shared between a top-level message and a reply inside an open
+ *  thread panel, so this is its own small component rather than inlined twice.
+ *
+ *  CB, Sept 2026, comparing against the QUO app reference: "I'm seeing all the emojis and all the
+ *  internal messaging" showing under every message at once — too busy, didn't match the
+ *  reference's clean bubble-only look. Confirmed scope: "tuck them away until needed." This row
+ *  (and MessageActionRow below it) no longer render inline by default; MessageBubble now only
+ *  shows them once that one message has been long-pressed (held down) — see MessageBubble's own
+ *  doc comment for the gesture. Supersedes the previous round's "always-visible row" call, which
+ *  turned out to be the wrong read of the mockup. */
 function ReactionRow({
   reactions,
   busy,
@@ -173,6 +180,16 @@ function MessageActionRow({
   );
 }
 
+/** How long a press has to hold before it counts as "long" and reveals a message's reactions/
+ *  actions — CB: "hold down on the message and then it pops up under the specific message."
+ *  Long enough that an ordinary tap/scroll never triggers it, short enough that it still reads as
+ *  an immediate response once you do hold. */
+const LONG_PRESS_MS = 450;
+/** How far a pointer can drift while held before this counts as a scroll/drag instead of a long
+ *  press — cancels the timer so swiping past a bubble on the way to scrolling the list never
+ *  pops its actions open. */
+const LONG_PRESS_MOVE_TOLERANCE_PX = 10;
+
 /** One message bubble — shared between the main list (top-level messages) and the thread panel
  *  (a root plus its replies), so the bubble/attachment/mention/timestamp markup isn't written
  *  twice. A real top-level component (not one nested inside DirectMessageThread's own body) —
@@ -180,7 +197,16 @@ function MessageActionRow({
  *  note-draft textarea, in particular) doesn't get reset on every parent re-render the way a
  *  function defined inside another component's render would. `actions` renders whatever
  *  MessageActionRow the caller wants under it (different for a top-level message vs. one
- *  already inside an open thread — see DirectMessageThread's own call sites below). */
+ *  already inside an open thread — see DirectMessageThread's own call sites below).
+ *
+ *  CB, Sept 2026 (see ReactionRow's own doc comment for the full context): reactions and the
+ *  action row are tucked away by default now — `revealed` is true only for whichever ONE message
+ *  (across the whole thread) is currently held open, tracked by DirectMessageThread itself so
+ *  only one can ever be open at a time. This bubble owns the actual gesture: holding down
+ *  (`onPointerDown`) for LONG_PRESS_MS calls `onReveal()`; releasing early, dragging past the
+ *  tolerance above, or a genuine short tap anywhere cancels/clears it via `onDismissReveal()`
+ *  instead — see handleClick below for why a short tap always dismisses rather than only
+ *  dismissing this specific bubble. */
 function MessageBubble({
   m,
   viewerId,
@@ -199,6 +225,9 @@ function MessageBubble({
   isLastMine,
   otherLastReadAt,
   actions,
+  revealed,
+  onReveal,
+  onDismissReveal,
 }: {
   m: DirectMessageDTO;
   viewerId: string;
@@ -217,8 +246,63 @@ function MessageBubble({
   isLastMine: boolean;
   otherLastReadAt: string | null;
   actions: React.ReactNode;
+  /** Whether THIS message's reactions/actions are the ones currently held open. */
+  revealed: boolean;
+  /** Fires once the hold has lasted long enough — opens this message specifically. */
+  onReveal: () => void;
+  /** Fires on a short tap (anywhere) or a canceled hold — closes whichever message is open, this
+   *  one or another, so tapping a different bubble while one is revealed closes it in one tap
+   *  rather than needing two. */
+  onDismissReveal: () => void;
 }) {
   const mine = m.senderId === viewerId;
+  // Long-press detection — see this component's own doc comment above. A ref (not state) for the
+  // timer and the "did it actually fire" flag: neither should ever trigger a re-render on its own,
+  // just gate what the eventual pointerup/click does.
+  const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFiredRef = useRef(false);
+  const pressStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  function clearPressTimer() {
+    if (pressTimerRef.current) {
+      clearTimeout(pressTimerRef.current);
+      pressTimerRef.current = null;
+    }
+  }
+
+  function handlePointerDown(e: ReactPointerEvent<HTMLDivElement>) {
+    if (e.pointerType === "mouse" && e.button !== 0) return; // right/middle click — leave alone
+    pressStartRef.current = { x: e.clientX, y: e.clientY };
+    longPressFiredRef.current = false;
+    clearPressTimer();
+    pressTimerRef.current = setTimeout(() => {
+      longPressFiredRef.current = true;
+      onReveal();
+    }, LONG_PRESS_MS);
+  }
+
+  function handlePointerMove(e: ReactPointerEvent<HTMLDivElement>) {
+    const start = pressStartRef.current;
+    if (!start) return;
+    if (
+      Math.abs(e.clientX - start.x) > LONG_PRESS_MOVE_TOLERANCE_PX ||
+      Math.abs(e.clientY - start.y) > LONG_PRESS_MOVE_TOLERANCE_PX
+    ) {
+      clearPressTimer();
+    }
+  }
+
+  function handleClick(e: React.MouseEvent<HTMLDivElement>) {
+    // Stop this from also being read as an "outside" tap by the scroll container's own dismiss
+    // handler further down — a click that landed on a bubble is handled entirely right here.
+    e.stopPropagation();
+    if (longPressFiredRef.current) {
+      longPressFiredRef.current = false;
+      return; // the hold already opened this one — the trailing click shouldn't also close it
+    }
+    onDismissReveal();
+  }
+
   return (
     <div className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
       {m.ref &&
@@ -237,8 +321,15 @@ function MessageBubble({
           );
         })()}
       <div
-        className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 ${mine ? "text-white" : "bg-black/[0.04]"}`}
+        className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 select-none ${mine ? "text-white" : "bg-black/[0.04]"}`}
         style={mine ? { background: "var(--ttc-blue)" } : undefined}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={clearPressTimer}
+        onPointerLeave={clearPressTimer}
+        onPointerCancel={clearPressTimer}
+        onContextMenu={(e) => e.preventDefault()}
+        onClick={handleClick}
       >
         {!mine && <p className="text-xs font-semibold mb-0.5">{m.senderName}</p>}
         {m.body && (
@@ -271,10 +362,12 @@ function MessageBubble({
         <p className={`text-[11px] mt-1 ${mine ? "text-white/70" : "text-muted"}`}>{formatMessageTime(m.createdAt)}</p>
       </div>
 
-      <div className={mine ? "self-end" : "self-start"}>
-        <ReactionRow reactions={m.reactions} busy={reactingId === m.id} onToggle={(emoji) => onToggleReaction(m.id, emoji)} />
-        {actions}
-      </div>
+      {revealed && (
+        <div className={mine ? "self-end" : "self-start"}>
+          <ReactionRow reactions={m.reactions} busy={reactingId === m.id} onToggle={(emoji) => onToggleReaction(m.id, emoji)} />
+          {actions}
+        </div>
+      )}
 
       {canUseInternalNotes && (m.comments.length > 0 || noteDraftId === m.id) && (
         <div className="max-w-[86%] mt-1 rounded-xl border border-dashed border-border bg-black/[0.025] px-3 py-2">
@@ -415,6 +508,11 @@ export default function DirectMessageThread({
   // Which message has a reaction toggle in flight — just disables that message's own pills/
   // picker while it's happening, same narrow busy-scoping every other list in this app uses.
   const [reactingId, setReactingId] = useState<string | null>(null);
+  // CB, Sept 2026 (see ReactionRow's own doc comment): which ONE message's reactions/actions are
+  // currently held open via long-press — null means every message is showing just its plain
+  // bubble. Shared across both the main list and the thread panel (only one is ever visible at a
+  // time anyway), and reset to null on any plain tap anywhere — see MessageBubble's handleClick.
+  const [revealedMessageId, setRevealedMessageId] = useState<string | null>(null);
   // Phase 5c: which message's internal-note composer is open, and its in-progress text — at
   // most one at a time, same "one draft slot" shape every other single-item draft in this
   // component uses (e.g. `threadPanelRootId` further down).
@@ -695,7 +793,10 @@ export default function DirectMessageThread({
 
   return (
     <div className={fill ? "h-full flex flex-col" : "bg-surface border border-border rounded-2xl overflow-hidden"}>
-      <div className={fill ? "flex-1 min-h-0 overflow-y-auto p-4 space-y-3" : "p-4 space-y-3 max-h-[28rem] overflow-y-auto"}>
+      <div
+        className={fill ? "flex-1 min-h-0 overflow-y-auto p-4 space-y-3" : "p-4 space-y-3 max-h-[28rem] overflow-y-auto"}
+        onClick={() => setRevealedMessageId(null)}
+      >
         {loadState === "loading" && (
           <div className="space-y-2">
             {[0, 1].map((i) => (
@@ -744,6 +845,9 @@ export default function DirectMessageThread({
                   onSchedule={openSchedulingComposer}
                 />
               }
+              revealed={revealedMessageId === m.id}
+              onReveal={() => setRevealedMessageId(m.id)}
+              onDismissReveal={() => setRevealedMessageId(null)}
             />
           ))}
         <div ref={bottomRef} />
@@ -928,7 +1032,7 @@ export default function DirectMessageThread({
               </button>
               <p className="text-sm font-semibold">Thread</p>
             </div>
-            <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3" onClick={() => setRevealedMessageId(null)}>
               <MessageBubble
                 m={threadPanelRoot}
                 viewerId={viewerId}
@@ -950,6 +1054,9 @@ export default function DirectMessageThread({
                 isLastMine={threadPanelRoot.id === lastMineId}
                 otherLastReadAt={otherLastReadAt}
                 actions={null}
+                revealed={revealedMessageId === threadPanelRoot.id}
+                onReveal={() => setRevealedMessageId(threadPanelRoot.id)}
+                onDismissReveal={() => setRevealedMessageId(null)}
               />
               {threadPanelReplies.length > 0 && <div className="border-t border-dashed border-border" />}
               {threadPanelReplies.map((r) => (
@@ -979,6 +1086,9 @@ export default function DirectMessageThread({
                       <MessageActionRow canUseInternalNotes onNote={() => toggleNoteDraft(r)} onSchedule={openSchedulingComposer} />
                     ) : null
                   }
+                  revealed={revealedMessageId === r.id}
+                  onReveal={() => setRevealedMessageId(r.id)}
+                  onDismissReveal={() => setRevealedMessageId(null)}
                 />
               ))}
             </div>
