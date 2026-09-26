@@ -1064,8 +1064,18 @@ export default function DirectMessageThread({
           the backdrop — the thread panel is the one piece of this component that deliberately
           escapes its own container. */}
       {threadPanelRoot && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-0 sm:p-4">
-          <div className="w-full sm:max-w-md sm:rounded-2xl bg-surface shadow-xl flex flex-col max-h-[85vh] sm:max-h-[80vh]">
+        // CB, Sept 2026, comparing against her own Messages app: "it needs to kinda zoom in...
+        // to where whichever message that we're replying to... it's not so far away from the
+        // place where I would be typing the messaging box." The old `items-end` mobile layout
+        // pinned this panel to the very bottom of the screen while its own height only ever hugs
+        // its content — on a short thread (one message, one reply) that left most of the screen
+        // as bare blurred backdrop above it, pushing the reply box down to the very bottom edge.
+        // Centering on every screen size (previously desktop-only, `sm:items-center`) keeps the
+        // panel a compact, content-hugging card wherever it opens, so the blank space is split
+        // evenly around it instead of piling up above — the message and the reply box stay close
+        // together, never stranded at the bottom of a mostly-empty screen.
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-2xl bg-surface shadow-xl flex flex-col max-h-[85vh]">
             <div className="flex items-center gap-2 border-b border-border px-4 py-3 shrink-0">
               <button
                 type="button"
