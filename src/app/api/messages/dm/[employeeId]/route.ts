@@ -33,7 +33,14 @@ export async function GET(_request: Request, ctx: RouteContext<"/api/messages/dm
  *  access that submissionId (the resulting message is still only ever readable by its own
  *  sender/recipient, same as any other DM), so a bogus id just fails to resolve a label rather
  *  than exposing anything. Same shape as POST /api/team-notes/[employeeId], minus the topic
- *  fields (a DM has no topic to scope to). */
+ *  fields (a DM has no topic to scope to).
+ *
+ *  "Schedule message" (Sept 2026, confirmed for deployment): an optional `scheduledFor`, an ISO
+ *  timestamp string built client-side from a plain `datetime-local` input (so this is always
+ *  interpreted in whichever timezone the browser that sent it is in — there's no server-side
+ *  timezone concept for this feature the way ORG_TIMEZONE is needed for shift reminders, since
+ *  this is one person picking a time for their own message, not a company-wide shift clock).
+ *  postMessage rejects anything not strictly in the future. */
 export async function POST(request: Request, ctx: RouteContext<"/api/messages/dm/[employeeId]">) {
   try {
     const employee = await requireEmployee();
@@ -46,6 +53,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/messages/dm
     const refType = form.get("refType");
     const refId = form.get("refId");
     const refDate = form.get("refDate");
+    const scheduledForRaw = form.get("scheduledFor");
 
     if (file !== null && !(file instanceof File)) {
       throw new InvalidDirectMessageError("That file couldn't be read — please try attaching it again.");
@@ -62,12 +70,24 @@ export async function POST(request: Request, ctx: RouteContext<"/api/messages/dm
       ref = { type: "AVAILABILITY_DATE", id: refId, date: refDate };
     }
 
+    let scheduledFor: Date | null = null;
+    if (scheduledForRaw !== null) {
+      if (typeof scheduledForRaw !== "string" || !scheduledForRaw) {
+        throw new InvalidDirectMessageError("That scheduled time isn't valid.");
+      }
+      const parsed = new Date(scheduledForRaw);
+      if (Number.isNaN(parsed.getTime())) {
+        throw new InvalidDirectMessageError("That scheduled time isn't valid.");
+      }
+      scheduledFor = parsed;
+    }
+
     const attachment =
       file instanceof File && file.size > 0
         ? { key: await uploadDirectMessageFile(file, employee.id, employeeId), name: file.name }
         : undefined;
 
-    const message = await postMessage(employee, employeeId, body, attachment, ref, replyToId || null);
+    const message = await postMessage(employee, employeeId, body, attachment, ref, replyToId || null, scheduledFor);
     return NextResponse.json({ message }, { status: 201 });
   } catch (err) {
     return toErrorResponse(err);
