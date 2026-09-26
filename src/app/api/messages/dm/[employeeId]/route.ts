@@ -28,8 +28,11 @@ export async function GET(_request: Request, ctx: RouteContext<"/api/messages/dm
  *  `refType`/`refId`/`refDate` trio (CB: "chat icons on availability requests linked to specific
  *  dates") for a message started from a date's own "Message about this date" button. Only
  *  AVAILABILITY_DATE is accepted here — see postMessage's own doc comment in
- *  src/lib/direct-messages.ts for why DATE_TASK stays server-only. All three ref fields are
- *  required together or not sent at all; postMessage itself doesn't re-verify the caller can
+ *  src/lib/direct-messages.ts for why DATE_TASK stays server-only. `refType`+`refId` are required
+ *  together; `refDate` is optional on top of those two — omitted (or empty) for the card-level
+ *  chat icon, which references the whole request rather than one date (round two, Sept 2026, CB:
+ *  "I'm still not seeing it be in line to... see that card information"), present for the
+ *  per-date "Message about this date" button. postMessage itself doesn't re-verify the caller can
  *  access that submissionId (the resulting message is still only ever readable by its own
  *  sender/recipient, same as any other DM), so a bogus id just fails to resolve a label rather
  *  than exposing anything. Same shape as POST /api/team-notes/[employeeId], minus the topic
@@ -63,11 +66,14 @@ export async function POST(request: Request, ctx: RouteContext<"/api/messages/dm
     }
 
     let ref: { type: "AVAILABILITY_DATE"; id: string; date: string | null } | undefined;
-    if (refType !== null || refId !== null || refDate !== null) {
-      if (refType !== "AVAILABILITY_DATE" || typeof refId !== "string" || !refId || typeof refDate !== "string" || !refDate) {
+    if (refType !== null || refId !== null) {
+      if (refType !== "AVAILABILITY_DATE" || typeof refId !== "string" || !refId) {
         throw new InvalidDirectMessageError("That reference can't be attached.");
       }
-      ref = { type: "AVAILABILITY_DATE", id: refId, date: refDate };
+      if (refDate !== null && typeof refDate !== "string") {
+        throw new InvalidDirectMessageError("That reference can't be attached.");
+      }
+      ref = { type: "AVAILABILITY_DATE", id: refId, date: refDate || null };
     }
 
     let scheduledFor: Date | null = null;
