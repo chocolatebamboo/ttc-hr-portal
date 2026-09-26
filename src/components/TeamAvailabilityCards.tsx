@@ -1763,10 +1763,18 @@ export function Card({
               the shift — a date sitting Approved with no task looked unresolved, like a denial.
               Now approving a date confirms its shift immediately and atomically
               (autoConfirmShiftForApprovedDate, src/lib/availability.ts), so this almost always
-              shows "Scheduled as a shift." The "not yet" branch below is only a legacy fallback
-              for a date approved before this existed — pushing any task for it still links the
-              shift as a side effect (createDateTask's own fallback), or Undo and re-approve to
-              confirm it immediately the normal way. */}
+              shows "Scheduled as a shift." The "no shift yet" branch below is only a legacy
+              fallback for a date approved before this existed — pushing any task for it still
+              links the shift as a side effect (createDateTask's own fallback), or Undo and
+              re-approve to confirm it immediately the normal way.
+
+              Copy follow-up (CB, Sept 2026), on the original "Approved — not yet linked to a
+              shift" phrasing: "it almost communicates... that there isn't [an] approved
+              schedule... it almost seems like in order for it to be approved, there needs to be
+              a task, which isn't necessarily the case." Confirmed she still wants a message here
+              (just not that reading) — split into two separate sentences so "Approved" stands on
+              its own as a complete, real decision, and the shift note reads as a separate, purely
+              informational follow-up rather than a qualifier on the approval itself. */}
           {openDecision?.status === "APPROVED" && (() => {
             const existingShift = shiftsByDate.get(`${openSubmission.id}:${openChip.date}`);
             return (
@@ -1779,7 +1787,7 @@ export function Card({
                   </div>
                 ) : (
                   <span className="text-xs font-semibold text-white/85">
-                    Approved — not yet linked to a shift (push a task below, or Undo and re-approve, to link one)
+                    Approved. This date doesn&rsquo;t have a shift yet. Push a task below, or Undo and re-approve, to add one.
                   </span>
                 )}
               </div>
