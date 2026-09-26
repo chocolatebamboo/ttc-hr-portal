@@ -22,7 +22,16 @@ import {
   type DirectMessageRefDTO,
   type DirectMessageRefType,
   type DirectMessageThreadDTO,
+  type DirectScheduledMessageDTO,
 } from "@/types";
+
+/** Background actor for the scheduled-message dispatch cron — same reasoning as every other
+ *  SYSTEM_ACTOR in this codebase (e.g. shift-reminders.ts): no signed-in employee behind a
+ *  scheduled run. Unlike those, DirectMessage's own RLS has no blanket is_admin() bypass (these
+ *  are personal messages — see direct_message_select in prisma/rls.sql), so this exact literal
+ *  employeeId is what direct_message_system_dispatch checks for instead — a real employee id is
+ *  always a uuid, so nothing else can ever match it. */
+const SCHEDULED_MESSAGE_SYSTEM_ACTOR = { employeeId: "system:scheduled-messages", role: "SUPER_ADMIN" };
 
 export class InvalidDirectMessageError extends Error {
   constructor(message: string) {
@@ -70,8 +79,10 @@ type MessageRow = {
   refId: string | null;
   refDate: string | null;
   replyTo: ReplyTargetRow | null;
+  chainRootId: string | null;
   reactions: ReactionRow[];
   comments: CommentRow[];
+  _count: { chainReplies: number };
 };
 
 /** The `include` shape every query in this file that returns a full MessageRow shares, so the
@@ -80,7 +91,14 @@ type MessageRow = {
  *  (direct_message_comment_select in prisma/rls.sql) already returns nothing to a non-staff
  *  actor at the database level, and toDTO below adds its own explicit `actorIsStaff` check on
  *  top rather than just trusting that silently, same "app layer first, RLS as the independent
- *  second check" division every other access rule in this codebase follows. */
+ *  second check" division every other access rule in this codebase follows.
+ *
+ *  `_count.chainReplies` (reply-chain redesign, Sept 2026) is how many messages have this one as
+ *  their `chainRootId` — only ever non-zero for a top-level message, see DirectMessageDTO's own
+ *  `replyCount` doc comment in src/types/index.ts. `chainRootId` itself (a plain scalar column,
+ *  not a relation) comes back automatically with every query regardless of `include`/`select`
+ *  shape here, same as `createdAt` — listed on MessageRow above for that reason, not because
+ *  this object adds it. */
 const MESSAGE_INCLUDE = {
   sender: { select: { firstName: true, lastName: true, preferredName: true } },
   replyTo: {
@@ -102,6 +120,7 @@ const MESSAGE_INCLUDE = {
     },
     orderBy: { createdAt: "asc" },
   },
+  _count: { select: { chainReplies: true } },
 } as const;
 
 function toCommentDTO(c: CommentRow): DirectMessageCommentDTO {
@@ -166,6 +185,8 @@ function toDTO(row: MessageRow, labels: Map<string, string>, actorId: string, ac
     createdAt: row.createdAt.toISOString(),
     ref,
     replyTo,
+    chainRootId: row.chainRootId,
+    replyCount: row._count.chainReplies,
     reactions: summarizeReactions(row.reactions, actorId),
     comments: actorIsStaff ? row.comments.map(toCommentDTO) : [],
   };
@@ -225,7 +246,11 @@ export async function listConversationSummaries(actor: CurrentEmployee): Promise
   const [rows, lastRead] = await Promise.all([
     withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
       return tx.directMessage.findMany({
-        where: { OR: [{ senderId: actor.id }, { recipientId: actor.id }] },
+        // "Schedule message" (Sept 2026): a still-pending scheduled message isn't really "in
+        // the conversation" yet for either side — excluded from every count/preview here, same
+        // as listMessages below. It only ever shows up in the sender's own dedicated
+        // `scheduled` list inside an open thread.
+        where: { OR: [{ senderId: actor.id }, { recipientId: actor.id }], sentAt: { not: null } },
         orderBy: { createdAt: "asc" },
         select: {
           senderId: true,
@@ -282,22 +307,59 @@ export async function listConversationSummaries(actor: CurrentEmployee): Promise
  * this thread is itself what the OTHER person will eventually see reflected back as their own
  * "Seen" mark, but fetching their timestamp first-vs-last here makes no difference to what THIS
  * call returns (only actor's own read state changes below, never the peer's).
+ *
+ * And `scheduled` (Sept 2026, "Schedule message") — actor's own still-pending scheduled
+ * messages to `otherEmployeeId`, oldest-due-first. Queried separately from the main `messages`
+ * list rather than folded in with a "sentAt IS NULL" branch in the same query: they're a
+ * different shape entirely (DirectScheduledMessageDTO, not DirectMessageDTO — no reactions, no
+ * replies, nothing to resolve a ref label for) and only ever the actor's own, never the peer's,
+ * so keeping the query separate is clearer than one query doing two jobs.
  */
 export async function listMessages(actor: CurrentEmployee, otherEmployeeId: string): Promise<DirectMessageThreadDTO> {
-  const messages = await withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+  const { messages, scheduled } = await withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const rows: MessageRow[] = await tx.directMessage.findMany({
       where: {
         OR: [
           { senderId: actor.id, recipientId: otherEmployeeId },
           { senderId: otherEmployeeId, recipientId: actor.id },
         ],
+        // "Schedule message" (Sept 2026): a still-pending scheduled message is invisible here to
+        // BOTH sides — even the sender's own thread view — until it's actually gone out. The
+        // sender manages it via the separate `scheduledRows` query below instead.
+        sentAt: { not: null },
       },
       include: MESSAGE_INCLUDE,
       orderBy: { createdAt: "asc" },
     });
     const labels = await resolveRefLabels(tx, rows);
     const actorIsStaff = isStaff(actor);
-    return rows.map((row) => toDTO(row, labels, actor.id, actorIsStaff));
+
+    const scheduledRows: {
+      id: string;
+      body: string;
+      attachmentKey: string | null;
+      attachmentName: string | null;
+      scheduledFor: Date | null;
+    }[] = await tx.directMessage.findMany({
+      where: { senderId: actor.id, recipientId: otherEmployeeId, sentAt: null },
+      select: { id: true, body: true, attachmentKey: true, attachmentName: true, scheduledFor: true },
+      orderBy: { scheduledFor: "asc" },
+    });
+
+    return {
+      messages: rows.map((row) => toDTO(row, labels, actor.id, actorIsStaff)),
+      scheduled: scheduledRows.map(
+        (s): DirectScheduledMessageDTO => ({
+          id: s.id,
+          body: s.body,
+          hasAttachment: s.attachmentKey !== null,
+          attachmentName: s.attachmentName,
+          // Not null for any row this query can return (that's exactly what postMessage sets
+          // alongside a null sentAt for a scheduled message), so this cast is safe.
+          scheduledFor: s.scheduledFor!.toISOString(),
+        })
+      ),
+    };
   });
 
   // Correction brief #1 — see listTeamNotes' matching comment in src/lib/team-notes.ts for why
@@ -305,7 +367,7 @@ export async function listMessages(actor: CurrentEmployee, otherEmployeeId: stri
   await markThreadRead(actor, threadKeyForDirectMessage(actor.id, otherEmployeeId));
 
   const otherLastReadAtDate = await getPeerLastRead(actor, otherEmployeeId);
-  return { messages, otherLastReadAt: otherLastReadAtDate ? otherLastReadAtDate.toISOString() : null };
+  return { messages, otherLastReadAt: otherLastReadAtDate ? otherLastReadAtDate.toISOString() : null, scheduled };
 }
 
 /**
@@ -328,7 +390,20 @@ export async function listMessages(actor: CurrentEmployee, otherEmployeeId: stri
  * `replyToId` is CB's "reply to a specific message within the message thread" (Sept 2026) — the
  * id of an existing message to quote. Re-checked against this same thread (not just any message
  * the actor can read) so a reply can't point at some OTHER conversation's message; a bad or
- * cross-thread id fails the whole post rather than silently dropping the reply.
+ * cross-thread id fails the whole post rather than silently dropping the reply. Reply-chain
+ * redesign (Sept 2026): the client always passes a THREAD ROOT's id here (opening or adding to
+ * that message's own "View N replies" panel), but this resolves `chainRootId` from the target's
+ * own `chainRootId ?? target.id` rather than trusting that — so even a stale client, or a reply
+ * passed in by id instead of its thread's root, still flattens to the true top-level ancestor
+ * instead of creating an orphaned sub-thread nothing ever displays. A still-scheduled (not yet
+ * sent) message can't be replied to — nobody but its own sender can even see it exists.
+ *
+ * `scheduledFor` is "Schedule message" (Sept 2026, confirmed for deployment): when given, this
+ * post doesn't go out now — the row is created immediately (so the sender can see/manage it as
+ * pending) but stays invisible to everyone, including the sender's own normal thread view, until
+ * POST /api/cron/scheduled-messages flips it once that time has passed (see
+ * sendDueScheduledMessages below). Must be strictly in the future; a past-or-now timestamp is
+ * just an immediate send, so that's rejected rather than silently reinterpreted.
  */
 export async function postMessage(
   actor: CurrentEmployee,
@@ -336,7 +411,8 @@ export async function postMessage(
   body: string,
   attachment?: { key: string; name: string },
   ref?: { type: "DATE_TASK" | "AVAILABILITY_DATE"; id: string; date: string | null },
-  replyToId?: string | null
+  replyToId?: string | null,
+  scheduledFor?: Date | null
 ): Promise<DirectMessageDTO> {
   if (recipientId === actor.id) {
     throw new InvalidDirectMessageError("You can't message yourself.");
@@ -344,6 +420,9 @@ export async function postMessage(
   const trimmedBody = body.trim();
   if (!trimmedBody && !attachment) {
     throw new InvalidDirectMessageError("Write a message or attach a file.");
+  }
+  if (scheduledFor && scheduledFor.getTime() <= Date.now()) {
+    throw new InvalidDirectMessageError("Pick a time in the future to schedule this for.");
   }
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
@@ -353,21 +432,24 @@ export async function postMessage(
     }
 
     let resolvedReplyToId: string | null = null;
+    let resolvedChainRootId: string | null = null;
     if (replyToId) {
       const target = await tx.directMessage.findFirst({
         where: {
           id: replyToId,
+          sentAt: { not: null },
           OR: [
             { senderId: actor.id, recipientId },
             { senderId: recipientId, recipientId: actor.id },
           ],
         },
-        select: { id: true },
+        select: { id: true, chainRootId: true },
       });
       if (!target) {
         throw new InvalidDirectMessageError("That message can't be replied to.");
       }
       resolvedReplyToId = target.id;
+      resolvedChainRootId = target.chainRootId ?? target.id;
     }
 
     const row: MessageRow = await tx.directMessage.create({
@@ -381,11 +463,64 @@ export async function postMessage(
         refId: ref?.id ?? null,
         refDate: ref?.date ?? null,
         replyToId: resolvedReplyToId,
+        chainRootId: resolvedChainRootId,
+        scheduledFor: scheduledFor ?? null,
+        sentAt: scheduledFor ? null : new Date(),
       },
       include: MESSAGE_INCLUDE,
     });
     const labels = await resolveRefLabels(tx, [row]);
     return toDTO(row, labels, actor.id, isStaff(actor));
+  });
+}
+
+/**
+ * Cancels one of the actor's OWN still-pending scheduled messages — "Schedule message" (Sept
+ * 2026). Hard-deletes the row (never sent, never seen by the recipient, so there's nothing to
+ * preserve an audit trail of) rather than just clearing `scheduledFor`, matching how a scheduled-
+ * but-unsent email's own "cancel" normally works elsewhere. Only the sender, and only before it's
+ * gone out — prisma/rls.sql's direct_message_delete backs up both halves of that independently.
+ */
+export async function cancelScheduledMessage(actor: CurrentEmployee, messageId: string): Promise<void> {
+  await withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const result = await tx.directMessage.deleteMany({
+      where: { id: messageId, senderId: actor.id, sentAt: null },
+    });
+    if (result.count === 0) {
+      throw new DirectMessageNotFoundError("That scheduled message can't be found, or has already gone out.");
+    }
+  });
+}
+
+export interface ScheduledMessageDispatchResult {
+  checked: number;
+  sent: number;
+}
+
+/**
+ * Finds every DirectMessage whose `scheduledFor` has passed and hasn't gone out yet, and marks
+ * it sent — "Schedule message" (Sept 2026, confirmed for deployment). Called by
+ * POST /api/cron/scheduled-messages, meant to be hit every 10-15 minutes the same way the other
+ * three /api/cron/* jobs already are (see README's "What actually calls those... cron endpoints
+ * on a schedule") — a message scheduled for, say, 3:00 PM goes out sometime within that same
+ * window, not necessarily on the exact minute. A plain updateMany rather than one row at a time:
+ * there's nothing per-row to do besides the timestamp flip (no email, no side effect), so one
+ * bulk write is both simpler and avoids any per-row failure needing its own retry bookkeeping.
+ */
+export async function sendDueScheduledMessages(): Promise<ScheduledMessageDispatchResult> {
+  return withRlsContext(SCHEDULED_MESSAGE_SYSTEM_ACTOR, async (tx) => {
+    const due: { id: string }[] = await tx.directMessage.findMany({
+      where: { sentAt: null, scheduledFor: { lte: new Date() } },
+      select: { id: true },
+    });
+    if (due.length === 0) {
+      return { checked: 0, sent: 0 };
+    }
+    const result = await tx.directMessage.updateMany({
+      where: { id: { in: due.map((d) => d.id) } },
+      data: { sentAt: new Date() },
+    });
+    return { checked: due.length, sent: result.count };
   });
 }
 
@@ -408,8 +543,10 @@ export async function toggleReaction(
   }
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    // sentAt filter (Sept 2026, "Schedule message"): can't react to a still-pending scheduled
+    // message — nobody but its own sender can even see it exists yet.
     const message = await tx.directMessage.findFirst({
-      where: { id: messageId, OR: [{ senderId: actor.id }, { recipientId: actor.id }] },
+      where: { id: messageId, sentAt: { not: null }, OR: [{ senderId: actor.id }, { recipientId: actor.id }] },
       select: { id: true },
     });
     if (!message) {
@@ -456,8 +593,10 @@ export async function addComment(
   }
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    // sentAt filter (Sept 2026, "Schedule message"): same reasoning as toggleReaction's own —
+    // no notes on a message that hasn't gone out yet.
     const message = await tx.directMessage.findFirst({
-      where: { id: messageId, OR: [{ senderId: actor.id }, { recipientId: actor.id }] },
+      where: { id: messageId, sentAt: { not: null }, OR: [{ senderId: actor.id }, { recipientId: actor.id }] },
       select: { id: true },
     });
     if (!message) {
