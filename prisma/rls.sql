@@ -346,19 +346,58 @@ create policy team_note_write on "TeamNote" for all using (
 -- design (an admin already has org-wide reach into those), but a DirectMessage is a personal
 -- conversation between two teammates that happens to run through this app, not an HR record —
 -- flagged to CB as a real design choice she can revisit if she'd rather admins have oversight.
+-- Still true after "Schedule message" (Sept 2026) added direct_message_system_dispatch below —
+-- that's a narrow literal-actor-id bypass for one specific cron job, not an is_admin() grant.
 alter table "DirectMessage" enable row level security;
 alter table "DirectMessage" force row level security;
 
-drop policy if exists direct_message_select on "DirectMessage";
-create policy direct_message_select on "DirectMessage" for select using (
+-- "Schedule message" (Sept 2026, confirmed for deployment) split the old single "direct_message_
+-- write for all" policy into insert/update/delete below — a FOR ALL policy also covers SELECT,
+-- which would have silently undone the recipient-side restriction direct_message_select adds
+-- next (Postgres ORs multiple permissive policies together for the same command, so the wider
+-- one would've won). Kept as three separate policies rather than one FOR ALL from here on so
+-- that never happens again by accident.
+drop policy if exists direct_message_write on "DirectMessage";
+
+create policy direct_message_insert on "DirectMessage" for insert with check (
   "senderId" = current_employee_id() or "recipientId" = current_employee_id()
 );
 
-drop policy if exists direct_message_write on "DirectMessage";
-create policy direct_message_write on "DirectMessage" for all using (
+create policy direct_message_update on "DirectMessage" for update using (
   "senderId" = current_employee_id() or "recipientId" = current_employee_id()
 ) with check (
   "senderId" = current_employee_id() or "recipientId" = current_employee_id()
+);
+
+-- New (Sept 2026, "Schedule message"): a sender can cancel their own still-pending scheduled
+-- message — never one already sent (nothing in this app deletes an ordinary delivered
+-- DirectMessage, and this doesn't change that). Backs up cancelScheduledMessage's own app-layer
+-- check in src/lib/direct-messages.ts.
+drop policy if exists direct_message_delete on "DirectMessage";
+create policy direct_message_delete on "DirectMessage" for delete using (
+  "senderId" = current_employee_id() and "sentAt" is null
+);
+
+-- "Schedule message" (Sept 2026): a recipient only ever sees a message that's actually gone out;
+-- the sender always sees their own (including a still-pending scheduled one, so they can manage/
+-- cancel it) — see DirectMessage.scheduledFor/sentAt's own doc comments in prisma/schema.prisma.
+drop policy if exists direct_message_select on "DirectMessage";
+create policy direct_message_select on "DirectMessage" for select using (
+  "senderId" = current_employee_id()
+  or ("recipientId" = current_employee_id() and ("scheduledFor" is null or "sentAt" is not null))
+);
+
+-- Narrow system-actor bypass for the dispatch cron (POST /api/cron/scheduled-messages) —
+-- deliberately NOT a blanket is_admin() grant, per this table's own "no admin override" design
+-- just above: adding is_admin() here would quietly let any real SUPER_ADMIN/HR_ADMIN browse
+-- everyone's DMs, which nobody asked for. Scoped to the exact literal actor id
+-- sendDueScheduledMessages' own SYSTEM_ACTOR uses (src/lib/direct-messages.ts) — a real employee
+-- id is always a uuid, so this can never match a signed-in person's own session.
+drop policy if exists direct_message_system_dispatch on "DirectMessage";
+create policy direct_message_system_dispatch on "DirectMessage" for all using (
+  current_role_name() = 'SUPER_ADMIN' and current_employee_id() = 'system:scheduled-messages'
+) with check (
+  current_role_name() = 'SUPER_ADMIN' and current_employee_id() = 'system:scheduled-messages'
 );
 
 
