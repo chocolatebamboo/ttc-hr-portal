@@ -131,7 +131,7 @@ function ReactionRow({
 }) {
   const byEmoji = new Map(reactions.map((r) => [r.emoji, r]));
   return (
-    <div className="flex flex-wrap gap-1">
+    <div className="flex flex-wrap gap-1 select-none">
       {QUICK_REACTION_EMOJIS.map((emoji) => {
         const r = byEmoji.get(emoji);
         return (
@@ -184,7 +184,7 @@ function MessageActionRow({
   onSchedule: () => void;
 }) {
   return (
-    <div className="mt-1.5 w-48 rounded-2xl border border-border bg-surface shadow-lg overflow-hidden divide-y divide-border">
+    <div className="mt-1.5 w-48 rounded-2xl border border-border bg-surface shadow-lg overflow-hidden divide-y divide-border select-none">
       {onReply && (
         <button
           type="button"
@@ -404,9 +404,23 @@ function MessageBubble({
                up to the scroll container's own onClick, which dismisses whichever message is
                revealed (see this component's own onClick on that container) — without this, any
                single tap inside the reveal panel closed it in the same tap it was acting on,
-               which read as the panel "not working" as much as a spacing problem did. */}
+               which read as the panel "not working" as much as a spacing problem did.
+
+          Follow-up (CB, Sept 2026), same complaint persisting after the two fixes above, this
+          time with iOS's own blue text-selection handles visible bracketing "Reply" in her
+          screenshot: revealing this row inserts it ABOVE the bubble in document flow (the whole
+          point of the first fix in this doc comment), which pushes the bubble — and the finger
+          still holding it down — downward by this row's own height. The long press never lifts,
+          so the browser keeps tracking it as a hold, now sitting over whichever bit of this row
+          ended up under that same, unmoved finger — "Reply" in her case — and since neither
+          ReactionRow's emoji buttons nor MessageActionRow's own buttons carried `select-none` the
+          way the bubble itself always has, iOS reads that continued hold as "select this text"
+          instead of a tap. `select-none` here (inherited by its children) closes that gap. */}
       {revealed && (
-        <div className={`mt-2.5 mb-1.5 ${mine ? "self-end" : "self-start"}`} onClick={(e) => e.stopPropagation()}>
+        <div
+          className={`mt-2.5 mb-1.5 select-none ${mine ? "self-end" : "self-start"}`}
+          onClick={(e) => e.stopPropagation()}
+        >
           <ReactionRow reactions={m.reactions} busy={reactingId === m.id} onToggle={(emoji) => onToggleReaction(m.id, emoji)} />
           {actions}
         </div>
