@@ -397,7 +397,17 @@ export default function DirectMessageThread({
 
   return (
     <div className={fill ? "h-full flex flex-col" : "bg-surface border border-border rounded-2xl overflow-hidden"}>
-      <div className={fill ? "flex-1 min-h-0 overflow-y-auto p-4 space-y-3" : "p-4 space-y-3 max-h-[28rem] overflow-y-auto"}>
+      {/* Sept 2026: pt-14 (not plain p-4's pt-4) on purpose — the react/reply/note toolbar
+          floats 44px (-top-11) above whichever bubble is open, and without enough headroom
+          above the very first message in the thread, this box's own overflow-y-auto clips
+          that toolbar out of view entirely (not just visually crowded — genuinely invisible,
+          no amount of scrolling reveals it, since there's nothing above the container's own
+          top edge to scroll to). Every later message has a previous bubble above it to
+          overlap into instead, so only the first one was actually broken — but on the
+          mobile accordion view (this component without `fill`, capped at max-h-[28rem]) the
+          first message is exactly what's on screen right after opening a thread, which is
+          almost certainly why CB's phone showed no toolbar at all. */}
+      <div className={fill ? "flex-1 min-h-0 overflow-y-auto pt-14 px-4 pb-4 space-y-3" : "pt-14 px-4 pb-4 space-y-3 max-h-[28rem] overflow-y-auto"}>
         {loadState === "loading" && (
           <div className="space-y-2">
             {[0, 1].map((i) => (
@@ -419,18 +429,8 @@ export default function DirectMessageThread({
             const mine = m.senderId === viewerId;
             return (
               <div key={m.id} className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
-                {/* CB, Sept 2026: "I should be able to kind of like reference within the
-                    conversation of my message with a specific team member" — a message that
-                    mirrored over from a task's own comment thread (addDateTaskComment, src/lib/
-                    date-tasks.ts) carries a small reference card above the bubble, same idea as
-                    a reply preview in a normal texting app: what this was actually about, and
-                    when. Sits outside the colored bubble (plain surface either way) so it reads
-                    the same regardless of which side sent it. */}
                 {m.ref &&
                   (() => {
-                    // Phase 5d: same card, now branching on ref type — AVAILABILITY_DATE reads
-                    // "Availability · <date>" with a calendar glyph, same shape DATE_TASK's own
-                    // "Task · <date>" already used, just not hardcoded to it anymore.
                     const RefIcon = m.ref.type === "AVAILABILITY_DATE" ? CalendarIcon : ChecklistIcon;
                     const refKind = m.ref.type === "AVAILABILITY_DATE" ? "Availability" : "Task";
                     return (
@@ -444,25 +444,11 @@ export default function DirectMessageThread({
                       </div>
                     );
                   })()}
-                {/* CB, Sept 2026: "I should be able to reply to a specific message within the
-                    message thread"; Phase 5b: "show a visible connecting line between the
-                    messages, so the conversation is easy to follow." The quoted-preview card a
-                    reply renders above itself, pointing back at whichever message it was
-                    answering — same plain-surface styling as the task reference card above, just
-                    quoting a message instead of an external record — now paired with a small
-                    elbow connector to its left, since the text label alone didn't read as
-                    "linked to" the original the way a real line does. Indented (pl-5) to leave
-                    room for the connector regardless of which side sent it. */}
                 {m.replyTo && (
                   <div className="relative max-w-[80%] mb-1 pl-5">
                     <ReplyIcon aria-hidden="true" className="absolute left-0 top-1 h-3.5 w-3.5 text-muted" />
                     <div className="rounded-xl border border-border bg-surface px-3 py-2 shadow-sm">
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">
-                        {/* DirectMessageReplyPreviewDTO only carries senderName, not senderId
-                            (it's a lightweight preview, not a full message row) — the quoted
-                            message is still sitting right in this same thread's already-loaded
-                            `messages`, so look it up locally for the "You" label rather than
-                            growing the DTO. */}
                         {messages.find((msg) => msg.id === m.replyTo!.id)?.senderId === viewerId
                           ? "You"
                           : m.replyTo.senderName}
@@ -519,11 +505,6 @@ export default function DirectMessageThread({
                     <p className={`text-[11px] mt-1 ${mine ? "text-white/70" : "text-muted"}`}>{formatMessageTime(m.createdAt)}</p>
                   </div>
 
-                  {/* Phase 5b: the react/reply toolbar — was an inline row below the bubble,
-                      opened only by tapping it; now floats above the bubble and also opens on
-                      hover for desktop pointer users (touch keeps the original tap behavior,
-                      since there's no hover to rely on there). `group/msg` scopes the hover to
-                      just this one bubble, not the whole message block below it. */}
                   <div
                     className={`absolute -top-11 ${mine ? "right-0" : "left-0"} z-10 flex items-center gap-0.5 rounded-full px-1.5 py-1 shadow-lg transition-opacity ${
                       activeMessageId === m.id
@@ -553,9 +534,6 @@ export default function DirectMessageThread({
                     >
                       <ReplyIcon className="h-3.5 w-3.5" />
                     </button>
-                    {/* Phase 5c: staff-only — absent entirely for a plain team member, not
-                        shown disabled, same "the action doesn't exist for them" reasoning
-                        addComment's own doc comment gives server-side. */}
                     {canUseInternalNotes && (
                       <>
                         <span className="w-px h-5 bg-white/20 mx-0.5" />
@@ -573,11 +551,6 @@ export default function DirectMessageThread({
                   </div>
                 </div>
 
-                {/* Quick-reaction pills — CB, Sept 2026: "I should have the options to include
-                    emojis to react to other people's replies." Tap-to-toggle: tapping a pill
-                    you've already reacted with removes it (toggleReaction's own doc comment in
-                    src/lib/direct-messages.ts). Only ever shows emoji actually in use, never all
-                    six as placeholders. */}
                 {m.reactions.length > 0 && (
                   <div className={`flex flex-wrap gap-1 mt-1 ${mine ? "justify-end" : "justify-start"}`}>
                     {m.reactions.map((r) => (
@@ -597,13 +570,6 @@ export default function DirectMessageThread({
                   </div>
                 )}
 
-                {/* Phase 5c: internal notes — staff-only (canUseInternalNotes), a dashed
-                    staff-only aside rather than a real bubble, deliberately NOT amber/pink/rose/
-                    blue (those already mean pending/approved/denied/"your own row" per this
-                    app's established status-color language). Renders when there's something to
-                    show OR the composer for this message is open; the composer itself lives
-                    inside this same panel so an in-progress note and any already-posted ones
-                    read as one staff-only block, not two separate UI pieces. */}
                 {canUseInternalNotes && (m.comments.length > 0 || noteDraftId === m.id) && (
                   <div className="max-w-[86%] mt-1 rounded-xl border border-dashed border-border bg-black/[0.025] px-3 py-2">
                     {m.comments.length > 0 && (
@@ -657,10 +623,6 @@ export default function DirectMessageThread({
                   </div>
                 )}
 
-                {/* CB, Sept 2026: "I should be able to see also when they read the message on
-                    their side" — an iMessage-style "Seen" mark under the last message the viewer
-                    sent, once the other person's own lastReadAt for this thread covers it. Never
-                    stamped on every message, only the most recent one of the viewer's own. */}
                 {m.id === lastMineId && otherLastReadAt && m.createdAt <= otherLastReadAt && (
                   <p className="text-[10px] text-muted mt-0.5">Seen</p>
                 )}
@@ -671,8 +633,6 @@ export default function DirectMessageThread({
       </div>
 
       <form onSubmit={handleSend} className="border-t border-border p-3 space-y-2">
-        {/* Phase 5d: what's about to go out, from a "Message about this date" link — cleared by
-            its own Cancel, or automatically once the message that carries it actually sends. */}
         {attachedRef && (
           <div
             className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2"
@@ -711,12 +671,6 @@ export default function DirectMessageThread({
           </div>
         )}
         <div className="relative">
-          {/* Phase 5c: @mention dropdown — CB, "team members should also be able to mention a
-              colleague by typing @ followed by their name." Floats above the compose box (same
-              place a mention dropdown always sits, so it can open even on the very first line)
-              rather than trying to track on-screen caret coordinates inside a plain textarea,
-              which would need a much heavier composer than this app has anywhere else. Closed
-              on blur with a short delay so a click on a suggestion still registers first. */}
           {mentionTrigger && mentionSuggestions.length > 0 && (
             <div className="absolute left-1 bottom-full mb-1.5 w-64 max-w-[90vw] rounded-xl border border-border bg-surface shadow-lg p-1.5 z-20">
               {mentionSuggestions.map((entry) => (
@@ -754,8 +708,6 @@ export default function DirectMessageThread({
               setMentionTrigger(detectMentionTrigger(value, e.target.selectionStart ?? value.length));
             }}
             onBlur={() => {
-              // A click on a suggestion is a mousedown-prevented button (above), so this timeout
-              // only ever fires for a REAL blur — clicking away, tabbing off, etc.
               setTimeout(() => setMentionTrigger(null), 150);
             }}
             placeholder="Text message…"
