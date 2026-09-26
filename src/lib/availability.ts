@@ -198,11 +198,12 @@ export async function listMyAvailability(actor: CurrentEmployee): Promise<Availa
       orderBy: { submittedAt: "desc" },
     });
 
-    // CB, Sept 2026, two-step approval workflow: an Approved submission doesn't mean "done" from
-    // the team member's own seat until a task's actually been pushed for it — that's what
-    // confirms the shift. Gather every date this employee has an APPROVED decision on, across
-    // every submission, and check which of those dates already have a real (non-cancelled)
-    // Shift, in one pass rather than a query per row.
+    // awaitingTask is now purely a legacy fallback (see autoConfirmShiftForApprovedDate's own doc
+    // comment above): going forward, an Approved date always gets its Shift the moment it's
+    // approved, so this only ever flags a date that was approved back when that wasn't true yet
+    // and never got a task pushed for it either. Gather every date this employee has an APPROVED
+    // decision on, across every submission, and check which of those dates already have a real
+    // (non-cancelled) Shift, in one pass rather than a query per row.
     const approvedDates = new Set<string>();
     for (const row of rows) {
       if (row.status !== "APPROVED") continue;
@@ -432,6 +433,63 @@ export async function deleteAvailabilitySubmission(actor: CurrentEmployee, submi
 
 type Decision = "APPROVED" | "DENIED";
 
+/**
+ * Creates the confirmed Shift row for one newly-approved date, unless a shift for that
+ * employee/date already exists (CANCELLED doesn't count — same guard convertAvailabilityDateToShift
+ * and createDateTask's own fallback use). CB, Sept 2026: "we shouldn't have to have a task in
+ * order for it to be approved... admin is supposed to be able to approve it even without it."
+ * This replaces the earlier "two-step" design (from the Daijour meeting) where approving a date
+ * didn't confirm anything by itself and only pushing a task for that date created the Shift —
+ * that left an approved-but-taskless date sitting with no visible outcome, reading like a denial.
+ * Now approving IS confirming: called from the same transaction as decideAvailability,
+ * decideAvailabilityDate, and changeAvailabilityDate, right after each marks a date APPROVED, so
+ * the decision and the shift land atomically in one action. Pushing a task (DateTasksPanel) is a
+ * fully separate, optional add-on from here on — see createDateTask's own doc comment in
+ * src/lib/date-tasks.ts, which still calls this too, purely as a legacy fallback for any date
+ * that was approved before this existed.
+ */
+export async function autoConfirmShiftForApprovedDate(
+  tx: PrismaClient,
+  actorId: string,
+  employeeId: string,
+  submissionId: string,
+  slot: AvailabilitySlot,
+  note: string | null
+): Promise<void> {
+  const alreadyShifted = await tx.shift.findFirst({
+    where: { employeeId, date: slot.date, status: { not: "CANCELLED" } },
+    select: { id: true },
+  });
+  if (alreadyShifted) return;
+
+  const shift = await tx.shift.create({
+    data: {
+      employeeId,
+      date: slot.date,
+      startTime: slot.startTime,
+      endTime: slot.endTime,
+      note,
+      sourceAvailabilitySubmissionId: submissionId,
+      createdById: actorId,
+    },
+  });
+  await writeAuditLog(tx, {
+    actorId,
+    action: "SHIFT_CREATED",
+    targetType: "Shift",
+    targetId: shift.id,
+    newValue: `${shift.date} ${shift.startTime}-${shift.endTime} for ${employeeId} (confirmed on approval, from availability ${submissionId})`,
+  });
+  await writeNotification(tx, {
+    recipientId: employeeId,
+    type: "SHIFT_CREATED",
+    title: "You've been scheduled for a new shift",
+    body: `${shift.date}, ${shift.startTime}–${shift.endTime}`,
+    targetType: "Shift",
+    targetId: shift.id,
+  });
+}
+
 /** Supervisor/HR decides on the WHOLE submission at once — "I have the option to approve
  *  everything at one time." Authorization (is the reviewer actually this employee's supervisor,
  *  or HR/Super Admin?) is checked by the caller (assertCanReviewAvailability, using the
@@ -495,6 +553,11 @@ export async function decideAvailability(
       targetType: "AvailabilitySubmission",
       targetId: row.id,
     });
+    if (decision === "APPROVED") {
+      for (const slot of slots) {
+        await autoConfirmShiftForApprovedDate(tx, reviewer.id, existing.employeeId, submissionId, slot, existing.note);
+      }
+    }
     return toDTO(row, new Map([[reviewer.id, nameOf(reviewer)]]));
   });
 }
@@ -574,6 +637,9 @@ export async function decideAvailabilityDate(
       targetType: "AvailabilitySubmission",
       targetId: row.id,
     });
+    if (decision === "APPROVED") {
+      await autoConfirmShiftForApprovedDate(tx, reviewer.id, existing.employeeId, submissionId, slots[index], existing.note);
+    }
     return toDTO(row, new Map([[reviewer.id, nameOf(reviewer)]]));
   });
 }
@@ -765,6 +831,7 @@ export async function changeAvailabilityDate(
       targetType: "AvailabilitySubmission",
       targetId: row.id,
     });
+    await autoConfirmShiftForApprovedDate(tx, reviewer.id, existing.employeeId, submissionId, newSlot, existing.note);
     return toDTO(row, new Map([[reviewer.id, nameOf(reviewer)]]));
   });
 }
