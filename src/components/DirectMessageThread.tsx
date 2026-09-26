@@ -131,7 +131,7 @@ function ReactionRow({
 }) {
   const byEmoji = new Map(reactions.map((r) => [r.emoji, r]));
   return (
-    <div className="flex flex-wrap gap-1 select-none">
+    <div className="flex flex-wrap gap-1 select-none [-webkit-touch-callout:none]">
       {QUICK_REACTION_EMOJIS.map((emoji) => {
         const r = byEmoji.get(emoji);
         return (
@@ -184,7 +184,7 @@ function MessageActionRow({
   onSchedule: () => void;
 }) {
   return (
-    <div className="mt-1.5 w-48 rounded-2xl border border-border bg-surface shadow-lg overflow-hidden divide-y divide-border select-none">
+    <div className="mt-1.5 w-48 rounded-2xl border border-border bg-surface shadow-lg overflow-hidden divide-y divide-border select-none [-webkit-touch-callout:none]">
       {onReply && (
         <button
           type="button"
@@ -387,47 +387,52 @@ function MessageBubble({
         })()}
 
       {/* CB, Sept 2026 (see ReactionRow's own doc comment above): rendered here, before the
-          bubble itself, so the reaction row and action menu sit visually above the message —
-          "emojis are supposed to show up at the top of the message" — as a plain reorder in
-          normal document flow, never absolutely positioned (that's what caused the earlier
-          mobile clipping bug this round already fixed once).
+          bubble itself, so the reaction row sits visually above the message — "emojis are
+          supposed to show up at the top of the message" — as a plain reorder in normal document
+          flow, never absolutely positioned (that's what caused the earlier mobile clipping bug
+          this round already fixed once).
 
           Follow-up (CB, Sept 2026), long-pressing "Got it" in a live thread: "the emoji is not
           on top of the message and the remaining correspondence is not on the bottom of that
-          message." Two real bugs, both fixed here rather than just a spacing tweak:
+          message." Two real bugs, fixed here rather than just a spacing tweak:
             1. `mt-2.5` below only applies to THIS message's own wrapper while it's revealed,
                opening up extra room above it (beyond the list's normal space-y-3 gap) so the
                reveal row reads as clearly its own group, not a toss-up between the message
                above it and the one it's actually attached to.
-            2. `onClick={(e) => e.stopPropagation()}` on this wrapper stops a tap on an emoji or
-               a MessageActionRow entry (neither stops propagation on its own) from also bubbling
-               up to the scroll container's own onClick, which dismisses whichever message is
-               revealed (see this component's own onClick on that container) — without this, any
-               single tap inside the reveal panel closed it in the same tap it was acting on,
-               which read as the panel "not working" as much as a spacing problem did.
+            2. `onClick={(e) => e.stopPropagation()}` on this wrapper stops a tap on an emoji from
+               also bubbling up to the scroll container's own onClick, which dismisses whichever
+               message is revealed (see this component's own onClick on that container).
 
-          Follow-up (CB, Sept 2026), same complaint persisting after the two fixes above, this
-          time with iOS's own blue text-selection handles visible bracketing "Reply" in her
-          screenshot: revealing this row inserts it ABOVE the bubble in document flow (the whole
-          point of the first fix in this doc comment), which pushes the bubble — and the finger
-          still holding it down — downward by this row's own height. The long press never lifts,
-          so the browser keeps tracking it as a hold, now sitting over whichever bit of this row
-          ended up under that same, unmoved finger — "Reply" in her case — and since neither
-          ReactionRow's emoji buttons nor MessageActionRow's own buttons carried `select-none` the
-          way the bubble itself always has, iOS reads that continued hold as "select this text"
-          instead of a tap. `select-none` here (inherited by its children) closes that gap. */}
+          Follow-up (CB, Sept 2026), same complaint persisting after the fixes above, this time
+          with iOS's own blue text-selection handles visible bracketing "Reply" in her screenshot,
+          then again, "the hold on the text isn't reading well also": neither ReactionRow's emoji
+          buttons nor MessageActionRow's own buttons carried `select-none`/`-webkit-touch-callout:
+          none` the way the bubble itself always has, so a long press that ended up over one of
+          them (the layout shift from revealing this row moves whatever's under an unmoved finger)
+          read as "select this text" instead of a tap. Added to every one of these long-press
+          targets, not just wherever a given screenshot happened to show the glitch — see
+          ReactionRow's and MessageActionRow's own root elements.
+
+          Follow-up (CB, Sept 2026), annotated screenshot, finally pinning down what "not reading
+          right" actually meant all along: "that reply section is supposed to be under the text
+          message and the emoji is supposed to be [on] top of the text message." Every round above
+          kept ReactionRow AND MessageActionRow grouped together in this one wrapper, both above
+          the bubble — so the action menu (Reply / Add internal note / Schedule message) sat
+          directly under the PREVIOUS message with nothing but a plain color change to say
+          otherwise, reading like it belonged there rather than to this one. `actions` (the
+          MessageActionRow the caller wants under it) now renders in its own wrapper AFTER the
+          bubble, further down this render — only ReactionRow stays here. */}
       {revealed && (
         <div
-          className={`mt-2.5 mb-1.5 select-none ${mine ? "self-end" : "self-start"}`}
+          className={`mt-2.5 mb-1.5 select-none [-webkit-touch-callout:none] ${mine ? "self-end" : "self-start"}`}
           onClick={(e) => e.stopPropagation()}
         >
           <ReactionRow reactions={m.reactions} busy={reactingId === m.id} onToggle={(emoji) => onToggleReaction(m.id, emoji)} />
-          {actions}
         </div>
       )}
 
       <div
-        className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 select-none ${mine ? "text-white" : "bg-black/[0.04]"}`}
+        className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 select-none [-webkit-touch-callout:none] ${mine ? "text-white" : "bg-black/[0.04]"}`}
         style={mine ? { background: "var(--ttc-blue)" } : undefined}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -467,6 +472,19 @@ function MessageBubble({
         )}
         <p className={`text-[11px] mt-1 ${mine ? "text-white/70" : "text-muted"}`}>{formatMessageTime(m.createdAt)}</p>
       </div>
+
+      {/* CB, Sept 2026 (see this bubble's own doc comment further up): the action menu now
+          renders down here, after the bubble, so it reads as clearly belonging to THIS message
+          rather than the one above it — `select-none`/`stopPropagation` still apply (see
+          MessageActionRow's own root and this component's outer scroll-container onClick), just
+          on a wrapper of its own instead of sharing ReactionRow's. `actions` is `null` for a
+          thread panel's own root message (see DirectMessageThread's call sites below), so this
+          renders nothing there rather than an empty wrapper. */}
+      {revealed && actions && (
+        <div className={`select-none [-webkit-touch-callout:none] ${mine ? "self-end" : "self-start"}`} onClick={(e) => e.stopPropagation()}>
+          {actions}
+        </div>
+      )}
 
       {canUseInternalNotes && (m.comments.length > 0 || noteDraftId === m.id) && (
         <div className="max-w-[86%] mt-1 rounded-xl border border-dashed border-border bg-black/[0.025] px-3 py-2">
