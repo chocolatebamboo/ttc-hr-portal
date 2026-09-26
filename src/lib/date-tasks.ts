@@ -4,7 +4,7 @@ import { assertCanAccessEmployeeRecords, assertCanAssignTasks, assertIsAdmin } f
 import { getSignedDownloadUrl, uploadDateTaskFile } from "@/lib/storage";
 import { writeAuditLog } from "@/lib/audit-log";
 import { writeNotification } from "@/lib/notifications";
-import { readDateDecisions } from "@/lib/availability";
+import { readDateDecisions, autoConfirmShiftForApprovedDate } from "@/lib/availability";
 import { postMessage } from "@/lib/direct-messages";
 import type { AvailabilitySlot, CurrentEmployee, DateTaskCommentDTO, DateTaskDTO } from "@/types";
 
@@ -212,73 +212,34 @@ export async function createDateTask(
       targetId: row.id,
     });
 
-    // CB, Sept 2026, two-step approval workflow, from the real meeting with Daijour: a
-    // supervisor approving a date doesn't finish anything by itself — it pings the admin, and
-    // it's the admin PUSHING A TASK for that date that actually confirms the shift, in one
-    // action, no separate "Confirm as Shift" tap. (That standalone button is intentionally gone
-    // from TeamAvailabilityCards — see its own comment.) Same transaction as the task write
-    // above, not a call out to convertAvailabilityDateToShift, which opens its own top-level
-    // withRlsContext/$transaction — nesting two interactive transactions on the same pooled
-    // connection is exactly the kind of thing that can hang under Supabase's connection limits,
-    // so this mirrors that function's logic inline against the tx already open here instead.
-    const alreadyShifted = await tx.shift.findFirst({
-      where: { employeeId, date: taskDate, status: { not: "CANCELLED" } },
-      select: { id: true },
+    // CB, Sept 2026: pushing a task USED to be what confirmed a date's shift, in the same tap
+    // (the "two-step approval workflow" from the Daijour meeting). That's gone now — approving a
+    // date confirms its shift immediately, atomically, on the spot (autoConfirmShiftForApprovedDate,
+    // called from decideAvailability/decideAvailabilityDate/changeAvailabilityDate in
+    // src/lib/availability.ts) — "admin is supposed to be able to approve it even without [a
+    // task]." Pushing a task is now a fully separate, optional add-on (DateTasksPanel). This block
+    // stays only as a legacy fallback, for a date that was approved before this existed and so
+    // never got its shift auto-created: since this call only knows employeeId+taskDate, not which
+    // submission, it still has to search every one of the employee's still-live submissions for an
+    // APPROVED decision on this date (the same per-date truth autoConfirmShiftForApprovedDate's
+    // callers already have in hand directly) before it knows what to pass through. In the ordinary
+    // case going forward, the shift already exists by the time a task is pushed, so this is a
+    // no-op. Same transaction as the task write above, not a call out to
+    // convertAvailabilityDateToShift, which opens its own top-level withRlsContext/$transaction —
+    // nesting two interactive transactions on the same pooled connection is exactly the kind of
+    // thing that can hang under Supabase's connection limits.
+    const candidates = await tx.availabilitySubmission.findMany({
+      where: { employeeId, status: { notIn: ["REMOVED", "CANCELLED"] } },
+      orderBy: { submittedAt: "desc" },
     });
-    if (!alreadyShifted) {
-      // Deliberately NOT filtered by submission.status === "APPROVED" here: decideAvailabilityDate
-      // (deciding one date at a time) leaves the submission's own status at PENDING until every
-      // date on it has been individually decided — see aggregateStatus/isInPerDateMode's own doc
-      // comments — so a date can be genuinely, individually APPROVED while its parent submission
-      // still reads PENDING. Filtering on submission.status would silently skip auto-confirming
-      // the shift for exactly that (common) per-date-review path. So this instead looks at every
-      // one of the employee's still-live submissions and asks THIS date's own dateDecisions entry
-      // whether it's approved — the same per-date truth convertAvailabilityDateToShift itself
-      // checks — rather than trusting the submission-level status.
-      const candidates = await tx.availabilitySubmission.findMany({
-        where: { employeeId, status: { notIn: ["REMOVED", "CANCELLED"] } },
-        orderBy: { submittedAt: "desc" },
-      });
-      let approvedSubmission: (typeof candidates)[number] | undefined;
-      let approvedSlot: AvailabilitySlot | undefined;
-      for (const candidate of candidates) {
-        const slots = candidate.slots as unknown as AvailabilitySlot[];
-        const slot = slots.find((s) => s.date === taskDate);
-        if (!slot) continue;
-        const decision = readDateDecisions(slots, candidate.dateDecisions).find((d) => d.date === taskDate);
-        if (decision?.status === "APPROVED") {
-          approvedSubmission = candidate;
-          approvedSlot = slot;
-          break;
-        }
-      }
-      if (approvedSubmission && approvedSlot) {
-        const shift = await tx.shift.create({
-          data: {
-            employeeId,
-            date: approvedSlot.date,
-            startTime: approvedSlot.startTime,
-            endTime: approvedSlot.endTime,
-            note: approvedSubmission.note,
-            sourceAvailabilitySubmissionId: approvedSubmission.id,
-            createdById: actor.id,
-          },
-        });
-        await writeAuditLog(tx, {
-          actorId: actor.id,
-          action: "SHIFT_CREATED",
-          targetType: "Shift",
-          targetId: shift.id,
-          newValue: `${shift.date} ${shift.startTime}-${shift.endTime} for ${employeeId} (confirmed by task push, from availability ${approvedSubmission.id})`,
-        });
-        await writeNotification(tx, {
-          recipientId: employeeId,
-          type: "SHIFT_CREATED",
-          title: "You've been scheduled for a new shift",
-          body: `${shift.date}, ${shift.startTime}–${shift.endTime}`,
-          targetType: "Shift",
-          targetId: shift.id,
-        });
+    for (const candidate of candidates) {
+      const slots = candidate.slots as unknown as AvailabilitySlot[];
+      const slot = slots.find((s) => s.date === taskDate);
+      if (!slot) continue;
+      const decision = readDateDecisions(slots, candidate.dateDecisions).find((d) => d.date === taskDate);
+      if (decision?.status === "APPROVED") {
+        await autoConfirmShiftForApprovedDate(tx, actor.id, employeeId, candidate.id, slot, candidate.note);
+        break;
       }
     }
 
