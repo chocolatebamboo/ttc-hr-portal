@@ -70,11 +70,15 @@ function rowEmployeeId(row: Row): string | undefined {
  * thread has no count of its own (nothing tracked "unread" for it before this round) so it
  * always sorts last, as a quiet, always-available fallback rather than competing for attention.
  *
- * On mobile, tapping a row still expands the matching thread component inline exactly as it
- * always has — TeamNotesThread for the general and topic rows (same component the admin card
- * views and Availability/My Time pages already use, so a message sent from any of those surfaces
- * still lands here), DirectMessageThread for DMs. "New message" opens NewMessagePicker to look
- * up a teammate and start (or reopen) a DM.
+ * CB, Sept 2026, on comparing against the QUO app reference screenshot: "I'm not seeing it as
+ * like a separate message when we click into one of the names... I need you to make sure that
+ * it's working properly." Confirmed scope: on mobile, tapping a row now opens a full separate
+ * screen for that conversation (replacing this list entirely, with its own "← Back") instead of
+ * expanding the thread inline beneath the row the way it briefly did — see renderMobileThread
+ * below. TeamNotesThread for the general and topic rows (same component the admin card views and
+ * Availability/My Time pages already use, so a message sent from any of those surfaces still
+ * lands here), DirectMessageThread for DMs. "New message" opens NewMessagePicker to look up a
+ * teammate and start (or reopen) a DM.
  *
  * Desktop redesign (CB, Sept 2026, approved mockup): "I like being able to see the conversation
  * list and the full selected conversation at the same time. Each person's name, title, and
@@ -247,10 +251,10 @@ export default function MessagesInboxView({
     setOpenKey(dmRowKey(entry.id));
   }
 
-  /** Mobile row — unchanged from before the desktop redesign: a swipe-to-clear card that expands
-   *  the matching thread inline, directly beneath itself, when tapped. */
+  /** Mobile row — a swipe-to-clear card that now opens the matching thread as its own full
+   *  screen (renderMobileThread below) rather than expanding inline beneath itself; see this
+   *  component's own doc comment above for the CB feedback that prompted the change. */
   function renderRow(row: Row) {
-    const open = openKey === row.key;
     return (
       <SwipeReveal
         key={row.key}
@@ -260,64 +264,95 @@ export default function MessagesInboxView({
         actionClassName="bg-black/[0.06] text-accent-ink"
         onAction={() => setDismissed((prev) => new Set(prev).add(row.key))}
       >
-        <div className="bg-surface border border-border rounded-2xl overflow-hidden">
-          <button
-            type="button"
-            onClick={() => setOpenKey(open ? null : row.key)}
-            className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left hover:bg-black/[0.02] transition-colors"
-          >
-            <div className="min-w-0 flex items-center gap-3">
-              <UserCircleIcon className="h-8 w-8 text-muted shrink-0" />
-              <div className="min-w-0">
-                <p className="text-sm font-medium truncate">{row.name}</p>
-                <p className="text-xs text-muted truncate">
-                  {row.kind === "general" ? "Your general thread" : row.kind === "topic" ? row.subtitle : "Direct message"}
-                </p>
-              </div>
+        <button
+          type="button"
+          onClick={() => setOpenKey(row.key)}
+          className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left bg-surface border border-border rounded-2xl hover:bg-black/[0.02] transition-colors"
+        >
+          <div className="min-w-0 flex items-center gap-3">
+            <UserCircleIcon className="h-8 w-8 text-muted shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">{row.name}</p>
+              <p className="text-xs text-muted truncate">
+                {row.kind === "general" ? "Your general thread" : row.kind === "topic" ? row.subtitle : "Direct message"}
+              </p>
             </div>
-            {row.kind !== "general" && (
-              <div className="flex items-center gap-2 shrink-0">
-                {row.unread > 0 && (
-                  <span className="flex items-center gap-1 rounded-full bg-accent/10 text-accent-ink text-xs font-semibold px-2 py-0.5">
-                    <ChatIcon className="h-3 w-3" />
-                    {row.unread}
-                  </span>
-                )}
-                <span className="text-xs text-muted">
-                  {row.total} message{row.total === 1 ? "" : "s"}
+          </div>
+          {row.kind !== "general" && (
+            <div className="flex items-center gap-2 shrink-0">
+              {row.unread > 0 && (
+                <span className="flex items-center gap-1 rounded-full bg-accent/10 text-accent-ink text-xs font-semibold px-2 py-0.5">
+                  <ChatIcon className="h-3 w-3" />
+                  {row.unread}
                 </span>
-              </div>
-            )}
-          </button>
-          {open && (
-            <div className="border-t border-border p-3">
-              {row.kind === "general" && (
-                <TeamNotesThread employeeId={viewerId} viewerId={viewerId} onRead={() => router.refresh()} />
               )}
-              {row.kind === "topic" && (
-                <TeamNotesThread
-                  employeeId={row.c.employeeId}
-                  viewerId={viewerId}
-                  topicType={row.c.topicType}
-                  topicId={row.c.topicId}
-                  topicDate={row.c.topicDate ?? undefined}
-                  onRead={() => router.refresh()}
-                />
-              )}
-              {row.kind === "dm" && (
-                <DirectMessageThread
-                  otherEmployeeId={row.employeeId}
-                  viewerId={viewerId}
-                  canUseInternalNotes={canUseInternalNotes}
-                  initialRef={pendingRef}
-                  onInitialRefConsumed={() => setPendingRef(null)}
-                  onRead={() => router.refresh()}
-                />
-              )}
+              <span className="text-xs text-muted">
+                {row.total} message{row.total === 1 ? "" : "s"}
+              </span>
             </div>
           )}
-        </div>
+        </button>
       </SwipeReveal>
+    );
+  }
+
+  /** Mobile — the full separate screen a tapped row now opens (CB: "open a full separate
+   *  screen"), replacing this whole list rather than expanding beneath the row. Same header shape
+   *  as the desktop pane's own renderThreadPane below (avatar, name, subtitle/job-title), plus a
+   *  "← Back" control that just clears `openKey` back to null, and the same thread component
+   *  rendered via its `fill` prop so it fills this screen edge-to-edge exactly like the desktop
+   *  pane does. `fixed inset-0` takes over the full viewport rather than just this component's own
+   *  layout column — same "this piece deliberately escapes its own container" reasoning
+   *  DirectMessageThread's own reply-thread overlay already uses, just one layer further out
+   *  (z-40, below that overlay's z-50, so a reply thread opened from inside this screen still
+   *  stacks correctly on top of it). */
+  function renderMobileThread(row: Row) {
+    const entry = row.kind !== "general" ? directoryById.get(rowEmployeeId(row) ?? "") : undefined;
+    const subtitle =
+      row.kind === "general" ? "Your general thread" : row.kind === "topic" ? row.subtitle : entry?.jobTitle || "Direct message";
+    return (
+      <div className="fixed inset-0 z-40 bg-background flex flex-col">
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-border shrink-0">
+          <button type="button" onClick={() => setOpenKey(null)} className="text-sm font-medium text-muted hover:text-accent-ink shrink-0">
+            ← Back
+          </button>
+          <span
+            className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0"
+            style={{ background: "var(--ttc-blue)" }}
+          >
+            {row.kind === "general" ? <UserCircleIcon className="h-4 w-4" /> : initialsOf(row.name)}
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold truncate">{row.name}</p>
+            <p className="text-xs text-muted truncate">{subtitle}</p>
+          </div>
+        </div>
+        <div className="flex-1 min-h-0">
+          {row.kind === "general" && <TeamNotesThread employeeId={viewerId} viewerId={viewerId} onRead={() => router.refresh()} fill />}
+          {row.kind === "topic" && (
+            <TeamNotesThread
+              employeeId={row.c.employeeId}
+              viewerId={viewerId}
+              topicType={row.c.topicType}
+              topicId={row.c.topicId}
+              topicDate={row.c.topicDate ?? undefined}
+              onRead={() => router.refresh()}
+              fill
+            />
+          )}
+          {row.kind === "dm" && (
+            <DirectMessageThread
+              otherEmployeeId={row.employeeId}
+              viewerId={viewerId}
+              canUseInternalNotes={canUseInternalNotes}
+              initialRef={pendingRef}
+              onInitialRefConsumed={() => setPendingRef(null)}
+              onRead={() => router.refresh()}
+              fill
+            />
+          )}
+        </div>
+      </div>
     );
   }
 
@@ -426,30 +461,33 @@ export default function MessagesInboxView({
 
   return (
     <div className={isDesktop ? "max-w-6xl" : "max-w-3xl"}>
-      {!isDesktop && (
-        <>
-          <div className="flex items-center justify-between gap-3 mb-1">
-            <h1 className="page-title text-2xl">My Messages</h1>
-            <button
-              type="button"
-              onClick={() => setPickerOpen(true)}
-              className="btn-primary text-sm px-3.5 py-2 flex items-center gap-1.5 shrink-0"
-            >
-              <span className="text-base leading-none">+</span>
-              New message
-            </button>
-          </div>
-          <p className="text-sm text-muted mb-4">
-            Hi {viewerName} — every conversation in one place: your general thread, messages about a specific date or
-            request, and direct messages with teammates.
-          </p>
+      {!isDesktop &&
+        (openKey ? (
+          renderMobileThread([generalRow, ...rows].find((r) => r.key === openKey) ?? generalRow)
+        ) : (
+          <>
+            <div className="flex items-center justify-between gap-3 mb-1">
+              <h1 className="page-title text-2xl">My Messages</h1>
+              <button
+                type="button"
+                onClick={() => setPickerOpen(true)}
+                className="btn-primary text-sm px-3.5 py-2 flex items-center gap-1.5 shrink-0"
+              >
+                <span className="text-base leading-none">+</span>
+                New message
+              </button>
+            </div>
+            <p className="text-sm text-muted mb-4">
+              Hi {viewerName} — every conversation in one place: your general thread, messages about a specific date or
+              request, and direct messages with teammates.
+            </p>
 
-          <div className="space-y-2.5">
-            {renderRow(generalRow)}
-            {rows.map(renderRow)}
-          </div>
-        </>
-      )}
+            <div className="space-y-2.5">
+              {renderRow(generalRow)}
+              {rows.map(renderRow)}
+            </div>
+          </>
+        ))}
 
       {isDesktop && (
         <>
