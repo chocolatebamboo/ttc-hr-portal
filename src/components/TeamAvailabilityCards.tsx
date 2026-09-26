@@ -1507,13 +1507,17 @@ export function Card({
             </div>
           )}
 
-          {/* Two-step approval workflow (CB, Sept 2026, from the real meeting with Daijour):
-              approving a date doesn't finish anything by itself — it pings the admin who pushes
-              a task for that date, and THAT push is what confirms the shift, in one action.
-              There's deliberately no manual "Confirm as Shift" button here anymore (that used to
-              skip the task requirement entirely) — this row is read-only: either the shift's
-              already confirmed (a task was pushed), or it's sitting in the admin's own "needs a
-              task" queue, and DateTasksPanel right below is where that actually happens. */}
+          {/* CB, Sept 2026: "we shouldn't have to have a task in order for it to be approved...
+              admin is supposed to be able to approve it even without it." Replaces the earlier
+              "two-step" workflow (from the real meeting with Daijour) where approving a date
+              didn't finish anything by itself and only pushing a task for that date confirmed
+              the shift — a date sitting Approved with no task looked unresolved, like a denial.
+              Now approving a date confirms its shift immediately and atomically
+              (autoConfirmShiftForApprovedDate, src/lib/availability.ts), so this almost always
+              shows "Scheduled as a shift." The "not yet" branch below is only a legacy fallback
+              for a date approved before this existed — pushing any task for it still links the
+              shift as a side effect (createDateTask's own fallback), or Undo and re-approve to
+              confirm it immediately the normal way. */}
           {openDecision?.status === "APPROVED" && (() => {
             const existingShift = shiftsByDate.get(`${openSubmission.id}:${openChip.date}`);
             return (
@@ -1526,7 +1530,7 @@ export function Card({
                   </div>
                 ) : (
                   <span className="text-xs font-semibold text-white/85">
-                    Approved — push a task below to confirm the shift
+                    Approved — not yet linked to a shift (push a task below, or Undo and re-approve, to link one)
                   </span>
                 )}
               </div>
@@ -1539,7 +1543,9 @@ export function Card({
               the employee's dashboard marks it done, this panel confirms it). Correction brief
               #2: each task now carries its own comment thread (DateTaskRow) instead of sharing
               one standalone conversation with every other task on this date — see this
-              component's own doc comment for what that replaced. */}
+              component's own doc comment for what that replaced. CB, later: pushing a task here
+              is a fully optional add-on — it no longer has anything to do with confirming the
+              shift (see the block above). */}
           <div>
             <p className="text-xs font-semibold text-white/80 mb-1.5 flex items-center gap-1.5">
               <ChecklistIcon className="h-3.5 w-3.5 text-white/80" />
