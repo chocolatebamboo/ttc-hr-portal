@@ -6,10 +6,12 @@ import { DownloadIcon, ChecklistIcon, CalendarIcon, LockIcon, ClockIcon, ChatIco
 import { QUICK_REACTION_EMOJIS } from "@/types";
 import type { DirectMessageDTO, DirectMessageThreadDTO, DirectScheduledMessageDTO, DirectoryEntryDTO } from "@/types";
 
-/** What a "Message about this date" link (Phase 5d) or an already-sent message's own `ref`
- *  actually is today — only ever AVAILABILITY_DATE from the client side (see postMessage's own
- *  doc comment in src/lib/direct-messages.ts for why DATE_TASK stays server-only). */
-type AttachedRef = { type: "AVAILABILITY_DATE"; id: string; date: string };
+/** What a "Message about this date" link (Phase 5d), the card-level chat icon (round two), or an
+ *  already-sent message's own `ref` actually is today — only ever AVAILABILITY_DATE from the
+ *  client side (see postMessage's own doc comment in src/lib/direct-messages.ts for why DATE_TASK
+ *  stays server-only). `date` is null for the card-level icon, which references the whole
+ *  request rather than one date — see openChat's own doc comment in TeamAvailabilityCards.tsx. */
+type AttachedRef = { type: "AVAILABILITY_DATE"; id: string; date: string | null };
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -100,7 +102,14 @@ function formatScheduledFor(iso: string): string {
  *  (and MessageActionRow below it) no longer render inline by default; MessageBubble now only
  *  shows them once that one message has been long-pressed (held down) — see MessageBubble's own
  *  doc comment for the gesture. Supersedes the previous round's "always-visible row" call, which
- *  turned out to be the wrong read of the mockup. */
+ *  turned out to be the wrong read of the mockup.
+ *
+ *  Round two, same context, against her phone's native Messages long-press (reaction pill row
+ *  sitting above the held message): "when I hold down on one of the message[s]... emojis are
+ *  supposed to show up at the top of the message." MessageBubble now renders this row (and the
+ *  action menu below it) BEFORE the bubble in document flow rather than after — see
+ *  MessageBubble's own render for why that's a plain reorder, not the absolute positioning that
+ *  caused the earlier clipping bug. */
 function ReactionRow({
   reactions,
   busy,
@@ -112,7 +121,7 @@ function ReactionRow({
 }) {
   const byEmoji = new Map(reactions.map((r) => [r.emoji, r]));
   return (
-    <div className="flex flex-wrap gap-1 mt-1">
+    <div className="flex flex-wrap gap-1">
       {QUICK_REACTION_EMOJIS.map((emoji) => {
         const r = byEmoji.get(emoji);
         return (
@@ -134,15 +143,21 @@ function ReactionRow({
   );
 }
 
-/** The small text-link action row under a message — Reply (or "N replies →" once a thread
- *  exists), Add internal note (staff only), Schedule message. Sept 2026 reply-chain redesign:
- *  replaces the old floating icon-only toolbar that used to open on tap/hover above the bubble
- *  (that toolbar's `-top-11` positioning is also what caused the mobile clipping bug fixed
- *  earlier this same round — an always-in-flow row like this can't be clipped by the thread's
- *  own scroll container the way an absolutely-positioned one poking above it could). "Schedule
+/** The message's own action menu — Reply (or "N replies →" once a thread exists), Add internal
+ *  note (staff only), Schedule message. CB, Sept 2026, comparing against her phone's native
+ *  Messages long-press menu (Reply / Attach Sticker / Copy / Translate / Select / Speak / More…,
+ *  stacked in a rounded vertical list): "the reply and the other sub categories... need to...
+ *  be vertical... like they're supposed to show" — replaces this round's earlier horizontal
+ *  text-link row with the same vertical, divided, rounded-menu shape as that reference. Sept
+ *  2026 reply-chain redesign (still true here): replaces the OLDER floating icon-only toolbar
+ *  that used to open on tap/hover above the bubble via absolute positioning (that toolbar's
+ *  `-top-11` offset is what caused the mobile clipping bug fixed earlier this same round) —
+ *  this menu stays in normal document flow (see MessageBubble's own render order below, which
+ *  now places it above the bubble without ever absolutely positioning it), so it still can't be
+ *  clipped by the thread's own scroll container the way that older toolbar could. "Schedule
  *  message" always opens the SAME shared composer at the bottom of the whole thread (see
  *  `onSchedule` below) — it starts a new message to this conversation, not a reply anchored to
- *  whichever message's row you tapped it from; the mockup put one "Schedule message" entry per
+ *  whichever message's menu you opened it from; the mockup put one "Schedule message" entry per
  *  message, but there's only ever one thing to schedule (a fresh message), so this keeps a single
  *  shared composer rather than duplicating scheduling state per message. */
 function MessageActionRow({
@@ -159,22 +174,34 @@ function MessageActionRow({
   onSchedule: () => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs font-medium text-muted">
+    <div className="mt-1.5 w-48 rounded-2xl border border-border bg-surface shadow-lg overflow-hidden divide-y divide-border">
       {onReply && (
-        <button type="button" onClick={onReply} className="flex items-center gap-1 hover:text-accent-ink">
-          <ChatIcon className="h-3.5 w-3.5" />
-          {replyCount && replyCount > 0 ? `${replyCount} ${replyCount === 1 ? "reply" : "replies"} →` : "Reply"}
+        <button
+          type="button"
+          onClick={onReply}
+          className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 text-sm font-medium text-left hover:bg-black/[0.04]"
+        >
+          <span>{replyCount && replyCount > 0 ? `${replyCount} ${replyCount === 1 ? "reply" : "replies"}` : "Reply"}</span>
+          <ChatIcon className="h-4 w-4 text-muted shrink-0" />
         </button>
       )}
       {canUseInternalNotes && (
-        <button type="button" onClick={onNote} className="flex items-center gap-1 hover:text-accent-ink">
-          <LockIcon className="h-3 w-3" />
-          Add internal note
+        <button
+          type="button"
+          onClick={onNote}
+          className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 text-sm font-medium text-left hover:bg-black/[0.04]"
+        >
+          <span>Add internal note</span>
+          <LockIcon className="h-4 w-4 text-muted shrink-0" />
         </button>
       )}
-      <button type="button" onClick={onSchedule} className="flex items-center gap-1 hover:text-accent-ink">
-        <ClockIcon className="h-3.5 w-3.5" />
-        Schedule message
+      <button
+        type="button"
+        onClick={onSchedule}
+        className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 text-sm font-medium text-left hover:bg-black/[0.04]"
+      >
+        <span>Schedule message</span>
+        <ClockIcon className="h-4 w-4 text-muted shrink-0" />
       </button>
     </div>
   );
@@ -320,6 +347,19 @@ function MessageBubble({
             </div>
           );
         })()}
+
+      {/* CB, Sept 2026 (see ReactionRow's own doc comment above): rendered here, before the
+          bubble itself, so the reaction row and action menu sit visually above the message —
+          "emojis are supposed to show up at the top of the message" — as a plain reorder in
+          normal document flow, never absolutely positioned (that's what caused the earlier
+          mobile clipping bug this round already fixed once). */}
+      {revealed && (
+        <div className={`mb-1.5 ${mine ? "self-end" : "self-start"}`}>
+          <ReactionRow reactions={m.reactions} busy={reactingId === m.id} onToggle={(emoji) => onToggleReaction(m.id, emoji)} />
+          {actions}
+        </div>
+      )}
+
       <div
         className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 select-none ${mine ? "text-white" : "bg-black/[0.04]"}`}
         style={mine ? { background: "var(--ttc-blue)" } : undefined}
@@ -361,13 +401,6 @@ function MessageBubble({
         )}
         <p className={`text-[11px] mt-1 ${mine ? "text-white/70" : "text-muted"}`}>{formatMessageTime(m.createdAt)}</p>
       </div>
-
-      {revealed && (
-        <div className={mine ? "self-end" : "self-start"}>
-          <ReactionRow reactions={m.reactions} busy={reactingId === m.id} onToggle={(emoji) => onToggleReaction(m.id, emoji)} />
-          {actions}
-        </div>
-      )}
 
       {canUseInternalNotes && (m.comments.length > 0 || noteDraftId === m.id) && (
         <div className="max-w-[86%] mt-1 rounded-xl border border-dashed border-border bg-black/[0.025] px-3 py-2">
@@ -647,7 +680,10 @@ export default function DirectMessageThread({
       if (attachedRef) {
         form.set("refType", attachedRef.type);
         form.set("refId", attachedRef.id);
-        form.set("refDate", attachedRef.date);
+        // Round two: a card-level ref has no date (see AttachedRef's own doc comment) — omitted
+        // entirely rather than sent as the string "null", so the API route's own refDate?
+        // check treats it exactly like it was never there.
+        if (attachedRef.date) form.set("refDate", attachedRef.date);
       }
       if (schedulingOpen && scheduleWhen) {
         form.set("scheduledFor", new Date(scheduleWhen).toISOString());
@@ -890,7 +926,15 @@ export default function DirectMessageThread({
             <div className="flex items-center gap-2 min-w-0">
               <CalendarIcon className="h-3.5 w-3.5 shrink-0 text-brand-ink" />
               <p className="text-xs truncate">
-                Attached: <span className="font-semibold text-brand-ink">{formatRefDate(attachedRef.date)}</span> availability
+                {attachedRef.date ? (
+                  <>
+                    Attached: <span className="font-semibold text-brand-ink">{formatRefDate(attachedRef.date)}</span> availability
+                  </>
+                ) : (
+                  <>
+                    Attached: <span className="font-semibold text-brand-ink">availability request</span>
+                  </>
+                )}
               </p>
             </div>
             <button
