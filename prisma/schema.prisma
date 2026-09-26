@@ -432,6 +432,22 @@ model DirectMessage {
   replyTo   DirectMessage?  @relation("DirectMessageReply", fields: [replyToId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   replies   DirectMessage[] @relation("DirectMessageReply")
 
+  // Reply-chain UI redesign (CB, Sept 2026, "Reply chain" mockup, confirmed for deployment):
+  // "View N replies" now groups every reply to one message under that message, Slack-thread
+  // style, rather than each reply showing its own inline quoted-preview card. `chainRootId`
+  // always points straight at the ultimate TOP-LEVEL ancestor of a reply chain (never at an
+  // intermediate reply, even if `replyToId` itself somehow pointed at one) — null on a
+  // top-level message, set on every reply — so grouping by it is a flat, one-level "which
+  // thread is this" lookup no matter how deep replyToId chains actually go. This column
+  // already existed on the live table (added in an earlier, never-finished pass at this same
+  // feature — confirmed unused anywhere in the app before this) and is only now getting wired
+  // up, rather than adding a redundant second column with the same job. Populated in postMessage
+  // (src/lib/direct-messages.ts), never by the client. Same ON DELETE SET NULL reasoning as
+  // replyToId above.
+  chainRootId  String?
+  chainRoot    DirectMessage?  @relation("DirectMessageChain", fields: [chainRootId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  chainReplies DirectMessage[] @relation("DirectMessageChain")
+
   // CB, Sept 2026: "I should have the options to include emojis to react to other people's
   // replies." See DirectMessageReaction's own doc comment below for why this is a separate table
   // rather than columns here.
@@ -441,11 +457,25 @@ model DirectMessage {
    *  DirectMessageComment's own doc comment just below for the full scope. */
   comments DirectMessageComment[]
 
+  /** "Schedule message" (CB, Sept 2026, confirmed for deployment): when set, this row is a
+   *  scheduled draft, not a delivered message — see `sentAt` just below and
+   *  sendDueScheduledMessages in src/lib/direct-messages.ts for how it actually goes out. Null
+   *  for every ordinary immediate message. */
+  scheduledFor DateTime?
+  /** When this message actually became visible to its recipient. Stamped at creation time for
+   *  an ordinary immediate message (same moment as `createdAt`); stays null for a scheduled
+   *  message until POST /api/cron/scheduled-messages flips it once `scheduledFor` has passed.
+   *  Every thread/inbox query filters on "sentAt is not null" — see listMessages'/
+   *  listConversationSummaries' own comments in src/lib/direct-messages.ts. */
+  sentAt DateTime?
+
   createdAt DateTime @default(now())
 
   @@index([senderId, recipientId, createdAt])
   @@index([recipientId, senderId, createdAt])
   @@index([replyToId])
+  @@index([chainRootId])
+  @@index([scheduledFor])
 }
 
 /**
