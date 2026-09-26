@@ -232,7 +232,7 @@ export default function DateTasksPanel({
           >
             +
           </span>
-          Create task
+          Create a task
         </button>
       )}
     </div>
