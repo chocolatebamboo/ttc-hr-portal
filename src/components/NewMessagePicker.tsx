@@ -13,13 +13,23 @@ import type { DirectoryEntryDTO } from "@/types";
  * (same reasoning DirectoryView's own doc comment gives). `viewerId` is filtered out — you can't
  * start a conversation with yourself (direct-messages.ts's postMessage rejects it server-side
  * too; this just keeps it off the list in the first place).
+ *
+ * `title`/`filter` (added for the Team Availability "loop in an admin" flow, Sept 2026, CB: "I
+ * should have the option to kind of like message internally and choose which admin I would like
+ * that message to go to"): this same picker — same directory fetch, same search — narrowed down
+ * to just the staff roster and relabeled, rather than a second, near-identical component. `filter`
+ * runs before the search query so a search inside a narrowed picker can only ever narrow further.
  */
 export default function NewMessagePicker({
   viewerId,
+  title = "New message",
+  filter,
   onPick,
   onClose,
 }: {
   viewerId: string;
+  title?: string;
+  filter?: (entry: DirectoryEntryDTO) => boolean;
   onPick: (entry: DirectoryEntryDTO) => void;
   onClose: () => void;
 }) {
@@ -44,10 +54,11 @@ export default function NewMessagePicker({
   }, [viewerId]);
 
   const filtered = useMemo(() => {
+    const base = filter ? entries.filter(filter) : entries;
     const q = query.trim().toLowerCase();
-    if (!q) return entries;
-    return entries.filter((e) => [e.name, e.jobTitle, e.department ?? ""].some((f) => f.toLowerCase().includes(q)));
-  }, [entries, query]);
+    if (!q) return base;
+    return base.filter((e) => [e.name, e.jobTitle, e.department ?? ""].some((f) => f.toLowerCase().includes(q)));
+  }, [entries, filter, query]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -55,7 +66,7 @@ export default function NewMessagePicker({
         className="w-full sm:max-w-sm bg-surface rounded-3xl sm:rounded-2xl p-5 max-h-[80vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <p className="text-sm font-semibold mb-3">New message</p>
+        <p className="text-sm font-semibold mb-3">{title}</p>
 
         <div className="relative mb-3 shrink-0">
           <SearchIcon className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" />
