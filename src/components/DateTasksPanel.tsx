@@ -48,6 +48,12 @@ export default function DateTasksPanel({
   const [submitting, setSubmitting] = useState(false);
   const [addError, setAddError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // CB, Sept 2026: "the task should look almost like an add-on... a circle with a plus that says
+  // create task... a submenu where you could enter in the task" — now that pushing a task has
+  // nothing to do with confirming a shift (see TeamAvailabilityCards' own doc comment), the form
+  // no longer needs to sit open by default; it's a collapsed, optional add-on the admin opens on
+  // purpose, same "+" affordance as the per-date "Add a note" button elsewhere on this card.
+  const [showAddForm, setShowAddForm] = useState(false);
 
   async function load() {
     setLoadState("loading");
@@ -91,6 +97,7 @@ export default function DateTasksPanel({
       setFile(null);
       setPriority("NORMAL");
       if (fileInputRef.current) fileInputRef.current.value = "";
+      setShowAddForm(false);
       await load();
     } catch {
       setAddError("Couldn't reach the server. Check your connection and try again.");
@@ -116,75 +123,100 @@ export default function DateTasksPanel({
           ))}
       </div>
 
-      <form onSubmit={addTask} className="mt-2.5 bg-surface border border-border rounded-2xl p-3 space-y-2">
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="Task title…"
-          className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
-        />
-        <textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Instructions or details (optional)…"
-          rows={2}
-          className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent resize-none"
-        />
-        <div className="flex w-full rounded-lg border border-border overflow-hidden text-xs font-semibold" role="radiogroup" aria-label="Priority">
-          <button
-            type="button"
-            role="radio"
-            aria-checked={priority === "NORMAL"}
-            onClick={() => setPriority("NORMAL")}
-            className={`flex-1 px-3.5 py-1.5 transition-colors ${
-              priority === "NORMAL" ? "bg-slate-600 text-white" : "bg-black/[0.03] text-muted hover:bg-black/[0.06]"
-            }`}
-          >
-            Normal
-          </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={priority === "URGENT"}
-            onClick={() => setPriority("URGENT")}
-            className={`flex-1 px-3.5 py-1.5 border-l border-border transition-colors ${
-              priority === "URGENT" ? "bg-rose-600 text-white" : "bg-black/[0.03] text-muted hover:bg-black/[0.06]"
-            }`}
-          >
-            Urgent
-          </button>
-        </div>
-        {addError && <p className="text-xs text-accent">{addError}</p>}
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <input
-              ref={fileInputRef}
-              type="file"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              className="text-xs text-muted file:mr-2 file:rounded-md file:border-0 file:bg-black/[0.05] file:px-2.5 file:py-1.5 file:text-xs file:font-medium max-w-[10rem]"
-            />
-            {file && (
+      {showAddForm ? (
+        <form onSubmit={addTask} className="mt-2.5 bg-surface border border-border rounded-2xl p-3 space-y-2">
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Task title…"
+            autoFocus
+            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
+          />
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Instructions or details (optional)…"
+            rows={2}
+            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent resize-none"
+          />
+          <div className="flex w-full rounded-lg border border-border overflow-hidden text-xs font-semibold" role="radiogroup" aria-label="Priority">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={priority === "NORMAL"}
+              onClick={() => setPriority("NORMAL")}
+              className={`flex-1 px-3.5 py-1.5 transition-colors ${
+                priority === "NORMAL" ? "bg-slate-600 text-white" : "bg-black/[0.03] text-muted hover:bg-black/[0.06]"
+              }`}
+            >
+              Normal
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={priority === "URGENT"}
+              onClick={() => setPriority("URGENT")}
+              className={`flex-1 px-3.5 py-1.5 border-l border-border transition-colors ${
+                priority === "URGENT" ? "bg-rose-600 text-white" : "bg-black/[0.03] text-muted hover:bg-black/[0.06]"
+              }`}
+            >
+              Urgent
+            </button>
+          </div>
+          {addError && <p className="text-xs text-accent">{addError}</p>}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <input
+                ref={fileInputRef}
+                type="file"
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                className="text-xs text-muted file:mr-2 file:rounded-md file:border-0 file:bg-black/[0.05] file:px-2.5 file:py-1.5 file:text-xs file:font-medium max-w-[10rem]"
+              />
+              {file && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFile(null);
+                    if (fileInputRef.current) fileInputRef.current.value = "";
+                  }}
+                  className="text-xs text-muted hover:text-accent-ink shrink-0"
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
               <button
                 type="button"
                 onClick={() => {
-                  setFile(null);
-                  if (fileInputRef.current) fileInputRef.current.value = "";
+                  setShowAddForm(false);
+                  setAddError("");
                 }}
-                className="text-xs text-muted hover:text-accent-ink shrink-0"
+                disabled={submitting}
+                className="text-sm px-2 py-2 text-muted hover:text-accent-ink disabled:opacity-60"
               >
-                Remove
+                Cancel
               </button>
-            )}
+              <button
+                type="submit"
+                disabled={submitting || !title.trim()}
+                className="btn-primary text-sm px-3.5 py-2 disabled:opacity-60"
+              >
+                {submitting ? "Adding…" : "Add task"}
+              </button>
+            </div>
           </div>
-          <button
-            type="submit"
-            disabled={submitting || !title.trim()}
-            className="btn-primary text-sm px-3.5 py-2 shrink-0 disabled:opacity-60"
-          >
-            {submitting ? "Adding…" : "Add task"}
-          </button>
-        </div>
-      </form>
+        </form>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setShowAddForm(true)}
+          className="mt-2.5 inline-flex items-center gap-1.5 text-sm font-semibold text-accent-ink hover:opacity-80"
+        >
+          <span className="flex items-center justify-center h-5 w-5 rounded-full bg-black/[0.06] text-sm leading-none">+</span>
+          Create task
+        </button>
+      )}
     </div>
   );
 }
