@@ -997,23 +997,33 @@ export function Card({
             {initialsOf(employeeName)}
           </span>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
-              <p className="text-base font-semibold text-white truncate">{employeeName}</p>
-              {isSelf && (
-                <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-white bg-white/25 border border-white/40 rounded-full px-1.5 py-0.5">
-                  You
-                </span>
-              )}
-              {/* Folder badge (CB's own confirmed mockup, Sept 2026): replaces the single status
-                  pill/reviewer-name line below once more than one of this person's submissions
-                  are merged into this card — there's no longer one status or one reviewer to
-                  summarize at the card level; each date still shows its own further down. */}
-              {!solo && (
-                <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-white bg-white/20 border border-white/35 rounded-full px-2 py-0.5">
-                  {chips.length} dates · {submissions.length} requests
-                </span>
-              )}
-            </div>
+            {/* CB, Sept 2026: "the name is getting cut off in the mobile view" — the "You" and
+                folder badges used to share this same row as the name, and on a narrow screen the
+                row simply didn't have enough width for a real name plus a "3 DATES · 2 REQUESTS"
+                pill, so the name (a true flex sibling, not the pill) was the one that gave up its
+                space and got truncated down to a couple of characters. The name now gets a row
+                fully to itself — truncate here is just a safety net for a genuinely very long
+                name on a very narrow screen, not the normal case — and the badges wrap onto their
+                own row underneath instead of stealing its width. */}
+            <p className="text-base font-semibold text-white truncate">{employeeName}</p>
+            {(isSelf || !solo) && (
+              <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                {isSelf && (
+                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-white bg-white/25 border border-white/40 rounded-full px-1.5 py-0.5">
+                    You
+                  </span>
+                )}
+                {/* Folder badge (CB's own confirmed mockup, Sept 2026): replaces the single status
+                    pill/reviewer-name line below once more than one of this person's submissions
+                    are merged into this card — there's no longer one status or one reviewer to
+                    summarize at the card level; each date still shows its own further down. */}
+                {!solo && (
+                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-white bg-white/20 border border-white/35 rounded-full px-2 py-0.5">
+                    {chips.length} dates · {submissions.length} requests
+                  </span>
+                )}
+              </div>
+            )}
             {solo && (
               <>
                 <div className="flex items-center gap-2 mt-0.5">
