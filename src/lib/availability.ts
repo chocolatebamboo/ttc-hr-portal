@@ -1101,6 +1101,38 @@ export async function findAvailabilitySubmissionEmployeeId(actor: CurrentEmploye
   });
 }
 
+/** CB, Sept 2026, on the "Loop in an admin" thread: "once we... write a message about that I
+ *  should be able to click that date and then see a preview of everything that's involved with
+ *  that specific date so we could have a conversation about it if needed." Backs the clickable
+ *  reference chip in Messages (DirectMessageThread's MessageBubble) — a staff member who can see
+ *  a message carrying an AVAILABILITY_DATE ref can tap it to open this same submission (status,
+ *  slot time, per-date decision, reviewer note) without leaving the conversation. Same
+ *  authorization as the reviewer-only actions this submission already supports
+ *  (assertCanReviewAvailability, checked by the caller — see the route this backs) rather than a
+ *  broader "anyone looped into the thread" grant: being invited into a staff DM about a date
+ *  doesn't by itself give visibility into that employee's full availability record, the same way
+ *  it doesn't unlock Approve/Deny on it. Returns null (never throws) when the submission itself
+ *  no longer exists — a removed/cleaned-up request the ref still points at — so the caller can
+ *  show "no longer available" instead of a hard error. */
+export async function getAvailabilitySubmissionForReview(
+  actor: CurrentEmployee,
+  submissionId: string
+): Promise<AdminAvailabilityDTO | null> {
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const row = await tx.availabilitySubmission.findUnique({
+      where: { id: submissionId },
+      include: { employee: { select: { firstName: true, lastName: true, preferredName: true } } },
+    });
+    if (!row) return null;
+    const names = await resolveReviewerNames(tx, [row]);
+    return {
+      ...toDTO(row, names),
+      employeeId: row.employeeId,
+      employeeName: `${row.employee.preferredName || row.employee.firstName} ${row.employee.lastName}`,
+    };
+  });
+}
+
 /**
  * Correction brief #9 (Sept 2026): "persist dismissal state" for "dismissible notifications and
  * availability records" — a Decided card's own dismiss key, content-derived exactly like
