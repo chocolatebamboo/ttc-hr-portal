@@ -223,8 +223,18 @@ function useTeamAvailabilityQueue(opts?: { initialPending?: AdminAvailabilityDTO
   // member's DM conversation pre-opened. `employeeName` only seeds the row's label for a
   // conversation that doesn't exist yet — once real messages exist, the fetched
   // DirectConversationSummaryDTO's own employeeName takes over, same as NewMessagePicker's flow.
-  function openChat(employeeId: string, employeeName: string) {
-    router.push(`/messages?dm=${employeeId}&name=${encodeURIComponent(employeeName)}`);
+  //
+  // Round two (Sept 2026), CB: "when we click on the chat icon at the top of one of the
+  // cards... I'm still not seeing it be in line to... see that card information." `submissionId`
+  // is optional and, when given, pre-attaches a reference to the WHOLE request (same
+  // AVAILABILITY_DATE ref type openChatForDate below uses for one date, just with no date —
+  // DirectMessageThread and the API route both already treat a dateless ref this way, see their
+  // own doc comments). Card only ever passes this for a `solo` (unmerged) card — a merged card's
+  // "N dates · M requests" badge means there's no one request to reference, same reasoning that
+  // already keeps swipe-to-remove off a merged card.
+  function openChat(employeeId: string, employeeName: string, submissionId?: string) {
+    const ref = submissionId ? `&refType=AVAILABILITY_DATE&refId=${submissionId}` : "";
+    router.push(`/messages?dm=${employeeId}&name=${encodeURIComponent(employeeName)}${ref}`);
   }
 
   // Phase 5d (CB, Sept 2026): "chat icons on availability requests linked to specific dates" —
@@ -911,7 +921,10 @@ export function Card({
   onUndoDate: (submissionId: string, date: string) => void;
   onRemoveConfirm: (submissionId: string) => void;
   onRemoveCancel: () => void;
-  onOpenChat: (employeeId: string, employeeName: string) => void;
+  /** Round two: `submissionId` is optional — Card only ever passes it for a `solo` card, so the
+   *  attached reference points at a real, unambiguous request. See openChat's own doc comment in
+   *  useTeamAvailabilityQueue above. */
+  onOpenChat: (employeeId: string, employeeName: string, submissionId?: string) => void;
   /** Phase 5d: same navigation as onOpenChat, scoped to one date — see openChatForDate's own
    *  doc comment above for what it pre-attaches. */
   onMessageAboutDate: (employeeId: string, employeeName: string, submissionId: string, date: string) => void;
@@ -1170,11 +1183,14 @@ export function Card({
           {/* Correction brief #11 (Sept 2026): "The chat bubble on an availability request
               should take the user into My Messages... open the relevant conversation/thread for
               that specific team member." Not shown on the viewer's own card — messaging yourself
-              isn't a real conversation. */}
+              isn't a real conversation. Round two: passes `solo?.id` so the thread that opens
+              carries a reference back to this request — only meaningful (and only possible) on
+              an unmerged card, same as the "− dates · − requests" badge only ever hiding on
+              `solo`. */}
           {!isSelf && (
             <button
               type="button"
-              onClick={() => onOpenChat(employeeId, employeeName)}
+              onClick={() => onOpenChat(employeeId, employeeName, solo?.id)}
               className="relative h-8 w-8 rounded-full bg-white/20 flex items-center justify-center hover:bg-white/30 transition-colors"
               title={`Message ${employeeName}`}
             >
