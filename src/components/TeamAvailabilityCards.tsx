@@ -6,10 +6,11 @@ import AvailabilityStatusPill from "@/components/AvailabilityStatusPill";
 import ShiftStatusPill from "@/components/ShiftStatusPill";
 import DateTasksPanel from "@/components/DateTasksPanel";
 import SwipeReveal from "@/components/SwipeReveal";
+import NewMessagePicker from "@/components/NewMessagePicker";
 import { ChecklistIcon, CheckCircleIcon, CalendarIcon, TrashIcon, ChatIcon } from "@/components/icons";
 import { slotChips, formatReviewedAt, type SlotChip } from "@/lib/availability-format";
 import { toneForStatus, YOU_TONE } from "@/lib/status-tone";
-import type { AdminAvailabilityDTO, AdminShiftDTO, AvailabilityDateDecision } from "@/types";
+import type { AdminAvailabilityDTO, AdminShiftDTO, AvailabilityDateDecision, DirectoryEntryDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -991,6 +992,15 @@ export function Card({
   const [creatingShift, setCreatingShift] = useState(false);
   const [createShiftError, setCreateShiftError] = useState("");
 
+  // CB, Sept 2026: "I'm still not seeing a thread created when I click on the chat icon... I
+  // should have the option to kind of like message internally and choose which admin I would
+  // like that message to go to." A second, separate channel from "Message about this date"
+  // above: that one still messages the team member directly, unchanged; this loops in another
+  // staff member privately about this specific date, visible only to staff. Reuses the exact
+  // same onMessageAboutDate prop (the hook's openChatForDate, already recipient-agnostic) with a
+  // chosen admin's id/name instead of the card's own employee — no new hook function needed.
+  const [adminPickerOpen, setAdminPickerOpen] = useState(false);
+
   // CB, Sept 2026, round three: "instead of the yellow background, I want the pink
   // background" (Approved) / "I think the pending color should be that yellow as well" —
   // confirmed this replaces the old per-employee tone entirely: color now signals the
@@ -1695,6 +1705,40 @@ export function Card({
               )}
             </div>
           )}
+
+          {/* CB, Sept 2026: "I should have the option to kind of like message internally and
+              choose which admin I would like that message to go to" — available regardless of
+              this date's decision status, and even on the viewer's own card: looping in another
+              admin about your own request is a real, useful case that messaging yourself never
+              was (unlike "Message about this date" above, which stays hidden on your own card).
+              Filtered to staff (isStaff's own SUPER_ADMIN/HR_ADMIN/SUPERVISOR grouping,
+              src/lib/authorization.ts) and excludes this card's own employee, so a supervisor
+              can't "loop in" themselves about their own availability. */}
+          <div>
+            <button
+              type="button"
+              onClick={() => setAdminPickerOpen(true)}
+              className="flex items-center gap-1.5 rounded-full bg-white/15 border border-white/35 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-white/25"
+            >
+              <ChatIcon className="h-3.5 w-3.5" />
+              Loop in an admin about this date
+            </button>
+            {adminPickerOpen && (
+              <NewMessagePicker
+                viewerId={viewerId}
+                title="Loop in an admin"
+                filter={(entry: DirectoryEntryDTO) =>
+                  entry.id !== employeeId &&
+                  (entry.role === "SUPER_ADMIN" || entry.role === "HR_ADMIN" || entry.role === "SUPERVISOR")
+                }
+                onPick={(entry) => {
+                  setAdminPickerOpen(false);
+                  onMessageAboutDate(entry.id, entry.name, openSubmission.id, openChip.date);
+                }}
+                onClose={() => setAdminPickerOpen(false)}
+              />
+            )}
+          </div>
 
           {/* CB, Sept 2026: "we shouldn't have to have a task in order for it to be approved...
               admin is supposed to be able to approve it even without it." Replaces the earlier
