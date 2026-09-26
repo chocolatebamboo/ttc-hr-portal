@@ -496,8 +496,24 @@ export interface DirectMessageDTO {
   attachmentName: string | null;
   createdAt: string; // ISO
   ref: DirectMessageRefDTO | null;
-  /** The message this one is quoting, if any — CB's "reply to a specific message" (Sept 2026). */
+  /** The message this one is quoting, if any — CB's "reply to a specific message" (Sept 2026).
+   *  Kept for existing data/back-compat; the current UI no longer renders an inline quote card
+   *  from it (see `chainRootId`/`replyCount` below) but still reads it as the "replying to
+   *  yourself"/"replying to X" label inside an open thread panel's draft banner. */
   replyTo: DirectMessageReplyPreviewDTO | null;
+  /** Reply-chain redesign (CB, Sept 2026, "Reply chain" mockup): null on a top-level message;
+   *  on a reply, always the id of the ultimate top-level ancestor of its chain (never an
+   *  intermediate reply's id) — see DirectMessage.chainRootId's own doc comment in
+   *  prisma/schema.prisma. The client groups the flat `messages` array into threads with this:
+   *  render every message with `chainRootId === null` in the main list, and every message whose
+   *  `chainRootId` equals some top-level message's `id` only inside that message's own expanded
+   *  thread panel, never in the main list. */
+  chainRootId: string | null;
+  /** How many replies this message's own thread has — only ever non-zero on a top-level message
+   *  (chainRootId === null); always 0 on a reply itself, since replies don't nest further. Drives
+   *  the "View N replies →" affordance without the client having to count `chainRootId` matches
+   *  itself. */
+  replyCount: number;
   /** Quick-reaction tallies on this message, one entry per emoji actually used — never all six,
    *  never zero-count placeholders. Empty array, not null, when nobody's reacted. */
   reactions: DirectMessageReactionSummaryDTO[];
@@ -507,16 +523,35 @@ export interface DirectMessageDTO {
   comments: DirectMessageCommentDTO[];
 }
 
+/** "Schedule message" (CB, Sept 2026, confirmed for deployment): one of the viewer's own
+ *  still-pending scheduled messages in a thread — never anyone else's (RLS backs this up
+ *  independently, see direct_message_select in prisma/rls.sql: a recipient can't read an unsent
+ *  scheduled row at all). Deliberately thin like DirectMessageReplyPreviewDTO, not a full
+ *  DirectMessageDTO — there's nothing to react to, reply to, or note on a message that hasn't
+ *  gone out yet. */
+export interface DirectScheduledMessageDTO {
+  id: string;
+  body: string;
+  hasAttachment: boolean;
+  attachmentName: string | null;
+  scheduledFor: string; // ISO
+}
+
 /** The GET /api/messages/dm/[employeeId] response shape — CB, Sept 2026: "I should be able to
  *  see also when they read the message on their side." `otherLastReadAt` is the OTHER
  *  participant's own lastReadAt for this one thread (null if they've never opened it), enabled by
  *  message_read_state_select_dm_peer's narrow RLS widening (see prisma/rls.sql) — never any
  *  other thread's read state, and never the viewer's own (that's implicit in having just loaded
  *  the thread). The client uses it to show a "Seen" mark under the last message the viewer sent
- *  that's at or before that timestamp, same idea as iMessage's own read receipt. */
+ *  that's at or before that timestamp, same idea as iMessage's own read receipt.
+ *
+ *  `scheduled` (Sept 2026, "Schedule message") is the viewer's OWN still-pending scheduled
+ *  messages to this recipient, oldest-due-first — never populated with anyone else's, and
+ *  entirely separate from `messages` (which only ever holds already-sent messages). */
 export interface DirectMessageThreadDTO {
   messages: DirectMessageDTO[];
   otherLastReadAt: string | null; // ISO
+  scheduled: DirectScheduledMessageDTO[];
 }
 
 /** One row per DM conversation, most-recent-activity-first — same total/fromOthers/unread shape
