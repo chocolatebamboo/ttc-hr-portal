@@ -27,12 +27,20 @@ export default function DateTasksPanel({
   employeeId,
   taskDate,
   viewerId,
+  onColor = false,
 }: {
   employeeId: string;
   taskDate: string;
   /** The signed-in admin/supervisor viewing this panel — passed straight through to DateTaskRow
    *  so its comment thread knows which side of a bubble is "you." */
   viewerId: string;
+  /** CB, Sept 2026: "it's blending too much. It's supposed to be white" — true only on
+   *  TeamAvailabilityCards' call site, where this panel sits directly on a solid same-hue
+   *  gradient card (no white/bordered box behind it) and the default dark "+ Create task"
+   *  treatment nearly disappears. TeamScheduleView's own call site sits on a plain bg-surface
+   *  card instead, so it leaves this false — same onColor pattern AvailabilityStatusPill already
+   *  uses for this exact "same component, two different background contexts" problem. */
+  onColor?: boolean;
 }) {
   const [tasks, setTasks] = useState<DateTaskDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
@@ -114,9 +122,11 @@ export default function DateTasksPanel({
       <div className="space-y-2.5 max-h-[28rem] overflow-y-auto p-0.5">
         {loadState === "loading" && <div className="h-16 rounded-2xl bg-black/[0.04] animate-pulse" />}
         {loadState === "error" && <p className="text-sm text-accent">Unable to load tasks. Please try again.</p>}
-        {loadState === "ready" && tasks.length === 0 && (
-          <p className="text-sm text-muted">No tasks pushed for this date yet.</p>
-        )}
+        {/* CB, Sept 2026: "I shouldn't see that prompted message like there's no task cause...
+            it's optional... they should be able to do it whenever" — tasks are a fully optional
+            add-on now (see this panel's own doc comment above), so an empty list needs no
+            message at all; the "+ Create task" affordance below already reads as available on
+            its own. */}
         {loadState === "ready" &&
           tasks.map((t) => (
             <DateTaskRow key={t.id} task={t} viewerId={viewerId} canReview onChanged={load} />
@@ -211,9 +221,17 @@ export default function DateTasksPanel({
         <button
           type="button"
           onClick={() => setShowAddForm(true)}
-          className="mt-2.5 inline-flex items-center gap-1.5 text-sm font-semibold text-accent-ink hover:opacity-80"
+          className={`mt-2.5 inline-flex items-center gap-1.5 text-sm font-semibold ${
+            onColor ? "text-white/90 hover:text-white" : "text-accent-ink hover:opacity-80"
+          }`}
         >
-          <span className="flex items-center justify-center h-5 w-5 rounded-full bg-black/[0.06] text-sm leading-none">+</span>
+          <span
+            className={`flex items-center justify-center h-5 w-5 rounded-full text-sm leading-none ${
+              onColor ? "bg-white/25 text-white" : "bg-black/[0.06]"
+            }`}
+          >
+            +
+          </span>
           Create task
         </button>
       )}
