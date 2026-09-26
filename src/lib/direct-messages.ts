@@ -199,10 +199,14 @@ function toDTO(row: MessageRow, labels: Map<string, string>, actorId: string, ac
  *  CB: "chat icons on availability requests linked to specific dates") resolves to that one
  *  date's own time range, e.g. "9:00 AM–5:00 PM" — a submission's `slots` can cover several
  *  dates, so this fans one fetched submission out into one label per date it actually has, keyed
- *  by date (see toDTO's own lookup above). PTO_REQUEST is declared on DirectMessageRefType
- *  (prisma/schema.prisma's own doc comment reserved all three from the start) but nothing
- *  attaches it yet. An unresolvable ref just renders as a plain message with no card, never an
- *  error — same as an id that's since been deleted. */
+ *  by date (see toDTO's own lookup above). Round two (Sept 2026), CB: "I'm still not seeing it
+ *  be in line to... see that card information" — the card-level chat icon (not scoped to one
+ *  date) now attaches the same AVAILABILITY_DATE ref type with `date: null` for the "N dates
+ *  submitted" case; this loop also writes that summary label under the empty-date key so toDTO's
+ *  lookup (`refDate ?? ""`) resolves it the same way a specific date's label does. PTO_REQUEST is
+ *  declared on DirectMessageRefType (prisma/schema.prisma's own doc comment reserved all three
+ *  from the start) but nothing attaches it yet. An unresolvable ref just renders as a plain
+ *  message with no card, never an error — same as an id that's since been deleted. */
 async function resolveRefLabels(
   tx: PrismaClient,
   rows: MessageRow[]
@@ -228,6 +232,7 @@ async function resolveRefLabels(
       for (const slot of slots) {
         labels.set(`AVAILABILITY_DATE:${s.id}:${slot.date}`, `${formatTime12h(slot.startTime)}–${formatTime12h(slot.endTime)}`);
       }
+      labels.set(`AVAILABILITY_DATE:${s.id}:`, `${slots.length} ${slots.length === 1 ? "date" : "dates"} submitted`);
     }
   }
 
@@ -367,6 +372,7 @@ export async function listMessages(actor: CurrentEmployee, otherEmployeeId: stri
   await markThreadRead(actor, threadKeyForDirectMessage(actor.id, otherEmployeeId));
 
   const otherLastReadAtDate = await getPeerLastRead(actor, otherEmployeeId);
+
   return { messages, otherLastReadAt: otherLastReadAtDate ? otherLastReadAtDate.toISOString() : null, scheduled };
 }
 
