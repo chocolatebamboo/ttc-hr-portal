@@ -378,6 +378,41 @@ function useTeamAvailabilityQueue(opts?: { initialPending?: AdminAvailabilityDTO
     }
   }
 
+  // CB, Sept 2026: "I should be able to create a schedule as an admin for them as well...
+  // let's say one of the admin wants to create unavailable schedule or something like that for
+  // it. I wanna be able to have them have that flexibility within that card as well." A shift
+  // assigned directly for this employee, independent of any availability submission — for a
+  // date they never submitted at all, which is exactly the case Team Schedule's own "Create a
+  // shift manually" form (TeamScheduleView.tsx) already covers, just without a picker since the
+  // employee is already fixed by whichever card this was opened from. Posts straight to the
+  // same POST /api/admin/shifts endpoint and createShiftManually (src/lib/shifts.ts) that form
+  // uses, so the two stay in lockstep rather than growing a second implementation. Returns the
+  // error string on failure (or null on success) rather than tracking its own busy/error state
+  // here — Card manages the form's open/busy/error state locally, the same "self-contained
+  // inline form" shape DateTasksPanel's own add-task form already uses, since this action isn't
+  // tied to any one submission the way the rest of this hook's state is keyed.
+  async function createShift(input: {
+    employeeId: string;
+    date: string;
+    startTime: string;
+    endTime: string;
+    note?: string;
+  }): Promise<string | null> {
+    try {
+      const res = await fetch("/api/admin/shifts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return data.error ?? "Unable to create that shift. Please try again.";
+      loadShifts();
+      return null;
+    } catch {
+      return "Couldn't reach the server. Check your connection and try again.";
+    }
+  }
+
   async function undo(submissionId: string) {
     setBusyId(submissionId);
     try {
@@ -488,6 +523,7 @@ function useTeamAvailabilityQueue(opts?: { initialPending?: AdminAvailabilityDTO
     undo,
     undoDate,
     changeDate,
+    createShift,
   };
 }
 
@@ -672,6 +708,7 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                   onOpenChat={q.openChat}
                   onMessageAboutDate={q.openChatForDate}
                   onRemoveDate={q.removeDate}
+                  onCreateShift={q.createShift}
                 />
               );
               // Swipe-to-remove targets ONE submission (removeAvailabilitySubmission takes a
@@ -740,6 +777,7 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
                   onOpenChat={q.openChat}
                   onMessageAboutDate={q.openChatForDate}
                   onRemoveDate={q.removeDate}
+                  onCreateShift={q.createShift}
                 />
               );
               return soleId !== null ? (
@@ -837,6 +875,7 @@ export function Card({
   onOpenChat,
   onMessageAboutDate,
   onRemoveDate,
+  onCreateShift,
 }: {
   submissions: AdminAvailabilityDTO[];
   viewerId: string;
@@ -876,6 +915,21 @@ export function Card({
    *  doc comment above for what it pre-attaches. */
   onMessageAboutDate: (employeeId: string, employeeName: string, submissionId: string, date: string) => void;
   onRemoveDate: (submissionId: string, date: string) => void;
+  /** CB, Sept 2026: "I should be able to create a schedule as an admin for them as well... one
+   *  of the admin wants to create unavailable schedule or something like that for it... I wanna
+   *  have them have that flexibility within that card as well." Reuses the same manual-shift
+   *  infrastructure TeamScheduleView's own "Create a shift manually" form already calls
+   *  (POST /api/admin/shifts → createShiftManually, src/lib/shifts.ts) — this is just a
+   *  scoped-down entry point for it, embedded directly on the card, with the employee already
+   *  fixed. Returns an error string on failure, or null on success, mirroring onChangeDate's own
+   *  "hand the error back, let the caller manage its own busy/error state" shape. */
+  onCreateShift: (input: {
+    employeeId: string;
+    date: string;
+    startTime: string;
+    endTime: string;
+    note?: string;
+  }) => Promise<string | null>;
 }) {
   const { employeeId, employeeName } = submissions[0];
   const isSelf = employeeId === viewerId;
@@ -922,6 +976,20 @@ export function Card({
   const [adjustStart, setAdjustStart] = useState("");
   const [adjustEnd, setAdjustEnd] = useState("");
   const [adjustDateComment, setAdjustDateComment] = useState("");
+
+  // CB, Sept 2026: "I should be able to create a schedule as an admin for them as well... I wanna
+  // be able to have them have that flexibility within that card as well" — a new, always-available
+  // "+ Add a date" affordance (not gated by solo/isSelf like the chips above, since this creates a
+  // brand new shift rather than acting on an existing request) that assigns this employee a shift
+  // directly. Mirrors TeamScheduleView's own CreateShiftForm field set, minus the employee picker —
+  // this card already fixes which employee.
+  const [addingDate, setAddingDate] = useState(false);
+  const [newShiftDate, setNewShiftDate] = useState("");
+  const [newShiftStart, setNewShiftStart] = useState("09:00");
+  const [newShiftEnd, setNewShiftEnd] = useState("17:00");
+  const [newShiftNote, setNewShiftNote] = useState("");
+  const [creatingShift, setCreatingShift] = useState(false);
+  const [createShiftError, setCreateShiftError] = useState("");
 
   // CB, Sept 2026, round three: "instead of the yellow background, I want the pink
   // background" (Approved) / "I think the pending color should be that yellow as well" —
@@ -984,6 +1052,30 @@ export function Card({
     onChangeDate(openSubmission.id, adjustingDate, newDate, adjustStart, adjustEnd, adjustDateComment.trim() || undefined);
     setAdjustingDate(null);
     setAdjustDateComment("");
+  }
+
+  async function submitCreateShift() {
+    if (!newShiftDate) return;
+    setCreatingShift(true);
+    setCreateShiftError("");
+    const error = await onCreateShift({
+      employeeId,
+      date: newShiftDate,
+      startTime: newShiftStart,
+      endTime: newShiftEnd,
+      note: newShiftNote.trim() || undefined,
+    });
+    setCreatingShift(false);
+    if (error) {
+      setCreateShiftError(error);
+      return;
+    }
+    setAddingDate(false);
+    setNewShiftDate("");
+    setNewShiftStart("09:00");
+    setNewShiftEnd("17:00");
+    setNewShiftNote("");
+    setCreateShiftError("");
   }
 
   return (
@@ -1146,6 +1238,85 @@ export function Card({
         </div>
       ) : (
         <p className="text-sm text-white/80 mt-2">No dates marked available.</p>
+      )}
+
+      {/* CB, Sept 2026: "let's say one of the admin wants to create unavailable schedule or
+          something like that for it... I wanna be able to have them have that flexibility within
+          that card as well" — assigns {employeeName} a shift directly, same
+          POST /api/admin/shifts flow TeamScheduleView's own manual-shift form already uses.
+          Always available (not tied to any one submission/date above), so it sits on its own,
+          separate from the chip list and its Edit/Remove affordances. */}
+      {addingDate ? (
+        <div className="mt-2.5 bg-black/20 rounded-xl p-3 space-y-2.5">
+          <p className="text-sm font-semibold text-white">Add a date for {employeeName}</p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <input
+              type="date"
+              value={newShiftDate}
+              onChange={(e) => setNewShiftDate(e.target.value)}
+              autoFocus
+              className="rounded-md border border-white/30 bg-white/90 px-2 py-1 text-sm text-foreground outline-none focus:ring-2 focus:ring-white"
+            />
+            <input
+              type="time"
+              value={newShiftStart}
+              onChange={(e) => setNewShiftStart(e.target.value)}
+              className="rounded-md border border-white/30 bg-white/90 px-2 py-1 text-sm text-foreground outline-none focus:ring-2 focus:ring-white"
+            />
+            <span className="text-xs text-white/80">to</span>
+            <input
+              type="time"
+              value={newShiftEnd}
+              onChange={(e) => setNewShiftEnd(e.target.value)}
+              className="rounded-md border border-white/30 bg-white/90 px-2 py-1 text-sm text-foreground outline-none focus:ring-2 focus:ring-white"
+            />
+          </div>
+          <textarea
+            value={newShiftNote}
+            onChange={(e) => setNewShiftNote(e.target.value)}
+            placeholder="Optional note…"
+            rows={2}
+            className="w-full rounded-md border border-white/30 bg-white/90 px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-white placeholder:text-muted resize-none"
+          />
+          {createShiftError && <p className="text-xs font-medium text-rose-50">{createShiftError}</p>}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setAddingDate(false);
+                setNewShiftDate("");
+                setNewShiftStart("09:00");
+                setNewShiftEnd("17:00");
+                setNewShiftNote("");
+                setCreateShiftError("");
+              }}
+              disabled={creatingShift}
+              className="rounded-full bg-white/15 border border-white/35 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-white/25 disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={submitCreateShift}
+              disabled={creatingShift || !newShiftDate}
+              className="rounded-full bg-white px-3.5 py-1.5 text-xs font-semibold shadow-sm disabled:opacity-60"
+              style={{ color: tone.to }}
+            >
+              {creatingShift ? "Adding…" : "Add date"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setAddingDate(true)}
+          className="mt-2.5 inline-flex items-center gap-1.5 text-sm font-semibold text-white/90 hover:text-white"
+        >
+          <span className="flex items-center justify-center h-5 w-5 rounded-full bg-white/25 text-white text-sm leading-none">
+            +
+          </span>
+          Add a date
+        </button>
       )}
 
       {editingDates && confirmRemoveDate && (
