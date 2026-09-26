@@ -390,9 +390,23 @@ function MessageBubble({
           bubble itself, so the reaction row and action menu sit visually above the message —
           "emojis are supposed to show up at the top of the message" — as a plain reorder in
           normal document flow, never absolutely positioned (that's what caused the earlier
-          mobile clipping bug this round already fixed once). */}
+          mobile clipping bug this round already fixed once).
+
+          Follow-up (CB, Sept 2026), long-pressing "Got it" in a live thread: "the emoji is not
+          on top of the message and the remaining correspondence is not on the bottom of that
+          message." Two real bugs, both fixed here rather than just a spacing tweak:
+            1. `mt-2.5` below only applies to THIS message's own wrapper while it's revealed,
+               opening up extra room above it (beyond the list's normal space-y-3 gap) so the
+               reveal row reads as clearly its own group, not a toss-up between the message
+               above it and the one it's actually attached to.
+            2. `onClick={(e) => e.stopPropagation()}` on this wrapper stops a tap on an emoji or
+               a MessageActionRow entry (neither stops propagation on its own) from also bubbling
+               up to the scroll container's own onClick, which dismisses whichever message is
+               revealed (see this component's own onClick on that container) — without this, any
+               single tap inside the reveal panel closed it in the same tap it was acting on,
+               which read as the panel "not working" as much as a spacing problem did. */}
       {revealed && (
-        <div className={`mb-1.5 ${mine ? "self-end" : "self-start"}`}>
+        <div className={`mt-2.5 mb-1.5 ${mine ? "self-end" : "self-start"}`} onClick={(e) => e.stopPropagation()}>
           <ReactionRow reactions={m.reactions} busy={reactingId === m.id} onToggle={(emoji) => onToggleReaction(m.id, emoji)} />
           {actions}
         </div>
