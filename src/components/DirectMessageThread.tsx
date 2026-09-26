@@ -3,8 +3,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { DownloadIcon, ChecklistIcon, CalendarIcon, LockIcon, ClockIcon, ChatIcon } from "@/components/icons";
+import DateTasksPanel from "@/components/DateTasksPanel";
+import AvailabilityStatusPill from "@/components/AvailabilityStatusPill";
+import { formatTime12h, slotChips, formatReviewedAt } from "@/lib/availability-format";
 import { QUICK_REACTION_EMOJIS } from "@/types";
-import type { DirectMessageDTO, DirectMessageThreadDTO, DirectScheduledMessageDTO, DirectoryEntryDTO } from "@/types";
+import type {
+  DirectMessageDTO,
+  DirectMessageThreadDTO,
+  DirectScheduledMessageDTO,
+  DirectoryEntryDTO,
+  DirectMessageRefDTO,
+  AdminAvailabilityDTO,
+} from "@/types";
 
 /** What a "Message about this date" link (Phase 5d), the card-level chat icon (round two), or an
  *  already-sent message's own `ref` actually is today — only ever AVAILABILITY_DATE from the
@@ -255,6 +265,7 @@ function MessageBubble({
   revealed,
   onReveal,
   onDismissReveal,
+  onOpenRefPreview,
 }: {
   m: DirectMessageDTO;
   viewerId: string;
@@ -281,6 +292,12 @@ function MessageBubble({
    *  one or another, so tapping a different bubble while one is revealed closes it in one tap
    *  rather than needing two. */
   onDismissReveal: () => void;
+  /** CB, Sept 2026, "Loop in an admin" follow-up: "click that date and then see a preview of
+   *  everything that's involved with that specific date." Opens the preview modal for this
+   *  message's own ref, if it has one — only ever wired up to actually render as clickable for
+   *  an AVAILABILITY_DATE ref and a staff viewer (canUseInternalNotes above), see the ref block
+   *  below for exactly where that gate lives. */
+  onOpenRefPreview: (ref: DirectMessageRefDTO) => void;
 }) {
   const mine = m.senderId === viewerId;
   // Long-press detection — see this component's own doc comment above. A ref (not state) for the
@@ -336,15 +353,36 @@ function MessageBubble({
         (() => {
           const RefIcon = m.ref!.type === "AVAILABILITY_DATE" ? CalendarIcon : ChecklistIcon;
           const refKind = m.ref!.type === "AVAILABILITY_DATE" ? "Availability" : "Task";
-          return (
-            <div className="max-w-[80%] mb-1 rounded-xl border border-border bg-surface px-3 py-2 shadow-sm">
+          const content = (
+            <>
               <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
                 <RefIcon className="h-3 w-3" />
                 {refKind}
                 {m.ref!.date ? ` · ${formatRefDate(m.ref!.date)}` : ""}
               </div>
               <p className="text-xs font-semibold mt-0.5">{m.ref!.label}</p>
-            </div>
+            </>
+          );
+          // CB, Sept 2026, "Loop in an admin" follow-up: "once we... write a message about
+          // that I should be able to click that date and then see a preview of everything
+          // that's involved with that specific date." Only AVAILABILITY_DATE opens a preview
+          // (a DATE_TASK ref, mirrored in here from a task comment, has nowhere of its own to
+          // preview back to) and only for a staff viewer (canUseInternalNotes) — the preview
+          // endpoint enforces the same reviewer-only authorization Approve/Deny already does
+          // (see getAvailabilitySubmissionForReview's own doc comment in
+          // src/lib/availability.ts), so a non-staff employee seeing this same ref in their own
+          // conversation still gets the plain, non-clickable card exactly as before.
+          const clickable = canUseInternalNotes && m.ref!.type === "AVAILABILITY_DATE";
+          return clickable ? (
+            <button
+              type="button"
+              onClick={() => onOpenRefPreview(m.ref!)}
+              className="max-w-[80%] mb-1 rounded-xl border border-border bg-surface px-3 py-2 shadow-sm text-left hover:bg-black/[0.03]"
+            >
+              {content}
+            </button>
+          ) : (
+            <div className="max-w-[80%] mb-1 rounded-xl border border-border bg-surface px-3 py-2 shadow-sm">{content}</div>
           );
         })()}
 
@@ -546,6 +584,13 @@ export default function DirectMessageThread({
   // bubble. Shared across both the main list and the thread panel (only one is ever visible at a
   // time anyway), and reset to null on any plain tap anywhere — see MessageBubble's handleClick.
   const [revealedMessageId, setRevealedMessageId] = useState<string | null>(null);
+  // CB, Sept 2026, "Loop in an admin" follow-up: which AVAILABILITY_DATE ref (if any) currently
+  // has its preview modal open, and the submission it resolves to — fetched fresh on open (see
+  // openRefPreview below) rather than reused from anything already in `messages`, since a ref
+  // only ever carries a pre-resolved label, never the full submission behind it.
+  const [previewRef, setPreviewRef] = useState<DirectMessageRefDTO | null>(null);
+  const [previewSubmission, setPreviewSubmission] = useState<AdminAvailabilityDTO | null>(null);
+  const [previewLoadState, setPreviewLoadState] = useState<LoadState>("loading");
   // Phase 5c: which message's internal-note composer is open, and its in-progress text — at
   // most one at a time, same "one draft slot" shape every other single-item draft in this
   // component uses (e.g. `threadPanelRootId` further down).
@@ -661,6 +706,30 @@ export default function DirectMessageThread({
     setSchedulingOpen(true);
     setScheduleMin(new Date(Date.now() + 60000).toISOString().slice(0, 16));
     requestAnimationFrame(() => textareaRef.current?.focus());
+  }
+
+  /** CB, Sept 2026, "Loop in an admin" follow-up: "click that date and then see a preview of
+   *  everything that's involved with that specific date so we could have a conversation about
+   *  it if needed." Only ever called for an AVAILABILITY_DATE ref (see MessageBubble's own
+   *  clickable-ref gating) — fetches the one submission fresh via the new
+   *  GET /api/admin/availability/[submissionId], which enforces the same reviewer-only
+   *  authorization Approve/Deny already does, so this can 403 for a supervisor who was looped
+   *  in on a date outside their own reporting line; previewLoadState surfaces that as a plain
+   *  "unable to load" rather than a crash. */
+  async function openRefPreview(ref: DirectMessageRefDTO) {
+    if (ref.type !== "AVAILABILITY_DATE") return;
+    setPreviewRef(ref);
+    setPreviewSubmission(null);
+    setPreviewLoadState("loading");
+    try {
+      const res = await fetch(`/api/admin/availability/${ref.id}`);
+      if (!res.ok) throw new Error();
+      const data: AdminAvailabilityDTO = await res.json();
+      setPreviewSubmission(data);
+      setPreviewLoadState("ready");
+    } catch {
+      setPreviewLoadState("error");
+    }
   }
 
   async function handleSend(e: React.FormEvent) {
@@ -884,6 +953,7 @@ export default function DirectMessageThread({
               revealed={revealedMessageId === m.id}
               onReveal={() => setRevealedMessageId(m.id)}
               onDismissReveal={() => setRevealedMessageId(null)}
+              onOpenRefPreview={openRefPreview}
             />
           ))}
         <div ref={bottomRef} />
@@ -1111,6 +1181,7 @@ export default function DirectMessageThread({
                 revealed={revealedMessageId === threadPanelRoot.id}
                 onReveal={() => setRevealedMessageId(threadPanelRoot.id)}
                 onDismissReveal={() => setRevealedMessageId(null)}
+                onOpenRefPreview={openRefPreview}
               />
               {threadPanelReplies.length > 0 && <div className="border-t border-dashed border-border" />}
               {threadPanelReplies.map((r) => (
@@ -1143,6 +1214,7 @@ export default function DirectMessageThread({
                   revealed={revealedMessageId === r.id}
                   onReveal={() => setRevealedMessageId(r.id)}
                   onDismissReveal={() => setRevealedMessageId(null)}
+                  onOpenRefPreview={openRefPreview}
                 />
               ))}
             </div>
@@ -1165,6 +1237,103 @@ export default function DirectMessageThread({
                   {threadSending ? "Sending…" : "Send"}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CB, Sept 2026, "Loop in an admin" follow-up: "click that date and then see a preview
+          of everything that's involved with that specific date so we could have a conversation
+          about it if needed." A second overlay, separate from the thread panel above (which is
+          wired specifically to a message and its replies) — this one can open from a ref inside
+          EITHER the main list or an open thread panel, so it renders one level above both
+          (z-[60] vs. z-50) rather than trying to share state with either. `date` is null for a
+          card-level ref (the plain chat-icon one on TeamAvailabilityCards, no single date to
+          point at) — in that case this shows every date's own status instead of one date's
+          detail, and skips the tasks panel below (there's no single date to scope it to). */}
+      {previewRef && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-2xl bg-surface shadow-xl flex flex-col max-h-[85vh]">
+            <div className="flex items-center gap-2 border-b border-border px-4 py-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => setPreviewRef(null)}
+                className="text-sm text-muted hover:text-accent-ink"
+              >
+                ← Back
+              </button>
+              <p className="text-sm font-semibold">Availability</p>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
+              {previewLoadState === "loading" && (
+                <div className="h-20 rounded-xl bg-black/[0.04] animate-pulse" />
+              )}
+              {previewLoadState === "error" && (
+                <p className="text-sm text-accent">Unable to load that request — it may have been removed.</p>
+              )}
+              {previewLoadState === "ready" &&
+                previewSubmission &&
+                (() => {
+                  const date = previewRef.date;
+                  const decision = date ? previewSubmission.dateDecisions.find((d) => d.date === date) : undefined;
+                  const slot = date ? previewSubmission.slots.find((s) => s.date === date) : undefined;
+                  const status = decision ? decision.status : previewSubmission.status;
+                  const decidedByName = decision ? decision.decidedByName : previewSubmission.reviewedByName;
+                  const decidedAt = decision ? decision.decidedAt : previewSubmission.reviewedAt;
+                  const comment = decision ? decision.comment : previewSubmission.reviewComment;
+                  return (
+                    <>
+                      <div>
+                        <p className="text-sm font-semibold">{previewSubmission.employeeName}</p>
+                        {date && slot ? (
+                          <p className="text-xs text-muted mt-0.5">
+                            {formatRefDate(date)} · {formatTime12h(slot.startTime)} – {formatTime12h(slot.endTime)}
+                          </p>
+                        ) : (
+                          <p className="text-xs text-muted mt-0.5">
+                            {previewSubmission.slots.length} {previewSubmission.slots.length === 1 ? "date" : "dates"} submitted
+                          </p>
+                        )}
+                      </div>
+                      <AvailabilityStatusPill status={status} />
+                      {decidedByName && (
+                        <p className="text-xs text-muted">
+                          {status === "APPROVED" ? "Approved" : status === "DENIED" ? "Denied" : ""} by {decidedByName}
+                          {decidedAt && <span className="block">{formatReviewedAt(decidedAt)}</span>}
+                        </p>
+                      )}
+                      {comment && <p className="text-xs italic">&ldquo;{comment}&rdquo;</p>}
+                      {!date && (
+                        <div className="space-y-1.5">
+                          {slotChips(previewSubmission.slots).map((c) => {
+                            const d = previewSubmission.dateDecisions.find((x) => x.date === c.date);
+                            return (
+                              <div
+                                key={c.date}
+                                className="flex items-center justify-between gap-2 rounded-lg border border-border px-2.5 py-1.5"
+                              >
+                                <div>
+                                  <p className="text-xs font-semibold">{c.dateLabel}</p>
+                                  <p className="text-[11px] text-muted">{c.timeLabel}</p>
+                                </div>
+                                {d && <AvailabilityStatusPill status={d.status} />}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {date && (
+                        <div>
+                          <p className="text-xs font-semibold text-muted mb-1.5 flex items-center gap-1.5">
+                            <ChecklistIcon className="h-3.5 w-3.5" />
+                            Tasks
+                          </p>
+                          <DateTasksPanel employeeId={previewSubmission.employeeId} taskDate={date} viewerId={viewerId} />
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
             </div>
           </div>
         </div>
