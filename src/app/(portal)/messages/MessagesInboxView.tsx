@@ -134,7 +134,7 @@ export default function MessagesInboxView({
   // to open as a result of this exact link — cleared the moment DirectMessageThread has
   // captured it (its own onInitialRefConsumed callback), so reopening a thread later (or a
   // different one) never inherits a stale reference from an earlier date-chat click.
-  const [pendingRef, setPendingRef] = useState<{ type: "AVAILABILITY_DATE"; id: string; date: string } | null>(null);
+  const [pendingRef, setPendingRef] = useState<{ type: "AVAILABILITY_DATE"; id: string; date: string | null } | null>(null);
   // Desktop redesign — see this component's own doc comment above for why this is tracked in JS
   // rather than via Tailwind `md:` classes, and why it starts false.
   const [isDesktop, setIsDesktop] = useState(false);
@@ -163,13 +163,17 @@ export default function MessagesInboxView({
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setPendingDms((prev) => new Map(prev).set(dm, name));
       // Phase 5d: the same link can also carry refType/refId/refDate — see TeamAvailabilityCards'
-      // openChatForDate, which is the only place that adds them today. All three or none; a
-      // partial/malformed set is just ignored rather than opening the thread with a broken ref.
+      // openChatForDate (per-date) and openChat (card-level, round two). refType+refId together
+      // are required; refDate is optional on top — present for a specific date, absent for the
+      // card-level "message this team member" icon, which references the whole request instead
+      // (CB: "I'm still not seeing it be in line to... see that card information"). A
+      // malformed/partial set (refId missing) is just ignored rather than opening the thread with
+      // a broken ref.
       const refType = params.get("refType");
       const refId = params.get("refId");
       const refDate = params.get("refDate");
-      if (refType === "AVAILABILITY_DATE" && refId && refDate) {
-        setPendingRef({ type: "AVAILABILITY_DATE", id: refId, date: refDate });
+      if (refType === "AVAILABILITY_DATE" && refId) {
+        setPendingRef({ type: "AVAILABILITY_DATE", id: refId, date: refDate || null });
       }
       setOpenKey(dmRowKey(dm));
       window.history.replaceState(null, "", "/messages");
