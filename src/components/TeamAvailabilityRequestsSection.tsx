@@ -105,6 +105,7 @@ export default function TeamAvailabilityRequestsSection({
               onOpenChat={q.openChat}
               onMessageAboutDate={q.openChatForDate}
               onRemoveDate={q.removeDate}
+              onCreateShift={q.createShift}
             />
           );
 
