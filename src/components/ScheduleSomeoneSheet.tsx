@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { initialsOf } from "@/components/TeamAvailabilityCards";
 import { todayDateKey } from "@/lib/time";
 import type { AssignmentOptionsDTO } from "@/types";
@@ -78,7 +79,19 @@ export default function ScheduleSomeoneSheet({
     }
   }
 
-  return (
+  // Rendered via a portal straight onto document.body — CB found this modal opening as part of
+  // the normal page flow instead of as a full-screen overlay ("it's not reading properly when I
+  // tried to create a schedule"). Cause: this sheet is opened from AdminHomeHero, which is
+  // rendered inside dashboard/page.tsx's `animate-in` wrapper div, and .animate-in's fade-up
+  // keyframe animation ends on `transform: translateY(0)` — a non-none transform, kept applied
+  // by the animation's `both` fill mode even after it finishes. A `transform` on an ancestor
+  // creates a new containing block for any `position: fixed` descendant, so this sheet's own
+  // `fixed inset-0` was being sized/positioned against that small wrapper div instead of the
+  // real viewport, and its taller content just spilled into whatever came after it in the page.
+  // Portaling to document.body sidesteps that ancestor chain entirely, the same fix this bug
+  // always needs — there's no CSS-only way to opt a specific fixed element back out of a
+  // transformed ancestor's containing block.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4"
       onClick={onClose}
@@ -199,6 +212,7 @@ export default function ScheduleSomeoneSheet({
           {submitting ? "Creating…" : "Create shift"}
         </button>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
