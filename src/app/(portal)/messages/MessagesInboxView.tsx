@@ -274,7 +274,22 @@ export default function MessagesInboxView({
           className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left bg-surface border border-border rounded-2xl hover:bg-black/[0.02] transition-colors"
         >
           <div className="min-w-0 flex items-center gap-3">
-            <UserCircleIcon className="h-8 w-8 text-muted shrink-0" />
+            {/* CB, Sept 2026: "can there be a blue dot or something representing that we got a
+                new message" — the desktop two-pane list (renderListRow below) already marks an
+                unread row with a small blue dot; this mirrors that same var(--ttc-blue) dot onto
+                the avatar here so a quick glance down the mobile list shows which conversations
+                are new without reading every row's count. border-surface "punches" it out from
+                the card background, same trick a phone's app-icon badge uses. */}
+            <span className="relative shrink-0">
+              <UserCircleIcon className="h-8 w-8 text-muted" />
+              {row.kind !== "general" && row.unread > 0 && (
+                <span
+                  className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-surface"
+                  style={{ background: "var(--ttc-blue)" }}
+                  aria-label="New message"
+                />
+              )}
+            </span>
             <div className="min-w-0">
               <p className="text-sm font-medium truncate">{row.name}</p>
               <p className="text-xs text-muted truncate">
