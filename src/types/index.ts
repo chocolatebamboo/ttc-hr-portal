@@ -367,6 +367,13 @@ export interface AdminShiftDTO extends ShiftDTO {
   employeeName: string;
   departmentId: string | null;
   departmentName: string | null;
+  /** Added Sept 2026: CB found the Home glance's department column unhelpful ("it's just saying
+   *  operations" — most of TTC is one department in practice) and asked for the person's actual
+   *  role there instead. This is the same free-text jobTitle every other admin employee view
+   *  already shows (Employees admin, profile, etc.), not the coarse EMPLOYEE/SUPERVISOR/...
+   *  access-control Role enum, which isn't meaningful here. departmentName above is untouched,
+   *  Team Schedule's department filter still needs it. */
+  employeeJobTitle: string;
   createdById: string;
   createdByName: string;
   /** Who resolved the most recent request (or acted on the shift directly) — null to match
