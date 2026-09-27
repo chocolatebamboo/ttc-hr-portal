@@ -57,6 +57,7 @@ function toCurrentEmployee(employee: {
   supervisorId: string | null;
   avatarStorageKey: string | null;
   quickActionKeys: string[];
+  clocksIn: boolean;
 }): CurrentEmployee {
   return {
     id: employee.id,
@@ -71,6 +72,7 @@ function toCurrentEmployee(employee: {
     supervisorId: employee.supervisorId,
     avatarUrl: employee.avatarStorageKey ? getAvatarPublicUrl(employee.avatarStorageKey) : null,
     quickActionKeys: employee.quickActionKeys,
+    clocksIn: employee.clocksIn,
   };
 }
 
@@ -105,6 +107,7 @@ export async function resolveEffectiveEmployee(real: CurrentEmployee): Promise<E
         supervisorId: true,
         avatarStorageKey: true,
         quickActionKeys: true,
+        clocksIn: true,
         deactivatedAt: true,
       },
     })
