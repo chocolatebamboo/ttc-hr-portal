@@ -56,6 +56,17 @@ model Employee {
   jobTitle         String
   role             Role              @default(EMPLOYEE)
   employmentStatus EmploymentStatus  @default(ACTIVE)
+
+  // CB, Sept 2026, on the admin Home redesign: "Shawn the founder will never clock in and
+  // Randall [won't either]... everyone else will clock in but Daijour we also need the option
+  // to clock in as well." A per-person exception, deliberately independent of role — Shawn and
+  // Randall are exempt even though other people who share their role still clock in, and the
+  // admin Home dashboard itself stays gated by role regardless of this flag (see isAdmin() in
+  // src/lib/authorization.ts). Defaults true so nothing changes for anyone until HR flips it
+  // off for a specific person in the Employees admin edit form. When false, TimeClockCard shows
+  // only the live time/date, with no status, button, or hours stat — see its own doc comment.
+  clocksIn         Boolean           @default(true)
+
   hireDate         DateTime
 
   // Storage key (path within the "avatars" Supabase Storage bucket, NOT a URL) for this
