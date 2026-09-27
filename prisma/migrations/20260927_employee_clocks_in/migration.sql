@@ -1,0 +1,13 @@
+-- CB, Sept 2026, admin Home redesign follow-up: a per-person "clocks in through the portal"
+-- flag on Employee, independent of role — Shawn (founder) and Randall never clock in, while
+-- Daijour and other people in her role still do. Purely additive: NOT NULL with a DEFAULT of
+-- true, so every existing row reads as "clocks in" (today's actual behavior for everyone)
+-- until HR turns it off for a specific person in the Employees admin edit form.
+--
+-- Informational only — already applied directly to the live Supabase database via
+-- mcp__Supabase__apply_migration (same reasoning as every prior phase's migration files: this
+-- project's Render build never runs `prisma migrate deploy`, only `prisma generate`).
+--
+-- No RLS change needed: prisma/rls.sql's existing employee_write policy already governs the
+-- whole Employee row, this column included.
+ALTER TABLE "Employee" ADD COLUMN "clocksIn" BOOLEAN NOT NULL DEFAULT true;
