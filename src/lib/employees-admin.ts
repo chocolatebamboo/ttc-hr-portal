@@ -29,6 +29,7 @@ type EmployeeWithRelations = {
   jobTitle: string;
   role: string;
   employmentStatus: string;
+  clocksIn: boolean;
   departmentId: string | null;
   department: { name: string } | null;
   supervisorId: string | null;
@@ -83,6 +84,7 @@ function toDTO(e: EmployeeWithRelations, invite: InviteStatus): EmployeeAdminRow
     jobTitle: e.jobTitle,
     role: e.role as Role,
     employmentStatus: e.employmentStatus as EmploymentStatus,
+    clocksIn: e.clocksIn,
     departmentId: e.departmentId,
     departmentName: e.department?.name ?? null,
     supervisorId: e.supervisorId,
@@ -114,6 +116,7 @@ const RELATIONS_SELECT = {
   jobTitle: true,
   role: true,
   employmentStatus: true,
+  clocksIn: true,
   departmentId: true,
   department: { select: { name: true } },
   supervisorId: true,
@@ -287,6 +290,9 @@ export interface CreateEmployeeInput {
   jobTitle: string;
   role: Role;
   employmentStatus?: EmploymentStatus;
+  /** Defaults true (see Employee.clocksIn's own doc comment in prisma/schema.prisma) —
+   *  everyone clocks in unless HR explicitly turns this off for them. */
+  clocksIn?: boolean;
   departmentName?: string;
   supervisorId?: string;
   hireDate: Date;
@@ -347,6 +353,7 @@ export async function createEmployee(actor: CurrentEmployee, input: CreateEmploy
           jobTitle,
           role: input.role,
           employmentStatus: input.employmentStatus ?? "ACTIVE",
+          clocksIn: input.clocksIn ?? true,
           departmentId: department?.id ?? null,
           supervisorId: input.supervisorId || null,
           hireDate: input.hireDate,
@@ -378,6 +385,8 @@ export interface UpdateEmployeeInput {
   jobTitle: string;
   role: Role;
   employmentStatus: EmploymentStatus;
+  /** See CreateEmployeeInput.clocksIn's own doc comment. */
+  clocksIn: boolean;
   departmentName?: string;
   supervisorId?: string;
   hireDate: Date;
@@ -448,6 +457,7 @@ export async function updateEmployee(
         jobTitle,
         role: input.role,
         employmentStatus: input.employmentStatus,
+        clocksIn: input.clocksIn,
         departmentId: department?.id ?? null,
         supervisorId: input.supervisorId || null,
         hireDate: input.hireDate,
