@@ -44,6 +44,7 @@ export async function POST(request: Request) {
       jobTitle: String(body.jobTitle ?? ""),
       role: body.role,
       employmentStatus: VALID_STATUSES.includes(body.employmentStatus) ? body.employmentStatus : undefined,
+      clocksIn: typeof body.clocksIn === "boolean" ? body.clocksIn : undefined,
       departmentName: typeof body.departmentName === "string" ? body.departmentName : undefined,
       supervisorId: typeof body.supervisorId === "string" && body.supervisorId ? body.supervisorId : undefined,
       hireDate,
