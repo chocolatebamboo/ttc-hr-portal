@@ -7,8 +7,11 @@ import { listDocumentsForEmployee } from "@/lib/documents";
 import { listAnnouncementsForEmployee } from "@/lib/announcements";
 import { getOnboardingAttention } from "@/lib/onboarding";
 import { listMyAvailability, listAdminAvailability } from "@/lib/availability";
+import { listAdminShifts } from "@/lib/shifts";
 import { getDashboardNotificationsSummary } from "@/lib/dashboard-notifications";
 import TimeClockCard from "@/components/TimeClockCard";
+import AdminHomeHero from "@/components/AdminHomeHero";
+import TeamScheduleGlance from "@/components/TeamScheduleGlance";
 import TimeOffSection from "@/components/TimeOffSection";
 import AvailabilityStatusSection from "@/components/AvailabilityStatusSection";
 import TeamAvailabilityRequestsSection from "@/components/TeamAvailabilityRequestsSection";
@@ -16,7 +19,7 @@ import DateTasksSection from "@/components/DateTasksSection";
 import QuickActionsCard from "@/components/QuickActionsCard";
 import DashboardNotifications, { MessagesBadgeLink } from "@/components/DashboardNotifications";
 import { MegaphoneIcon, ChartIcon, type IconProps } from "@/components/icons";
-import { formatHoursCompact } from "@/lib/time";
+import { formatHoursCompact, todayDateKey } from "@/lib/time";
 import type { AnnouncementDTO, DocumentDTO } from "@/types";
 
 function formatAnnouncementDate(iso: string): string {
@@ -57,6 +60,19 @@ export default async function DashboardPage() {
   // listAdminAvailability at all (it throws ForbiddenError for them) — isAdmin gates the fetch
   // itself, not just the render.
   const pendingTeamAvailability = isAdmin(employee) ? (await listAdminAvailability(employee)).pending : [];
+
+  // CB, Sept 2026 (admin Home redesign): "I should see a dashboard of pretty much all the
+  // different people that have the schedule right now... just so I could get like a glance of
+  // who is supposed to be working right now." Every shift for TODAY, org-wide — feeds both
+  // AdminHomeHero's "Scheduled today"/"In progress" stats and TeamScheduleGlance's list below.
+  // Non-admins never call listAdminShifts at all, same isAdmin-gates-the-fetch pattern as
+  // pendingTeamAvailability just above.
+  const todayKey = todayDateKey();
+  const todaysShifts = isAdmin(employee)
+    ? await listAdminShifts(employee, { dateFrom: todayKey, dateTo: todayKey })
+    : [];
+  const scheduledTodayCount = todaysShifts.length;
+  const inProgressCount = todaysShifts.filter((s) => s.displayStatus === "IN_PROGRESS").length;
 
   // One transaction, four reads: recent PTO history (existing), plus the numbers the mobile
   // stat row needs (Sept 2026 aesthetic pass) that nothing on this page fetched before.
@@ -118,8 +134,23 @@ export default async function DashboardPage() {
           was scoped to "mobile/app view" only. */}
       <div className="md:hidden mt-5 space-y-5">
         <div className="animate-in animate-in-2">
-          <TimeClockCard variant="hero" />
+          {isAdmin(employee) ? (
+            <AdminHomeHero
+              variant="hero"
+              scheduledToday={scheduledTodayCount}
+              inProgress={inProgressCount}
+              clocksIn={employee.clocksIn}
+            />
+          ) : (
+            <TimeClockCard variant="hero" clocksIn={employee.clocksIn} />
+          )}
         </div>
+
+        {isAdmin(employee) && (
+          <div className="animate-in animate-in-2">
+            <TeamScheduleGlance shifts={todaysShifts} />
+          </div>
+        )}
 
         <div className="animate-in animate-in-3 grid grid-cols-3 gap-3">
           <StatCard label="This week" value={formatHoursCompact(weekMinutes)} tone="blue" href="/dashboard/week" />
@@ -168,8 +199,23 @@ export default async function DashboardPage() {
       <div className="hidden md:grid grid-cols-1 lg:grid-cols-3 gap-5 mt-5">
         <div className="lg:col-span-2 space-y-5">
           <div className="animate-in animate-in-2">
-            <TimeClockCard />
+            {isAdmin(employee) ? (
+              <AdminHomeHero
+                variant="default"
+                scheduledToday={scheduledTodayCount}
+                inProgress={inProgressCount}
+                clocksIn={employee.clocksIn}
+              />
+            ) : (
+              <TimeClockCard clocksIn={employee.clocksIn} />
+            )}
           </div>
+
+          {isAdmin(employee) && (
+            <div className="animate-in animate-in-2">
+              <TeamScheduleGlance shifts={todaysShifts} />
+            </div>
+          )}
 
           <div className="animate-in animate-in-3">
             <QuickActionsCard role={employee.role} initialKeys={employee.quickActionKeys} variant="desktop" />
