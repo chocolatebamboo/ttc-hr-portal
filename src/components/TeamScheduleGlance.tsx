@@ -46,13 +46,14 @@ function groupUpcomingByDate(upcomingShifts: AdminShiftDTO[]): UpcomingDateGroup
  * duplicate any of that.
  *
  * `upcomingShifts` (CB, Sept 2026 follow-up, screenshotted the exact scenario): "just because
- * somebody isn't working today, I should be able to see the upcoming schedules, cleanly." A
- * week-out window (dashboard/page.tsx's own dateKeyDaysFromNow(1) through (6), CANCELLED/
- * REASSIGNED already filtered out there), grouped here by date under its own "Upcoming" header
- * — shown whenever there's anything in that window, whether or not `shifts` (today) is empty,
- * so the empty-today message is never a dead end but today having people on doesn't hide what's
- * coming next either. No status pill on these rows (unlike `shifts` above): every one of them
- * is, by construction, still ahead — the date-group header already says which day.
+ * somebody isn't working today, I should be able to see the upcoming schedules, cleanly." Every
+ * future shift from tomorrow onward (dashboard/page.tsx's own dateKeyDaysFromNow(1) with no
+ * dateTo cap, CANCELLED/REASSIGNED already filtered out there), grouped here by date under its
+ * own "Upcoming" header, shown whenever there's anything in that window, whether or not `shifts`
+ * (today) is empty, so the empty-today message is never a dead end but today having people on
+ * doesn't hide what's coming next either. No status pill on these rows (unlike `shifts` above):
+ * every one of them is, by construction, still ahead, and the date-group header already says
+ * which day.
  */
 export default function TeamScheduleGlance({
   shifts,
@@ -89,7 +90,7 @@ export default function TeamScheduleGlance({
               </span>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold truncate">{s.employeeName}</p>
-                <p className="text-xs text-muted truncate">{s.departmentName ?? "—"}</p>
+                <p className="text-xs text-muted truncate">{s.employeeJobTitle}</p>
               </div>
               <div className="text-right shrink-0">
                 <p className="text-xs text-muted tabular-nums mb-1">
@@ -121,7 +122,7 @@ export default function TeamScheduleGlance({
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold truncate">{s.employeeName}</p>
-                      <p className="text-xs text-muted truncate">{s.departmentName ?? "—"}</p>
+                      <p className="text-xs text-muted truncate">{s.employeeJobTitle}</p>
                     </div>
                     <p className="text-xs text-muted tabular-nums shrink-0">
                       {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
