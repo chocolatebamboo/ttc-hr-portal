@@ -18,7 +18,13 @@ export async function listAssignmentOptions(
       tx.department.findMany({ orderBy: { name: "asc" } }),
       tx.employee.findMany({
         where: { deactivatedAt: null },
-        select: { id: true, firstName: true, lastName: true, preferredName: true },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          preferredName: true,
+          department: { select: { name: true } },
+        },
         orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
       }),
     ]);
@@ -28,6 +34,7 @@ export async function listAssignmentOptions(
       employees: employees.map((e) => ({
         id: e.id,
         name: `${e.preferredName || e.firstName} ${e.lastName}`,
+        departmentName: e.department?.name ?? null,
       })),
     };
   });
