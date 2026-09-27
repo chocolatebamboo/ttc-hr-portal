@@ -32,6 +32,13 @@ export interface CurrentEmployee {
   /** Which Quick Actions tiles this person has chosen for their own dashboard — see
    *  src/lib/quick-actions.ts. Empty means "never customized," not "chose none." */
   quickActionKeys: string[];
+  /** CB, Sept 2026: "Shawn the founder will never clock in... Randall [won't either]...
+   *  everyone else will clock in but Daijour we also need the option to clock in as well" — a
+   *  per-person exception, independent of role. Defaults true for everyone; HR turns it off for
+   *  a specific person in the Employees admin edit form. Gates whether TimeClockCard shows its
+   *  status/button/hours-stat at all (see that component's own doc comment) — true everywhere
+   *  else in the app that isn't about clocking in. */
+  clocksIn: boolean;
 }
 
 /** One clock-in/clock-out pair. clockOut is null exactly while this is the day's currently
@@ -99,6 +106,9 @@ export interface EmployeeAdminRowDTO {
   jobTitle: string;
   role: Role;
   employmentStatus: EmploymentStatus;
+  /** See CurrentEmployee.clocksIn's own doc comment — same field, same per-person meaning,
+   *  editable here in the Employees admin edit form. */
+  clocksIn: boolean;
   departmentId: string | null;
   departmentName: string | null;
   supervisorId: string | null;
@@ -732,7 +742,10 @@ export interface DepartmentAdminRowDTO {
  *  uploads, announcement audiences) — see src/lib/roster.ts. */
 export interface AssignmentOptionsDTO {
   departments: DepartmentDTO[];
-  employees: { id: string; name: string }[];
+  /** departmentName added Sept 2026 for ScheduleSomeoneSheet's team-member picker (admin Home
+   *  redesign) — purely additive, existing callers (document/announcement assignee pickers)
+   *  that only read id/name are unaffected. */
+  employees: { id: string; name: string; departmentName: string | null }[];
 }
 
 // NOT_STARTED covers both "locked" and "available" — see OnboardingItemDTO.locked, computed
