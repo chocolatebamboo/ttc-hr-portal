@@ -1,10 +1,24 @@
 import { Fragment } from "react";
 import Link from "next/link";
 import ShiftStatusPill from "@/components/ShiftStatusPill";
-import { initialsOf } from "@/components/TeamAvailabilityCards";
 import { formatTime12h, formatSlotDate } from "@/lib/availability-format";
 import { dateKeyDaysFromNow } from "@/lib/time";
 import type { AdminShiftDTO } from "@/types";
+
+// Sept 2026 hotfix: this file has no "use client" directive (it renders directly inside
+// dashboard/page.tsx, a Server Component) but was importing initialsOf as a plain function from
+// TeamAvailabilityCards.tsx, which DOES have "use client". That's an RSC boundary violation —
+// "Attempted to call initialsOf() from the server but initialsOf is on the client" — and it took
+// down the whole Home dashboard for every admin the moment a build's chunking happened to expose
+// it, rather than erroring at build time. Same small local copy MessagesInboxView.tsx's own
+// initialsOf already uses for exactly this reason (see that file's own doc comment on the same
+// choice) — kept local here too rather than moved to a shared lib, so nothing else importing it
+// from TeamAvailabilityCards (a real client component, fine for its own client callers) needs to
+// change.
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
+}
 
 // Same small cycling palette as ScheduleSomeoneSheet's own picker avatars — kept as a local
 // copy rather than a shared import (see that file's own doc comment on this same choice).
