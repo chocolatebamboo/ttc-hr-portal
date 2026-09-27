@@ -55,7 +55,31 @@ const REASON_PROMPT: Record<"no_shift" | "outside_window", string> = {
   outside_window: "This is outside your scheduled shift's start time — why are you clocking in early or late?",
 };
 
-export default function TimeClockCard({ variant = "default" }: { variant?: "default" | "hero" }) {
+/**
+ * CB, Sept 2026 (admin Home redesign): "Shawn the founder will never clock in... Randall
+ * [won't either]... everyone else will clock in but Daijour we also need the option to clock
+ * in as well." `clocksIn` (Employee.clocksIn, always passed by the caller — see the dashboard
+ * page and AdminHomeHero) is a per-person exception, independent of role: when false, every
+ * variant below shows only the live time/date — no status line, no button, no hours stat, no
+ * sessions list, nothing to interact with. True is the default for everyone; this only ever
+ * changes for someone HR has explicitly turned it off for in the Employees admin edit form.
+ *
+ * `variant="compact"` (new, admin Home redesign) is the same status/button/sessions content as
+ * "default", minus the big time face (the admin hero above it already shows the time) and
+ * wrapped a little tighter — this is what "Need to clock in yourself?" expands into on the
+ * admin dashboard. `onClose` is compact-only: a small × the admin dashboard uses to collapse
+ * it back, rendered here (not by the caller) since the status text it sits next to comes from
+ * this component's own fetched state.
+ */
+export default function TimeClockCard({
+  variant = "default",
+  clocksIn = true,
+  onClose,
+}: {
+  variant?: "default" | "hero" | "compact";
+  clocksIn?: boolean;
+  onClose?: () => void;
+}) {
   const [entry, setEntry] = useState<TimeEntryDTO | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [actionState, setActionState] = useState<ActionState>("idle");
@@ -97,10 +121,12 @@ export default function TimeClockCard({ variant = "default" }: { variant?: "defa
     // Intentional fetch-on-mount: the time clock has no server-rendered initial state (its
     // status can change from another tab/device between page loads), so it has to ask the
     // API as soon as it mounts. `refresh` is also reused by the "try again" and error-retry
-    // paths below, not just here.
+    // paths below, not just here. Skipped entirely when clocksIn is false — someone who never
+    // clocks in has nothing here to fetch, and shouldn't sit on "loading" waiting for it.
+    if (!clocksIn) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     refresh();
-  }, []);
+  }, [clocksIn]);
 
   // Forces a re-render once a minute so the 3-hour reminder banner below can appear on its own
   // — without this, "clocked in for 3+ hours" would only get re-checked the next time `entry`
@@ -133,6 +159,28 @@ export default function TimeClockCard({ variant = "default" }: { variant?: "defa
     } finally {
       setActionState("idle");
     }
+  }
+
+  // clocksIn === false: nothing to fetch, nothing to click — just the live time/date, same
+  // face every other variant shows, with no status line, button, hours stat, or sessions list.
+  // "compact" only ever renders while expanded from AdminHomeHero's own clocksIn-gated toggle,
+  // so it shouldn't be reachable here — null rather than a half-built card if it ever is.
+  if (!clocksIn) {
+    if (variant === "compact") return null;
+    if (variant === "hero") {
+      return (
+        <div className="rounded-3xl p-6 text-white shadow-lg" style={{ background: "var(--ttc-pink)" }}>
+          <p className="text-5xl font-bold tabular-nums leading-none tracking-tight">{liveTime}</p>
+          <p className="text-sm font-medium text-white/75 mt-1.5">{liveDate}</p>
+        </div>
+      );
+    }
+    return (
+      <div className="rounded-2xl border border-border bg-surface p-6 shadow-sm">
+        <p className="text-3xl font-bold tabular-nums leading-none tracking-tight mb-1.5">{liveTime}</p>
+        <p className="text-xs uppercase tracking-wide text-muted/60">{liveDate}</p>
+      </div>
+    );
   }
 
   if (loadState === "loading") {
@@ -212,6 +260,76 @@ export default function TimeClockCard({ variant = "default" }: { variant?: "defa
       ))}
     </div>
   );
+
+  if (variant === "compact") {
+    // Admin Home redesign (CB, Sept 2026): what "Need to clock in yourself?" expands into,
+    // right under AdminHomeHero's own time/date — same status/button/sessions content as
+    // "default" below, just without repeating the big time face (already shown above this)
+    // and with `onClose` rendered as a small × next to the status line so collapsing it back
+    // doesn't need its own separate control bar.
+    return (
+      <div className="rounded-2xl border border-border bg-surface p-4">
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div>
+            <p className="text-base font-semibold">{STATUS_LABEL[state]}</p>
+            {state !== "BEFORE_WORK" && (
+              <p className="text-xs text-muted mt-0.5">
+                Hours today: {formatMinutes(entry?.totalMinutes ?? null)}
+              </p>
+            )}
+          </div>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Hide clock in"
+              className="h-7 w-7 rounded-full flex items-center justify-center text-muted hover:bg-black/[0.05] text-base leading-none shrink-0"
+            >
+              ×
+            </button>
+          )}
+        </div>
+
+        {showReminder && (
+          <div role="status" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            You&apos;ve been clocked in for {formatMinutes(openMinutes)} — don&apos;t forget to clock out.
+          </div>
+        )}
+
+        {needsReason && (
+          <div className="mb-3">
+            <p className="flex items-start gap-1.5 text-xs text-amber-800 mb-1.5">
+              <WarningIcon className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+              <span>{reasonPrompt}</span>
+            </p>
+            <textarea
+              value={exceptionReason}
+              onChange={(e) => setExceptionReason(e.target.value)}
+              placeholder="Reason for clocking in…"
+              rows={2}
+              className="w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:border-accent-ink"
+            />
+          </div>
+        )}
+
+        <button
+          onClick={handleClockAction}
+          disabled={actionState === "submitting" || (needsReason && !reasonTrimmed)}
+          className="btn-primary w-full min-h-[46px] text-sm"
+        >
+          {actionState === "submitting" ? "Updating…" : action.label}
+        </button>
+
+        {errorMessage && (
+          <p role="alert" className="mt-2.5 text-sm text-accent">
+            {errorMessage}
+          </p>
+        )}
+
+        {sessionsList}
+      </div>
+    );
+  }
 
   if (variant === "hero") {
     // Bold color-block treatment for the mobile Dashboard (CB's Sept 2026 aesthetic pass —
