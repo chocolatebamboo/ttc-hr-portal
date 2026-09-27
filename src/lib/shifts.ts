@@ -39,6 +39,7 @@ const SHIFT_INCLUDE = {
       firstName: true,
       lastName: true,
       preferredName: true,
+      jobTitle: true,
       departmentId: true,
       department: { select: { name: true } },
     },
@@ -72,6 +73,7 @@ type ShiftRow = {
     firstName: string;
     lastName: string;
     preferredName: string | null;
+    jobTitle: string;
     departmentId: string | null;
     department: { name: string } | null;
   };
@@ -165,6 +167,7 @@ function toAdminDTO(row: ShiftRow, displayStatus: ShiftStatus): AdminShiftDTO {
     employeeName: nameOf(row.employee),
     departmentId: row.employee.departmentId,
     departmentName: row.employee.department?.name ?? null,
+    employeeJobTitle: row.employee.jobTitle,
     createdById: row.createdById,
     createdByName: nameOf(row.createdBy),
     reviewedByName: row.reviewedBy ? nameOf(row.reviewedBy) : null,
