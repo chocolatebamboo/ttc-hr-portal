@@ -19,7 +19,7 @@ import DateTasksSection from "@/components/DateTasksSection";
 import QuickActionsCard from "@/components/QuickActionsCard";
 import DashboardNotifications, { MessagesBadgeLink } from "@/components/DashboardNotifications";
 import { MegaphoneIcon, ChartIcon, type IconProps } from "@/components/icons";
-import { formatHoursCompact, todayDateKey } from "@/lib/time";
+import { formatHoursCompact, todayDateKey, dateKeyDaysFromNow } from "@/lib/time";
 import type { AnnouncementDTO, DocumentDTO } from "@/types";
 
 function formatAnnouncementDate(iso: string): string {
@@ -73,6 +73,22 @@ export default async function DashboardPage() {
     : [];
   const scheduledTodayCount = todaysShifts.length;
   const inProgressCount = todaysShifts.filter((s) => s.displayStatus === "IN_PROGRESS").length;
+
+  // CB, Sept 2026 (follow-up to the above): "just because somebody isn't working today, I
+  // should be able to see the upcoming schedules, cleanly" — screenshotted the exact case where
+  // today is empty and the glance had nothing else to offer. A week-out window (tomorrow through
+  // 6 days from now) grouped by date in TeamScheduleGlance, so the glance is never a dead end
+  // just because today happens to be quiet — shown whether or not today itself has anyone
+  // scheduled. CANCELLED/REASSIGNED are filtered out here (not something listAdminShifts itself
+  // does) since a cancelled or reassigned-away shift isn't really "upcoming" for the person it
+  // used to belong to; every other status for a future date is still deriveShiftDisplayStatus's
+  // plain "UPCOMING" or an in-review change/cancellation request, both still worth showing.
+  const upcomingShiftsRaw = isAdmin(employee)
+    ? await listAdminShifts(employee, { dateFrom: dateKeyDaysFromNow(1), dateTo: dateKeyDaysFromNow(6) })
+    : [];
+  const upcomingShifts = upcomingShiftsRaw.filter(
+    (s) => s.displayStatus !== "CANCELLED" && s.displayStatus !== "REASSIGNED"
+  );
 
   // One transaction, four reads: recent PTO history (existing), plus the numbers the mobile
   // stat row needs (Sept 2026 aesthetic pass) that nothing on this page fetched before.
@@ -148,7 +164,7 @@ export default async function DashboardPage() {
 
         {isAdmin(employee) && (
           <div className="animate-in animate-in-2">
-            <TeamScheduleGlance shifts={todaysShifts} />
+            <TeamScheduleGlance shifts={todaysShifts} upcomingShifts={upcomingShifts} />
           </div>
         )}
 
@@ -213,7 +229,7 @@ export default async function DashboardPage() {
 
           {isAdmin(employee) && (
             <div className="animate-in animate-in-2">
-              <TeamScheduleGlance shifts={todaysShifts} />
+              <TeamScheduleGlance shifts={todaysShifts} upcomingShifts={upcomingShifts} />
             </div>
           )}
 
