@@ -75,16 +75,19 @@ export default async function DashboardPage() {
   const inProgressCount = todaysShifts.filter((s) => s.displayStatus === "IN_PROGRESS").length;
 
   // CB, Sept 2026 (follow-up to the above): "just because somebody isn't working today, I
-  // should be able to see the upcoming schedules, cleanly" — screenshotted the exact case where
-  // today is empty and the glance had nothing else to offer. A week-out window (tomorrow through
-  // 6 days from now) grouped by date in TeamScheduleGlance, so the glance is never a dead end
-  // just because today happens to be quiet — shown whether or not today itself has anyone
-  // scheduled. CANCELLED/REASSIGNED are filtered out here (not something listAdminShifts itself
+  // should be able to see the upcoming schedules, cleanly." Every future shift from tomorrow
+  // onward, grouped by date in TeamScheduleGlance, so the glance is never a dead end just
+  // because today happens to be quiet, shown whether or not today itself has anyone scheduled.
+  // Deliberately no dateTo cap here (an earlier version capped this at 6 days out and CB found
+  // it empty because the one shift on the books at the time was 12 days out): listAdminShifts's
+  // dateTo is optional, and a small team like TTC's doesn't schedule far enough ahead for an
+  // unbounded list to get unwieldy, unlike the exhaustive Team Schedule page this still links
+  // out to. CANCELLED/REASSIGNED are filtered out here (not something listAdminShifts itself
   // does) since a cancelled or reassigned-away shift isn't really "upcoming" for the person it
   // used to belong to; every other status for a future date is still deriveShiftDisplayStatus's
   // plain "UPCOMING" or an in-review change/cancellation request, both still worth showing.
   const upcomingShiftsRaw = isAdmin(employee)
-    ? await listAdminShifts(employee, { dateFrom: dateKeyDaysFromNow(1), dateTo: dateKeyDaysFromNow(6) })
+    ? await listAdminShifts(employee, { dateFrom: dateKeyDaysFromNow(1) })
     : [];
   const upcomingShifts = upcomingShiftsRaw.filter(
     (s) => s.displayStatus !== "CANCELLED" && s.displayStatus !== "REASSIGNED"
