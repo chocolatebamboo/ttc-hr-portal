@@ -34,6 +34,17 @@ export function todayDateKey(): string {
   ).padStart(2, "0")}`;
 }
 
+/** Same local sense as todayDateKey(), `days` calendar days from now — negative for the past.
+ *  Added for the admin Home "Upcoming" glance (CB, Sept 2026: "just because somebody isn't
+ *  working today, I should be able to see the upcoming schedules"), which needs both "tomorrow"
+ *  (the window's start, and what labels its first group as "Tomorrow" rather than a bare date)
+ *  and "a week out" (the window's end) — see dashboard/page.tsx and TeamScheduleGlance.tsx. */
+export function dateKeyDaysFromNow(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 /**
  * Working minutes = the sum of every CLOSED session's (clock out - clock in) — explicitly not
  * payroll: no rates, no overtime multiplier, no tax math — see brief §13. An open session (no
