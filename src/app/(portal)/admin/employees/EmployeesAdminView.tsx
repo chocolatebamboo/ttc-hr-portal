@@ -60,6 +60,7 @@ export interface EmployeeFormValues {
   jobTitle: string;
   role: Role;
   employmentStatus: EmploymentStatus;
+  clocksIn: boolean;
   departmentName: string;
   supervisorId: string;
   hireDate: string;
@@ -80,6 +81,7 @@ function blankValues(): EmployeeFormValues {
     jobTitle: "",
     role: "EMPLOYEE",
     employmentStatus: "ACTIVE",
+    clocksIn: true,
     departmentName: "",
     supervisorId: "",
     hireDate: todayDateKey(),
@@ -101,6 +103,7 @@ function valuesFromRow(row: EmployeeAdminRowDTO): EmployeeFormValues {
     jobTitle: row.jobTitle,
     role: row.role,
     employmentStatus: row.employmentStatus,
+    clocksIn: row.clocksIn,
     departmentName: row.departmentName ?? "",
     supervisorId: row.supervisorId ?? "",
     hireDate: row.hireDate.slice(0, 10),
@@ -674,6 +677,27 @@ function EmployeeForm({
           </select>
         </div>
       </div>
+
+      {/* CB, Sept 2026 (admin Home redesign): "Shawn the founder will never clock in...
+          Randall [won't either]... everyone else will clock in but Daijour we also need the
+          option to clock in as well" — a per-person exception, independent of role. On by
+          default; only ever turned off for someone specific. See TimeClockCard's own doc
+          comment for what this does when off. */}
+      <label className="flex items-start gap-2.5 rounded-lg border border-border bg-background px-3 py-2.5 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={values.clocksIn}
+          onChange={(e) => set("clocksIn", e.target.checked)}
+          className="mt-0.5 h-3.5 w-3.5 accent-[var(--ttc-pink)]"
+        />
+        <span>
+          <span className="block text-sm font-medium">Clocks in through the portal</span>
+          <span className="block text-xs text-muted mt-0.5">
+            On by default. Turn off for people who never use the time clock — doesn&apos;t
+            change their dashboard, which still follows their role.
+          </span>
+        </span>
+      </label>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
