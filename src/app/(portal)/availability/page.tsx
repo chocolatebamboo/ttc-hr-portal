@@ -2,6 +2,7 @@ import { requireEmployeeOrRedirect } from "@/lib/auth";
 import { isAdmin } from "@/lib/authorization";
 import TeamAvailabilityCards from "@/components/TeamAvailabilityCards";
 import TeamPtoCards from "@/components/TeamPtoCards";
+import ScheduleSomeoneButton from "@/components/ScheduleSomeoneButton";
 import AvailabilityView from "./AvailabilityView";
 
 /**
@@ -30,7 +31,14 @@ export default async function AvailabilityPage() {
       <div className="max-w-3xl">
         <AvailabilityView employeeId={employee.id} />
         <div className="mt-6">
-          <h2 className="text-sm font-medium text-muted mb-2">Team availability requests</h2>
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <h2 className="text-sm font-medium text-muted">Team availability requests</h2>
+            {/* Oct 2026 (CB: "for those admin accounts... we need to be able to make our team
+                member's schedule from here"): the same "Schedule someone" action Home's hero
+                already offers, so an admin can create any team member's shift without leaving
+                this page — see ScheduleSomeoneButton's own doc comment. */}
+            <ScheduleSomeoneButton />
+          </div>
           <TeamAvailabilityCards viewerId={employee.id} />
         </div>
         <div className="mt-6">
