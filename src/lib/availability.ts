@@ -1206,15 +1206,31 @@ export async function listAdminAvailability(
 }
 
 /**
- * Correction brief #9 (Sept 2026): persists an admin swiping "Clear" on one Decided availability
- * card — same admin-only access as the roster it's clearing a row from. Recomputes the key from
- * the submission's OWN current status/reviewedAt, never trusting whatever the client last saw,
- * same discipline dismissDashboardNotification uses for the banner keys: a stale dismiss request
- * for a submission that's since been Undone and re-decided silently no-ops rather than hiding the
- * new decision (it builds a different key than the one actually in front of the admin right now).
+ * Correction brief #9 (Sept 2026): persists an admin (or, Oct 2026 fix, a Supervisor) swiping
+ * "Clear" on one Decided availability card — same access as the roster it's clearing a row from
+ * (listAdminAvailability above, which this used to be narrower than: that premise — "same
+ * admin-only access as the roster" — stopped being true once Correction brief #8 opened the
+ * roster itself to a Supervisor, and this function was never updated to match). Found alongside
+ * the /api/admin/availability route-level bug (Oct 2026, CB: "did you make sure that Daijour's
+ * role... is looking like the admin"): clearDecided's own POST is fire-and-forget (see its doc
+ * comment in TeamAvailabilityCards.tsx), so a Supervisor's swipe looked like it worked — the card
+ * vanished locally — while this 403'd silently in the background and the dismissal never actually
+ * persisted, so the card would just reappear on the next reload. Safe to widen: the findUnique
+ * below reads under the actor's own RLS identity, and availability_select (prisma/rls.sql) only
+ * lets a Supervisor see submissions from their OWN direct reports — a submission outside their
+ * team resolves to `row === null` here and silently no-ops, exactly like canAccessEmployeeRecords'
+ * own "RLS decided the row could be READ, this decides whether the caller may ACT on it" pattern.
+ * dismissKey/listDismissedKeys (src/lib/dashboard-dismissals.ts) key off the ACTOR's own id, not
+ * the submission's employeeId, so there's no separate write-side scoping to add here either.
+ *
+ * Recomputes the key from the submission's OWN current status/reviewedAt, never trusting whatever
+ * the client last saw, same discipline dismissDashboardNotification uses for the banner keys: a
+ * stale dismiss request for a submission that's since been Undone and re-decided silently no-ops
+ * rather than hiding the new decision (it builds a different key than the one actually in front
+ * of the reviewer right now).
  */
 export async function dismissDecidedAvailability(actor: CurrentEmployee, submissionId: string): Promise<void> {
-  if (!isAdmin(actor)) throw new ForbiddenError();
+  if (!isAdmin(actor) && actor.role !== "SUPERVISOR") throw new ForbiddenError();
 
   const row = await withRlsContext({ employeeId: actor.id, role: actor.role }, (tx) =>
     tx.availabilitySubmission.findUnique({ where: { id: submissionId } })
