@@ -5,6 +5,7 @@ import AvailabilityCalendar, { Panel as AvailabilityPanel, useAvailabilityPanel 
 import LoggedHoursSection from "@/components/LoggedHoursSection";
 import MyAvailabilityPreview from "@/components/MyAvailabilityPreview";
 import TimeOffRequests from "@/components/TimeOffRequests";
+import ScheduleSomeoneButton from "@/components/ScheduleSomeoneButton";
 import { ChevronDownIcon } from "@/components/icons";
 import type { AvailabilityDTO, AvailabilitySlot, PtoType, TimeEntryDTO, PtoRequestDTO } from "@/types";
 
@@ -75,7 +76,19 @@ function weekRangeLabel(start: Date): string {
  * are one tap further in, opened from the widget that summarizes them, instead of always-closed
  * accordions guessed at from a label alone.
  */
-export default function AvailabilityView({ employeeId }: { employeeId: string }) {
+export default function AvailabilityView({
+  employeeId,
+  isAdminViewer = false,
+}: {
+  employeeId: string;
+  /** Oct 2026 (CB, on the Availability mockup: "like how we have the schedule someone... it kind
+   *  of needs to be in that same area where we have this week" and, separately, "For admin i
+   *  dont want to have them see this" on the Logged hours/Time off tiles): set only by
+   *  AvailabilityPage's admin branch, where this same widget is stacked above the team review
+   *  queue. A non-admin employee (the default, `false`) renders exactly as this component
+   *  always has — unaffected by either change below. */
+  isAdminViewer?: boolean;
+}) {
   const [submissions, setSubmissions] = useState<AvailabilityDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [submitting, setSubmitting] = useState(false);
@@ -129,15 +142,6 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
   // changed from a blind accordion label to a real number.
   const [loggedHoursOpen, setLoggedHoursOpen] = useState(false);
   const [timeOffOpen, setTimeOffOpen] = useState(false);
-  // QA pass (Sept 2026), CB: a soft reminder about the Sunday submission cutoff — purely a UI
-  // nudge, computed client-side from today's own weekday, not a new schema field or scheduled
-  // job. The actual protective behavior (nothing self-scheduled becomes a real shift without
-  // going through decideAvailabilityDate → convertAvailabilityDateToShift) is already fully
-  // enforced server-side regardless of this banner; this only helps someone submit on time in
-  // the first place. Shown Thursday through Sunday — the stretch where "next week" is close
-  // enough that a reminder is actually useful — and quietly absent the rest of the week rather
-  // than a permanent fixture nobody reads anymore.
-  const [showCutoffReminder] = useState(() => [0, 4, 5, 6].includes(new Date().getDay()));
 
   // Redesign: the "Logged hours" stat tile's own number — this calendar week's (Sun–Sat) total
   // logged minutes, same underlying /api/time/timesheet?start=&end= endpoint LoggedHoursSection
@@ -156,6 +160,29 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
   // which week the "This week" strip happens to be scrolled to at the moment).
   const weekStart = startOfWeek(new Date());
   const todayKey = toDateKey(new Date());
+
+  // Restyled + re-gated (CB, Oct 2026, on the mockup's reminder banner: "needs to be a bit more
+  // stylized and only shows more toward the end of the week... doesnt really stand out" / "it
+  // should only show for those who hasnt locked in a schedule for the week"): replaces the old
+  // always-computed-once showCutoffReminder state above. Both of these now have to be true:
+  //   (1) Thursday through Saturday only — narrowed from the old Thu–Sun window; by Sunday
+  //       itself the reminder is moot, so the mockup dropped it from the gate.
+  //   (2) this person hasn't already submitted (non-cancelled) availability covering ANY date in
+  //       next week — once they have, the reminder has done its job and steps aside even if it's
+  //       still Thursday–Saturday.
+  // Purely a UI nudge either way, same as before — the actual cutoff enforcement is unchanged
+  // and lives entirely server-side. Gated on loadState === "ready" so it never flashes on screen
+  // before we actually know whether next week has been submitted yet.
+  const nextWeekStart = startOfWeek(addDays(new Date(), 7));
+  const nextWeekStartKey = toDateKey(nextWeekStart);
+  const nextWeekEndKey = toDateKey(addDays(nextWeekStart, 6));
+  const hasSubmittedNextWeek = submissions.some(
+    (s) =>
+      s.status !== "CANCELLED" &&
+      s.slots.some((slot) => slot.date >= nextWeekStartKey && slot.date <= nextWeekEndKey)
+  );
+  const cutoffDaysLeft = 7 - new Date().getDay();
+  const showCutoffReminder = loadState === "ready" && [4, 5, 6].includes(new Date().getDay()) && !hasSubmittedNextWeek;
 
   // Which week the "This week" strip is currently showing (see weekOffset's own doc comment
   // above) — a plain function rather than a memoized value since it's cheap and weekOffset is
@@ -396,10 +423,46 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
         six months ahead.
       </p>
 
+      {/* Restyled per comment (CB, Oct 2026, on this exact spot: "needs to be a bit more
+          stylized... it just doesnt really stand out" / "I dont realy like that emoji i need it
+          more like an icon"): a bolder left-accent gradient card with a drawn outline-clock icon
+          in a solid pink badge, replacing the old flat amber banner and its ⏰ emoji. See
+          showCutoffReminder's own doc comment above for the two-factor gate this is now behind. */}
       {showCutoffReminder && (
-        <div className="mb-4 md:shrink-0 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Reminder: submit your availability for next week by Sunday so it can be reviewed and
-          scheduled in time.
+        <div
+          className="mb-4 md:shrink-0 flex items-center gap-3 rounded-xl px-4 py-3"
+          style={{
+            background: "linear-gradient(135deg, rgba(184,0,111,0.08), rgba(237,0,140,0.08))",
+            border: "1px solid rgba(237,0,140,0.3)",
+            borderLeft: "4px solid var(--ttc-pink)",
+          }}
+        >
+          <span
+            className="h-8 w-8 rounded-full flex items-center justify-center shrink-0"
+            style={{ background: "var(--ttc-pink)" }}
+            aria-hidden
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#ffffff"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="12" cy="12" r="9" />
+              <polyline points="12 7 12 12 15 15" />
+            </svg>
+          </span>
+          <p className="text-sm">
+            <strong style={{ color: "var(--ttc-pink-ink)" }}>
+              {cutoffDaysLeft} {cutoffDaysLeft === 1 ? "day" : "days"} left
+            </strong>{" "}
+            — submit your availability for next week by Sunday so it can be reviewed and scheduled
+            in time.
+          </p>
         </div>
       )}
 
@@ -420,23 +483,32 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
           further out than one week — it opens INSIDE this same card, right under the strip, so
           the whole thing still reads as one widget that expands rather than stacked cards. */}
       <div className="mb-4 md:shrink-0 rounded-2xl border border-border bg-surface p-4">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3 gap-3">
           <h2 className="text-sm font-semibold">{weekOffset === 0 ? "This week" : weekRangeLabel(stripWeekDays(weekOffset)[0])}</h2>
-          <button
-            type="button"
-            onClick={() => setCalendarOpen((v) => !v)}
-            className="text-xs font-medium text-accent-ink hover:underline flex items-center gap-1"
-          >
-            {calendarOpen ? (
-              <>
-                Hide calendar <ChevronDownIcon className="h-3.5 w-3.5 rotate-180" />
-              </>
-            ) : (
-              <>
-                Full calendar <span aria-hidden>›</span>
-              </>
-            )}
-          </button>
+          <div className="flex items-center gap-3 shrink-0">
+            {/* Oct 2026 (CB, on the mockup: "like how we have the schedule someone... it kind of
+                needs to be in that same area where we have this week"): moved here from the "Team
+                availability requests" header further down the page (see AvailabilityPage's own
+                admin branch) — same action, same ScheduleSomeoneButton/ScheduleSomeoneSheet, just
+                relocated so an admin can schedule someone without scrolling past their own
+                calendar widget first. */}
+            {isAdminViewer && <ScheduleSomeoneButton className="btn-primary text-xs px-3.5 py-1.5 shrink-0" />}
+            <button
+              type="button"
+              onClick={() => setCalendarOpen((v) => !v)}
+              className="text-xs font-medium text-accent-ink hover:underline flex items-center gap-1 shrink-0"
+            >
+              {calendarOpen ? (
+                <>
+                  Hide calendar <ChevronDownIcon className="h-3.5 w-3.5 rotate-180" />
+                </>
+              ) : (
+                <>
+                  Full calendar <span aria-hidden>›</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
 
         <div className="flex items-center gap-1">
@@ -612,8 +684,11 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
           /api/availability defaults to the caller; see that route's own doc comment), the same
           way My Time only ever shows your own hours. There's no page here that mixes in a
           teammate's — Team → Availability is the admin-facing one for that. This line makes that
-          explicit instead of assuming it's obvious. */}
-      {loadState === "ready" && (
+          explicit instead of assuming it's obvious.
+          Removed per comment (CB, Oct 2026, on this exact spot: "If there is no submissions then
+          we shouldnt even see this, only should see this if there is one"): this block now only
+          renders once there's at least one submission — no "(0)" counter, no empty-state card. */}
+      {loadState === "ready" && submissions.length > 0 && (
         <div className="mb-4 md:shrink-0">
           <h2 className="text-sm font-semibold mb-0.5">
             Your submissions <span className="text-muted font-normal">({submissions.length})</span>
@@ -625,47 +700,54 @@ export default function AvailabilityView({ employeeId }: { employeeId: string })
         </div>
       )}
 
-      {/* Two compact stat tiles — each opens its own full detail section below (corrections,
-          swipe-to-delete, per-request messaging all still exactly what they were, just reached
-          from a real number instead of a blind label). */}
-      <div className="mb-4 md:shrink-0 grid grid-cols-2 gap-3">
-        <button
-          type="button"
-          onClick={() => setLoggedHoursOpen((v) => !v)}
-          className="text-left rounded-2xl border border-border bg-surface p-4"
-        >
-          <p className="text-sm font-medium text-muted">Logged hours</p>
-          <p className="text-2xl font-bold mt-1 tabular-nums">
-            {weeklyMinutes === null ? "—" : (weeklyMinutes / 60).toFixed(1)}
-          </p>
-          <p className="text-xs text-muted mt-0.5">this pay period</p>
-        </button>
-        <div className="rounded-2xl border border-border bg-surface p-4">
-          <button type="button" onClick={() => setTimeOffOpen((v) => !v)} className="text-left w-full">
-            <p className="text-sm font-medium text-muted">Time off</p>
-            <p className="text-2xl font-bold mt-1 tabular-nums">{upcomingPtoCount ?? "—"}</p>
-            <p className="text-xs text-muted mt-0.5">upcoming requests</p>
-          </button>
-          <button
-            type="button"
-            onClick={() => setTimeOffOpen(true)}
-            className="text-xs font-medium text-accent-ink hover:underline mt-1.5"
-          >
-            Request time off
-          </button>
-        </div>
-      </div>
+      {/* Removed per comment (CB, Oct 2026, on this exact spot: "For admin i dont want to have
+          them see this"): the "Logged hours" / "Time off" stat tiles — and their detail panels
+          below — no longer show for an admin viewer. A non-admin employee still sees both. */}
+      {!isAdminViewer && (
+        <>
+          {/* Two compact stat tiles — each opens its own full detail section below (corrections,
+              swipe-to-delete, per-request messaging all still exactly what they were, just reached
+              from a real number instead of a blind label). */}
+          <div className="mb-4 md:shrink-0 grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => setLoggedHoursOpen((v) => !v)}
+              className="text-left rounded-2xl border border-border bg-surface p-4"
+            >
+              <p className="text-sm font-medium text-muted">Logged hours</p>
+              <p className="text-2xl font-bold mt-1 tabular-nums">
+                {weeklyMinutes === null ? "—" : (weeklyMinutes / 60).toFixed(1)}
+              </p>
+              <p className="text-xs text-muted mt-0.5">this pay period</p>
+            </button>
+            <div className="rounded-2xl border border-border bg-surface p-4">
+              <button type="button" onClick={() => setTimeOffOpen((v) => !v)} className="text-left w-full">
+                <p className="text-sm font-medium text-muted">Time off</p>
+                <p className="text-2xl font-bold mt-1 tabular-nums">{upcomingPtoCount ?? "—"}</p>
+                <p className="text-xs text-muted mt-0.5">upcoming requests</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setTimeOffOpen(true)}
+                className="text-xs font-medium text-accent-ink hover:underline mt-1.5"
+              >
+                Request time off
+              </button>
+            </div>
+          </div>
 
-      {loggedHoursOpen && (
-        <div className="mb-4 md:shrink-0 md:max-h-80 md:overflow-y-auto">
-          <LoggedHoursSection showHeading={false} />
-        </div>
-      )}
+          {loggedHoursOpen && (
+            <div className="mb-4 md:shrink-0 md:max-h-80 md:overflow-y-auto">
+              <LoggedHoursSection showHeading={false} />
+            </div>
+          )}
 
-      {timeOffOpen && (
-        <div className="mb-4 md:shrink-0 md:max-h-80 md:overflow-y-auto">
-          <TimeOffRequests employeeId={employeeId} refreshSignal={ptoRefreshSignal} showHeading={false} />
-        </div>
+          {timeOffOpen && (
+            <div className="mb-4 md:shrink-0 md:max-h-80 md:overflow-y-auto">
+              <TimeOffRequests employeeId={employeeId} refreshSignal={ptoRefreshSignal} showHeading={false} />
+            </div>
+          )}
+        </>
       )}
     </div>
   );
