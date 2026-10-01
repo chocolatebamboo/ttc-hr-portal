@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentEmployee } from "@/lib/auth";
-import { canSeeAdminHomeDashboard } from "@/lib/authorization";
+import { canSeeAdminHomeDashboard, isAdmin } from "@/lib/authorization";
 import { withRlsContext } from "@/lib/db";
 import { listDocumentsForEmployee } from "@/lib/documents";
 import { listAnnouncementsForEmployee } from "@/lib/announcements";
@@ -167,6 +167,19 @@ export default async function DashboardPage() {
           in chat). Desktop keeps the original layout below, completely untouched — this pass
           was scoped to "mobile/app view" only. */}
       <div className="md:hidden mt-5 space-y-5">
+        {/* Oct 2026 (CB: "the announcement should always be at the top"): moved from its old
+            spot near the bottom (after Team availability requests, before Time Off) to the very
+            first thing in the mobile scroll — ahead of the clock-in hero itself. Still exactly
+            the same AnnouncementsSection component/data as before (featuredAnnouncement/
+            otherAnnouncements, both already computed above from listAnnouncementsForEmployee),
+            just rendered in a different spot; "but should not be there forever" is a separate,
+            still-open ask about default expiration, not a layout change. */}
+        <AnnouncementsSection
+          className="animate-in animate-in-1"
+          featuredAnnouncement={featuredAnnouncement}
+          otherAnnouncements={otherAnnouncements}
+        />
+
         <div className="animate-in animate-in-2">
           {canSeeAdminHomeDashboard(employee) ? (
             <AdminHomeHero
@@ -192,27 +205,38 @@ export default async function DashboardPage() {
           </div>
         )}
 
-        <div className="animate-in animate-in-3 grid grid-cols-3 gap-3">
-          <StatCard label="This week" value={formatHoursCompact(weekMinutes)} tone="blue" href="/dashboard/week" />
-          <StatCard
-            label="Availability"
-            value={String(pendingPtoCount + pendingMyAvailabilityCount)}
-            tone="pink"
-            href="/dashboard/availability"
-          />
-          {/* CB, Sept 2026: "for admins, I want that to be replaced... switch them out for
-              reports... keep it yellow" — an admin's yellow tile becomes a straight tap-through
-              to Reports instead of their own doc acknowledgments (still visible either way,
-              under Needs your attention below). Daijour (SUPERVISOR) already has real Reports
-              access (canAccessReports, src/lib/authorization.ts) via Correction brief #8, so he
-              gets this tile too now rather than Docs to review, same as any admin. Everyone else
-              keeps Docs to review as-is. */}
-          {canSeeAdminHomeDashboard(employee) ? (
-            <StatCard label="Reports" icon={ChartIcon} tone="amber" href="/admin/reports" />
-          ) : (
-            <StatCard label="Docs to review" value={String(pendingAcknowledgments.length)} tone="amber" href="/documents" />
-          )}
-        </div>
+        {/* Oct 2026 (CB, circling this exact row on a screenshot of her own admin dashboard):
+            "I don't think it's necessary" for an admin account specifically — SUPER_ADMIN/
+            HR_ADMIN no longer see this row at all on mobile. Deliberately isAdmin(employee), not
+            canSeeAdminHomeDashboard: CB drew the line at "only the admin accounts," and Daijour
+            (SUPERVISOR) still has real work tied to his own "This week"/"Availability" numbers
+            (he clocks in and submits his own availability like any team member) — he keeps the
+            row exactly as before, same as a regular employee. */}
+        {!isAdmin(employee) && (
+          <div className="animate-in animate-in-3 grid grid-cols-3 gap-3">
+            <StatCard label="This week" value={formatHoursCompact(weekMinutes)} tone="blue" href="/dashboard/week" />
+            <StatCard
+              label="Availability"
+              value={String(pendingPtoCount + pendingMyAvailabilityCount)}
+              tone="pink"
+              href="/dashboard/availability"
+            />
+            {/* CB, Sept 2026: "for admins, I want that to be replaced... switch them out for
+                reports... keep it yellow" — an admin's yellow tile becomes a straight tap-through
+                to Reports instead of their own doc acknowledgments (still visible either way,
+                under Needs your attention below). Daijour (SUPERVISOR) already has real Reports
+                access (canAccessReports, src/lib/authorization.ts) via Correction brief #8, so he
+                gets this tile too now rather than Docs to review, same as any admin. Everyone else
+                keeps Docs to review as-is. Admin itself never reaches this branch any more — the
+                whole row is hidden for isAdmin(employee) above — but the canSeeAdminHomeDashboard
+                check stays here unchanged since Daijour (SUPERVISOR) still needs it. */}
+            {canSeeAdminHomeDashboard(employee) ? (
+              <StatCard label="Reports" icon={ChartIcon} tone="amber" href="/admin/reports" />
+            ) : (
+              <StatCard label="Docs to review" value={String(pendingAcknowledgments.length)} tone="amber" href="/documents" />
+            )}
+          </div>
+        )}
 
         <div className="animate-in animate-in-4">
           <QuickActionsCard role={employee.role} initialKeys={employee.quickActionKeys} variant="mobile" />
@@ -228,11 +252,6 @@ export default async function DashboardPage() {
           className="animate-in animate-in-4"
           initialPending={pendingTeamAvailability}
           viewerId={employee.id}
-        />
-        <AnnouncementsSection
-          className="animate-in animate-in-5"
-          featuredAnnouncement={featuredAnnouncement}
-          otherAnnouncements={otherAnnouncements}
         />
         <TimeOffSection className="animate-in animate-in-5" recentPto={recentPto} />
         <AvailabilityStatusSection className="animate-in animate-in-5" recentAvailability={recentAvailability} />
