@@ -59,6 +59,13 @@ export const SUPERVISOR_NAV: NavItem[] = [
   // of under the admin-only URL space. Same href in ADMIN_NAV below — one page, gated to
   // whichever of the two roles is actually viewing it, not two competing pages.
   { label: "Team Schedule", href: "/team/schedule", icon: CalendarIcon },
+  // Found missing Oct 2026 (CB: "did you make sure that Daijour's role... is looking like the
+  // admin"): /admin/reports/page.tsx has granted a Supervisor this page, scoped to their own team
+  // (canAccessReports), ever since Correction brief #8 — but this sidebar list was never updated
+  // to match, so Daijour had a fully working Reports page with no link anywhere in his nav to
+  // actually reach it. Same href ADMIN_NAV uses below — one page, gated by scope inside
+  // ReportsView, not two competing routes.
+  { label: "Reports", href: "/admin/reports", icon: ChartIcon },
 ];
 
 // Documents, Onboarding and Announcements are deliberately NOT repeated here even though
@@ -101,27 +108,26 @@ export function navForRole(role: Role): { primary: NavItem[]; extra: NavItem[] }
 /**
  * The mobile bottom tab bar's four fixed slots — one set per permission level (correction
  * brief #7, "Mobile navigation by permission level"): regular team members get
- * Home / Availability / My Messages / More; SUPER_ADMIN/HR_ADMIN get Home / Availability /
- * Reports / More instead — "Administrative users can still reach Messages through the
- * appropriate interface/More area/chat entry points even if Messages is not one of their four
- * primary navigation items" (My Messages still appears in their own More list; see
+ * Home / Availability / My Messages / More; staff (SUPER_ADMIN/HR_ADMIN/SUPERVISOR) get
+ * Home / Availability / Reports / More instead — "Administrative users can still reach Messages
+ * through the appropriate interface/More area/chat entry points even if Messages is not one of
+ * their four primary navigation items" (My Messages still appears in their own More list; see
  * src/app/(portal)/more/page.tsx).
  *
- * Deliberately SUPER_ADMIN/HR_ADMIN only, not SUPERVISOR too, even though brief §8 (the
- * administrative-access/role audit fix, not yet done) eventually wants a Supervisor to reach
- * reports: /admin/reports itself is still gated to isAdmin() only today (see
- * src/app/(portal)/admin/reports/page.tsx), and brief §8 explicitly calls for a dedicated
- * permissions audit *before* changing who can see what. Pointing a Supervisor's bottom nav at a
- * page that currently redirects them straight back out to /dashboard would be worse than
- * leaving them on My Messages until that audit lands — revisit this the same moment Reports
- * access itself is extended to Supervisors.
+ * Used to be SUPER_ADMIN/HR_ADMIN only: this doc comment originally explained that on the
+ * grounds that /admin/reports itself was "still gated to isAdmin() only today," so pointing a
+ * Supervisor's bottom nav at Reports would have redirected them straight back to /dashboard.
+ * That premise is stale — /admin/reports/page.tsx has granted a Supervisor this page (scoped to
+ * their own team) since Correction brief #8, same as SUPERVISOR_NAV above already assumed; this
+ * function was just never updated to match when that landed. Found and fixed Oct 2026 (CB: "did
+ * you make sure that Daijour's role... is looking like the admin").
  */
 export function bottomNavForRole(role: Role): NavItem[] {
-  const isAdminRole = role === "SUPER_ADMIN" || role === "HR_ADMIN";
+  const isStaffRole = role === "SUPER_ADMIN" || role === "HR_ADMIN" || role === "SUPERVISOR";
   return [
     { label: "Home", href: "/dashboard", icon: HomeIcon },
     { label: "Availability", href: "/availability", icon: CalendarIcon },
-    isAdminRole
+    isStaffRole
       ? { label: "Reports", href: "/admin/reports", icon: ChartIcon }
       : { label: "My Messages", href: "/messages", icon: ChatIcon },
     { label: "More", href: "/more", icon: MoreIcon },
