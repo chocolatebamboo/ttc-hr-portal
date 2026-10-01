@@ -1011,10 +1011,23 @@ model Notification {
 
   readAt DateTime?
 
+  // Sept 2026 (CB: "we need to make sure that any notification goes to their email as well so
+  // they know"): null until src/lib/notification-emails.ts's cron job has successfully emailed
+  // this row to its recipient, then stamped once and never touched again — same "write it once,
+  // use it to dedupe" shape AvailabilityShiftReminder already uses so a later run of the same
+  // job never double-sends. A separate async job rather than sending inline from writeNotification
+  // deliberately: writeNotification runs inside the SAME transaction as the real mutation it's a
+  // side effect of (see its own doc comment), and blocking that transaction open on an external
+  // Resend HTTP call would reopen exactly the connection-pool-exhaustion problem
+  // withConnectionLimit() in src/lib/db.ts was hotfixed for — every authenticated request already
+  // holds its own transaction/connection for the duration of the call.
+  emailedAt DateTime?
+
   createdAt DateTime @default(now())
 
   @@index([recipientId, createdAt])
   @@index([recipientId, readAt])
+  @@index([emailedAt, createdAt])
 }
 
 model MessageReadState {
