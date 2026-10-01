@@ -5,6 +5,7 @@ import ShiftStatusPill from "@/components/ShiftStatusPill";
 import DateTasksPanel from "@/components/DateTasksPanel";
 import { ChecklistIcon } from "@/components/icons";
 import { formatSlotDate, formatTime12h } from "@/lib/availability-format";
+import { getWeek, formatWeekRange } from "@/lib/week";
 import type { AdminShiftDTO, AssignmentOptionsDTO, DirectReportDTO, ShiftStatus } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
@@ -34,6 +35,18 @@ function initialsOf(name: string): string {
   return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
 }
 
+/** Round 2 (CB, Oct 2026: "it should only be for the week... after the week it's gonna go to
+ *  the next schedule, so it's like multiple pages"): resolves a "?dateFrom=" deep link
+ *  (TeamScheduleGlance's "See all upcoming") to the weekOffset whose week contains that date,
+ *  rather than the old free-form date-range filter it used to seed. Same Monday-start week math
+ *  as getWeek itself, just measured from an arbitrary date instead of "today." */
+function weekOffsetForDate(dateKey: string): number {
+  const target = new Date(`${dateKey}T00:00:00`);
+  const thisMonday = new Date(`${getWeek(0).start}T00:00:00`);
+  const diffDays = Math.round((target.getTime() - thisMonday.getTime()) / 86_400_000);
+  return Math.floor(diffDays / 7);
+}
+
 /**
  * Team Schedule — phase 1 of the scheduling workflow rebuild (client spec, Sept 2026): the
  * supervisor/admin-facing counterpart to My Schedule, plus the two actions that actually create
@@ -49,14 +62,24 @@ function initialsOf(name: string): string {
  *
  * Oct 2026 (CB, on the Home dashboard's Upcoming widget: "when we click it we can see that
  * person's full schedule down the line," and separately, "if I click on see more then it should
- * go into another page"): `employeeFilter`/`dateFromFilter` now seed themselves from this page's
- * own URL — `?employeeId=<id>` (one Upcoming row) or `?dateFrom=<date>` ("See all upcoming") —
- * so TeamScheduleGlance's links can land here pre-filtered instead of dumping an admin on an
- * unfiltered, org-wide list they'd have to filter themselves. Read straight off
- * window.location.search in the mount effect below, not next/navigation's useSearchParams, so
- * this page doesn't need a Suspense boundary — same reasoning MessagesInboxView.tsx's own
- * dm/name URL read already documents. The filter selects/inputs further down are still fully
- * interactive afterward, so nothing about adjusting or clearing a filter once here changes.
+ * go into another page"): `employeeFilter` (and, via weekOffsetForDate, the initial `weekOffset`)
+ * seed themselves from this page's own URL — `?employeeId=<id>` (one Upcoming row) or
+ * `?dateFrom=<date>` ("See all upcoming") — so TeamScheduleGlance's links can land here
+ * pre-filtered instead of dumping an admin on an unfiltered, org-wide list they'd have to filter
+ * themselves. Read straight off window.location.search in the mount effect below, not
+ * next/navigation's useSearchParams, so this page doesn't need a Suspense boundary — same
+ * reasoning MessagesInboxView.tsx's own dm/name URL read already documents. The filter
+ * selects/week nav further down are still fully interactive afterward, so nothing about
+ * adjusting or paging once here changes.
+ *
+ * Round 2 (CB, Oct 2026, on the mockup: "it should only be for the week... multiple pages," and
+ * separately "I don't like how it's showing up the same name multiple times... organized per
+ * profile"): the list is now bounded to one Monday–Sunday week at a time (`weekOffset` + the
+ * same getWeek/formatWeekRange helpers ReportsView's "This week" button already uses), with
+ * prev/next nav instead of the old free-form date-range filter. And whenever no single employee
+ * is picked, shifts render grouped by person (`groupedByPerson` below) instead of repeating each
+ * person's name on every card — approved via mockup first (her standing requirement for this
+ * kind of visual change) before landing here.
  */
 export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIsAdmin: boolean; viewerId: string }) {
   const [shifts, setShifts] = useState<AdminShiftDTO[]>([]);
@@ -68,8 +91,8 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
   const [employeeFilter, setEmployeeFilter] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [dateFromFilter, setDateFromFilter] = useState("");
-  const [dateToFilter, setDateToFilter] = useState("");
+  const [weekOffset, setWeekOffset] = useState(0);
+  const week = useMemo(() => getWeek(weekOffset), [weekOffset]);
 
   const [showCreate, setShowCreate] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -141,7 +164,7 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
     if (!employeeId && !dateFrom) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (employeeId) setEmployeeFilter(employeeId);
-    if (dateFrom) setDateFromFilter(dateFrom);
+    if (dateFrom) setWeekOffset(weekOffsetForDate(dateFrom));
     window.history.replaceState(null, "", window.location.pathname);
   }, []);
 
@@ -150,11 +173,10 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
       if (employeeFilter && s.employeeId !== employeeFilter) return false;
       if (departmentFilter && s.departmentId !== departmentFilter) return false;
       if (statusFilter && s.displayStatus !== statusFilter) return false;
-      if (dateFromFilter && s.date < dateFromFilter) return false;
-      if (dateToFilter && s.date > dateToFilter) return false;
+      if (s.date < week.start || s.date > week.end) return false;
       return true;
     });
-  }, [shifts, employeeFilter, departmentFilter, statusFilter, dateFromFilter, dateToFilter]);
+  }, [shifts, employeeFilter, departmentFilter, statusFilter, week]);
 
   // Oct 2026 (CB, after seeing the filtered-to-one-person view in production): she didn't like
   // that person's name repeating on every card below, and wanted the page "widgetized" and
@@ -169,6 +191,35 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
   const singleEmployeeMissedCount = isSingleEmployeeView
     ? filtered.filter((s) => s.displayStatus === "MISSED").length
     : 0;
+
+  // Round 2 (CB, Oct 2026, on the mockup: "I don't like how it's showing up the same name
+  // multiple times... they're supposed to be organized per profile"): whenever no single
+  // employee is picked, group this week's shifts by person instead of one flat, repeating-name
+  // list. Group order follows first appearance in `filtered` (already date-ordered from the
+  // API), same as the approved mockup.
+  const isGroupedView = employeeFilter === "" && filtered.length > 0;
+  const groupedByPerson = useMemo(() => {
+    if (employeeFilter !== "") return [];
+    const order: string[] = [];
+    const byEmployee = new Map<string, AdminShiftDTO[]>();
+    for (const s of filtered) {
+      if (!byEmployee.has(s.employeeId)) {
+        byEmployee.set(s.employeeId, []);
+        order.push(s.employeeId);
+      }
+      byEmployee.get(s.employeeId)!.push(s);
+    }
+    return order.map((id) => {
+      const group = byEmployee.get(id)!;
+      return {
+        employeeId: id,
+        name: group[0].employeeName,
+        jobTitle: group[0].employeeJobTitle,
+        shifts: group,
+        missedCount: group.filter((s) => s.displayStatus === "MISSED").length,
+      };
+    });
+  }, [filtered, employeeFilter]);
 
   async function handleCreate(input: { employeeId: string; date: string; startTime: string; endTime: string; note: string }) {
     setActionError(null);
@@ -294,6 +345,261 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
     }
   }
 
+  // Round 2 (CB, Oct 2026, on the mockup: "organized per profile"): the per-shift card used to
+  // render differently depending on isSingleEmployeeView (date-only vs. name+date), because the
+  // old multi-employee view was one flat list with the name repeated on every card. Now that the
+  // multi-employee case groups by person instead (groupedByPerson below, each with its own name
+  // header), every row is always the compact date-only variant — extracted here once so both the
+  // single-employee list and every grouped-view card below share the exact same row, actions,
+  // and Tasks panel rather than three copies of this markup.
+  function renderShiftRow(s: AdminShiftDTO) {
+    // Phase 2: Cancel/Reassign stay available on a pending CHANGE_REQUESTED/
+    // CANCELLATION_REQUESTED shift too — the spec's own response options to a request include
+    // "Change the shift time," "Cancel the shift," and "Reassign the shift," not only a plain
+    // approve/decline (see SHIFT_RESOLVABLE_STATUSES in src/lib/shifts.ts).
+    const canManage = s.status === "UPCOMING" || s.status === "CHANGE_REQUESTED" || s.status === "CANCELLATION_REQUESTED";
+    const hasPendingRequest = s.status === "CHANGE_REQUESTED" || s.status === "CANCELLATION_REQUESTED";
+    return (
+      <div key={s.id} className="px-4 py-3.5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold">{formatSlotDate(s.date)}</p>
+            <p className="text-sm text-muted">
+              {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
+            </p>
+          </div>
+          <ShiftStatusPill status={s.displayStatus} />
+        </div>
+        {s.note && <p className="text-sm text-muted italic mt-2">&ldquo;{s.note}&rdquo;</p>}
+        {s.status === "CANCELLED" && s.cancelReason && (
+          <p className="text-sm text-accent mt-2">Cancelled: {s.cancelReason}</p>
+        )}
+
+        {hasPendingRequest && (
+          <div className="mt-2 rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-sm">
+            <p className="text-amber-800">
+              {s.status === "CHANGE_REQUESTED" ? "Requested a change" : "Requested cancellation"}
+              {s.changeReason ? `: "${s.changeReason}"` : "."}
+            </p>
+            {s.requestedDate && s.requestedStartTime && s.requestedEndTime && (
+              <p className="text-amber-800 mt-1">
+                Proposed: {formatSlotDate(s.requestedDate)}, {formatTime12h(s.requestedStartTime)} –{" "}
+                {formatTime12h(s.requestedEndTime)}
+              </p>
+            )}
+          </div>
+        )}
+
+        {s.status === "CANCELLATION_REQUESTED" && (
+          <div className="flex items-center gap-3 mt-3">
+            <button
+              type="button"
+              onClick={() => handleApproveCancellation(s.id)}
+              disabled={busyId === s.id}
+              className="text-xs font-medium text-accent-ink hover:underline"
+            >
+              Approve cancellation
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setDecliningId(decliningId === s.id ? null : s.id);
+                setDeclineComment("");
+              }}
+              className="text-xs font-medium text-accent hover:underline"
+            >
+              Decline request
+            </button>
+          </div>
+        )}
+
+        {s.status === "CHANGE_REQUESTED" && (
+          <div className="flex items-center gap-3 mt-3">
+            <button
+              type="button"
+              onClick={() => {
+                setApprovingChangeId(approvingChangeId === s.id ? null : s.id);
+                setApproveDate(s.requestedDate ?? "");
+                setApproveStartTime(s.requestedStartTime ?? "");
+                setApproveEndTime(s.requestedEndTime ?? "");
+              }}
+              className="text-xs font-medium text-accent-ink hover:underline"
+            >
+              Approve change
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setDecliningId(decliningId === s.id ? null : s.id);
+                setDeclineComment("");
+              }}
+              className="text-xs font-medium text-accent hover:underline"
+            >
+              Decline request
+            </button>
+          </div>
+        )}
+
+        {approvingChangeId === s.id && (
+          <div className="mt-3 flex flex-col gap-2 bg-black/[0.03] rounded-xl p-3">
+            <p className="text-xs text-muted">Confirm the final date and time for this shift:</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <input
+                type="date"
+                value={approveDate}
+                onChange={(e) => setApproveDate(e.target.value)}
+                className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm"
+              />
+              <input
+                type="time"
+                value={approveStartTime}
+                onChange={(e) => setApproveStartTime(e.target.value)}
+                className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm"
+              />
+              <input
+                type="time"
+                value={approveEndTime}
+                onChange={(e) => setApproveEndTime(e.target.value)}
+                className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => handleApproveChange(s.id)}
+              disabled={busyId === s.id || !approveDate || !approveStartTime || !approveEndTime}
+              className="btn-outline self-start"
+            >
+              Confirm approval
+            </button>
+          </div>
+        )}
+
+        {decliningId === s.id && (
+          <div className="mt-3 flex flex-col sm:flex-row gap-2 bg-black/[0.03] rounded-xl p-3">
+            <textarea
+              value={declineComment}
+              onChange={(e) => setDeclineComment(e.target.value)}
+              placeholder="Optional note for the team member…"
+              rows={2}
+              className="flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent-ink"
+            />
+            <button
+              type="button"
+              onClick={() => handleDeclineRequest(s.id)}
+              disabled={busyId === s.id}
+              className="btn-outline self-start"
+            >
+              Confirm decline
+            </button>
+          </div>
+        )}
+
+        {canManage && (
+          <div className="flex items-center gap-3 mt-3">
+            <button
+              type="button"
+              onClick={() => {
+                setCancellingId(cancellingId === s.id ? null : s.id);
+                setReassigningId(null);
+                setCancelReason("");
+              }}
+              className="text-xs font-medium text-accent hover:underline"
+            >
+              Cancel shift
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setReassigningId(reassigningId === s.id ? null : s.id);
+                setCancellingId(null);
+                setReassignTo("");
+              }}
+              className="text-xs font-medium text-accent-ink hover:underline"
+            >
+              Reassign
+            </button>
+          </div>
+        )}
+
+        {cancellingId === s.id && (
+          <div className="mt-3 flex flex-col sm:flex-row gap-2 bg-black/[0.03] rounded-xl p-3">
+            <textarea
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="Reason for cancelling (required)…"
+              rows={2}
+              className="flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent-ink"
+            />
+            <button
+              type="button"
+              onClick={() => handleCancel(s.id)}
+              disabled={busyId === s.id || !cancelReason.trim()}
+              className="btn-outline self-start"
+            >
+              Confirm cancel
+            </button>
+          </div>
+        )}
+
+        {reassigningId === s.id && (
+          <div className="mt-3 flex flex-col sm:flex-row gap-2 bg-black/[0.03] rounded-xl p-3">
+            <select
+              value={reassignTo}
+              onChange={(e) => setReassignTo(e.target.value)}
+              className="flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm"
+            >
+              <option value="">Choose a team member…</option>
+              {employeeOptions
+                .filter((e) => e.id !== s.employeeId)
+                .map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.name}
+                  </option>
+                ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => handleReassign(s.id)}
+              disabled={busyId === s.id || !reassignTo}
+              className="btn-outline self-start"
+            >
+              Confirm reassign
+            </button>
+          </div>
+        )}
+
+        {/* Phase 3 (client spec, Sept 2026): "re-point tasks and messages onto shifts instead of
+            the original availability submission" — the same task list TeamAvailabilityCards
+            already shows for an availability date, now on the shift itself. Correction brief #2
+            (Sept 2026): each task now carries its own comment thread (DateTaskRow), replacing
+            the standalone per-shift conversation that used to sit alongside this list — see
+            DateTasksPanel's own doc comment. */}
+        <button
+          type="button"
+          onClick={() => setOpenShiftId(openShiftId === s.id ? null : s.id)}
+          className={`mt-3 flex items-center gap-1.5 text-xs font-medium transition-colors ${
+            openShiftId === s.id ? "text-accent-ink" : "text-muted hover:text-accent-ink"
+          }`}
+        >
+          <ChecklistIcon className="h-3.5 w-3.5" />
+          Tasks
+        </button>
+
+        {openShiftId === s.id && (
+          <div className="mt-2.5 space-y-2.5">
+            <div>
+              <p className="text-xs font-semibold text-muted mb-1 flex items-center gap-1.5">
+                <ChecklistIcon className="h-3.5 w-3.5" />
+                Tasks for this shift
+              </p>
+              <DateTasksPanel employeeId={s.employeeId} taskDate={s.date} viewerId={viewerId} />
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-4xl">
       <div className="flex items-start justify-between gap-3 mb-1">
@@ -351,18 +657,38 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
             </option>
           ))}
         </select>
-        <input
-          type="date"
-          value={dateFromFilter}
-          onChange={(e) => setDateFromFilter(e.target.value)}
-          className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm"
-        />
-        <input
-          type="date"
-          value={dateToFilter}
-          onChange={(e) => setDateToFilter(e.target.value)}
-          className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm"
-        />
+      </div>
+
+      {/* Round 2 (CB, Oct 2026: "it should only be for the week... after the week it's gonna go
+          to the next schedule, so it's like multiple pages"): replaces the old free-form
+          date-range filter — same prev/next + labeled-range pattern approved on the mockup and
+          shared with Attendance, so every admin list page reads the same way about what date
+          range it's on. "This week" only shows when the selected week is the real current one. */}
+      <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-2.5 mb-4">
+        <button
+          type="button"
+          onClick={() => setWeekOffset((w) => w - 1)}
+          aria-label="Previous week"
+          className="h-7 w-7 shrink-0 rounded-full border border-border flex items-center justify-center text-muted hover:text-foreground hover:bg-black/[0.03]"
+        >
+          ‹
+        </button>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold">Week of {formatWeekRange(week.start, week.end)}</span>
+          {weekOffset === 0 && (
+            <span className="text-[11px] font-semibold text-accent-ink bg-accent/10 rounded-full px-2.5 py-0.5">
+              This week
+            </span>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() => setWeekOffset((w) => w + 1)}
+          aria-label="Next week"
+          className="h-7 w-7 shrink-0 rounded-full border border-border flex items-center justify-center text-muted hover:text-foreground hover:bg-black/[0.03]"
+        >
+          ›
+        </button>
       </div>
 
       {loadState === "loading" && (
@@ -381,7 +707,7 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
 
       {loadState === "ready" && filtered.length === 0 && (
         <div className="rounded-2xl border border-border bg-surface p-4 text-sm text-muted">
-          No shifts match these filters.
+          No shifts match these filters for this week.
         </div>
       )}
 
@@ -418,265 +744,44 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
               </div>
             </div>
           )}
-        <div className={isSingleEmployeeView ? "bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden" : "space-y-2.5"}>
-          {filtered.map((s) => {
-            // Phase 2: Cancel/Reassign stay available on a pending CHANGE_REQUESTED/
-            // CANCELLATION_REQUESTED shift too — the spec's own response options to a request
-            // include "Change the shift time," "Cancel the shift," and "Reassign the shift," not
-            // only a plain approve/decline (see SHIFT_RESOLVABLE_STATUSES in src/lib/shifts.ts).
-            const canManage = s.status === "UPCOMING" || s.status === "CHANGE_REQUESTED" || s.status === "CANCELLATION_REQUESTED";
-            const hasPendingRequest = s.status === "CHANGE_REQUESTED" || s.status === "CANCELLATION_REQUESTED";
-            return (
-              <div key={s.id} className={isSingleEmployeeView ? "px-4 py-3.5" : "rounded-2xl border border-border bg-surface p-4"}>
-                <div className="flex items-start justify-between gap-3">
-                  {isSingleEmployeeView ? (
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold">{formatSlotDate(s.date)}</p>
-                      <p className="text-sm text-muted">
-                        {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold truncate">{s.employeeName}</p>
-                      <p className="text-sm text-muted">
-                        {formatSlotDate(s.date)} · {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
-                      </p>
-                      {s.departmentName && <p className="text-xs text-muted/70">{s.departmentName}</p>}
-                    </div>
-                  )}
-                  <ShiftStatusPill status={s.displayStatus} />
-                </div>
-                {s.note && <p className="text-sm text-muted italic mt-2">&ldquo;{s.note}&rdquo;</p>}
-                {s.status === "CANCELLED" && s.cancelReason && (
-                  <p className="text-sm text-accent mt-2">Cancelled: {s.cancelReason}</p>
-                )}
-
-                {hasPendingRequest && (
-                  <div className="mt-2 rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-sm">
-                    <p className="text-amber-800">
-                      {s.status === "CHANGE_REQUESTED" ? "Requested a change" : "Requested cancellation"}
-                      {s.changeReason ? `: "${s.changeReason}"` : "."}
+        {isSingleEmployeeView ? (
+          <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
+            {filtered.map((s) => renderShiftRow(s))}
+          </div>
+        ) : isGroupedView ? (
+          // Round 2 (CB, Oct 2026, on the mockup: "I don't like how it's showing up the same
+          // name multiple times... they're supposed to be organized per profile"): one card per
+          // person instead of one flat list — a quiet header naming them once (avatar, name,
+          // real job title, same correction already made to the single-employee banner), then
+          // their shifts as the same compact divided rows the single-employee view uses.
+          <div className="space-y-4">
+            {groupedByPerson.map((group) => (
+              <div key={group.employeeId} className="bg-surface border border-border rounded-xl overflow-hidden">
+                <div className="flex items-center gap-3 px-5 py-3.5 bg-black/[0.02] border-b border-border">
+                  <span
+                    className="h-9 w-9 rounded-full shrink-0 flex items-center justify-center text-white text-xs font-semibold"
+                    style={{ background: "linear-gradient(135deg, var(--ttc-pink-ink), var(--ttc-pink))" }}
+                  >
+                    {initialsOf(group.name) || "?"}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-serif font-bold text-[15px] truncate">{group.name}</p>
+                    <p className="text-xs text-muted truncate">{group.jobTitle}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-xs font-semibold text-foreground">
+                      {group.shifts.length} {group.shifts.length === 1 ? "shift" : "shifts"}
                     </p>
-                    {s.requestedDate && s.requestedStartTime && s.requestedEndTime && (
-                      <p className="text-amber-800 mt-1">
-                        Proposed: {formatSlotDate(s.requestedDate)}, {formatTime12h(s.requestedStartTime)} –{" "}
-                        {formatTime12h(s.requestedEndTime)}
-                      </p>
+                    {group.missedCount > 0 && (
+                      <p className="text-[11px] text-rose-800">{group.missedCount} no clock-in</p>
                     )}
                   </div>
-                )}
-
-                {s.status === "CANCELLATION_REQUESTED" && (
-                  <div className="flex items-center gap-3 mt-3">
-                    <button
-                      type="button"
-                      onClick={() => handleApproveCancellation(s.id)}
-                      disabled={busyId === s.id}
-                      className="text-xs font-medium text-accent-ink hover:underline"
-                    >
-                      Approve cancellation
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDecliningId(decliningId === s.id ? null : s.id);
-                        setDeclineComment("");
-                      }}
-                      className="text-xs font-medium text-accent hover:underline"
-                    >
-                      Decline request
-                    </button>
-                  </div>
-                )}
-
-                {s.status === "CHANGE_REQUESTED" && (
-                  <div className="flex items-center gap-3 mt-3">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setApprovingChangeId(approvingChangeId === s.id ? null : s.id);
-                        setApproveDate(s.requestedDate ?? "");
-                        setApproveStartTime(s.requestedStartTime ?? "");
-                        setApproveEndTime(s.requestedEndTime ?? "");
-                      }}
-                      className="text-xs font-medium text-accent-ink hover:underline"
-                    >
-                      Approve change
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDecliningId(decliningId === s.id ? null : s.id);
-                        setDeclineComment("");
-                      }}
-                      className="text-xs font-medium text-accent hover:underline"
-                    >
-                      Decline request
-                    </button>
-                  </div>
-                )}
-
-                {approvingChangeId === s.id && (
-                  <div className="mt-3 flex flex-col gap-2 bg-black/[0.03] rounded-xl p-3">
-                    <p className="text-xs text-muted">Confirm the final date and time for this shift:</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                      <input
-                        type="date"
-                        value={approveDate}
-                        onChange={(e) => setApproveDate(e.target.value)}
-                        className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm"
-                      />
-                      <input
-                        type="time"
-                        value={approveStartTime}
-                        onChange={(e) => setApproveStartTime(e.target.value)}
-                        className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm"
-                      />
-                      <input
-                        type="time"
-                        value={approveEndTime}
-                        onChange={(e) => setApproveEndTime(e.target.value)}
-                        className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleApproveChange(s.id)}
-                      disabled={busyId === s.id || !approveDate || !approveStartTime || !approveEndTime}
-                      className="btn-outline self-start"
-                    >
-                      Confirm approval
-                    </button>
-                  </div>
-                )}
-
-                {decliningId === s.id && (
-                  <div className="mt-3 flex flex-col sm:flex-row gap-2 bg-black/[0.03] rounded-xl p-3">
-                    <textarea
-                      value={declineComment}
-                      onChange={(e) => setDeclineComment(e.target.value)}
-                      placeholder="Optional note for the team member…"
-                      rows={2}
-                      className="flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent-ink"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleDeclineRequest(s.id)}
-                      disabled={busyId === s.id}
-                      className="btn-outline self-start"
-                    >
-                      Confirm decline
-                    </button>
-                  </div>
-                )}
-
-                {canManage && (
-                  <div className="flex items-center gap-3 mt-3">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCancellingId(cancellingId === s.id ? null : s.id);
-                        setReassigningId(null);
-                        setCancelReason("");
-                      }}
-                      className="text-xs font-medium text-accent hover:underline"
-                    >
-                      Cancel shift
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setReassigningId(reassigningId === s.id ? null : s.id);
-                        setCancellingId(null);
-                        setReassignTo("");
-                      }}
-                      className="text-xs font-medium text-accent-ink hover:underline"
-                    >
-                      Reassign
-                    </button>
-                  </div>
-                )}
-
-                {cancellingId === s.id && (
-                  <div className="mt-3 flex flex-col sm:flex-row gap-2 bg-black/[0.03] rounded-xl p-3">
-                    <textarea
-                      value={cancelReason}
-                      onChange={(e) => setCancelReason(e.target.value)}
-                      placeholder="Reason for cancelling (required)…"
-                      rows={2}
-                      className="flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent-ink"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleCancel(s.id)}
-                      disabled={busyId === s.id || !cancelReason.trim()}
-                      className="btn-outline self-start"
-                    >
-                      Confirm cancel
-                    </button>
-                  </div>
-                )}
-
-                {reassigningId === s.id && (
-                  <div className="mt-3 flex flex-col sm:flex-row gap-2 bg-black/[0.03] rounded-xl p-3">
-                    <select
-                      value={reassignTo}
-                      onChange={(e) => setReassignTo(e.target.value)}
-                      className="flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm"
-                    >
-                      <option value="">Choose a team member…</option>
-                      {employeeOptions
-                        .filter((e) => e.id !== s.employeeId)
-                        .map((e) => (
-                          <option key={e.id} value={e.id}>
-                            {e.name}
-                          </option>
-                        ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => handleReassign(s.id)}
-                      disabled={busyId === s.id || !reassignTo}
-                      className="btn-outline self-start"
-                    >
-                      Confirm reassign
-                    </button>
-                  </div>
-                )}
-
-                {/* Phase 3 (client spec, Sept 2026): "re-point tasks and messages onto shifts
-                    instead of the original availability submission" — the same task list
-                    TeamAvailabilityCards already shows for an availability date, now on the
-                    shift itself. Correction brief #2 (Sept 2026): each task now carries its own
-                    comment thread (DateTaskRow), replacing the standalone per-shift conversation
-                    that used to sit alongside this list — see DateTasksPanel's own doc comment. */}
-                <button
-                  type="button"
-                  onClick={() => setOpenShiftId(openShiftId === s.id ? null : s.id)}
-                  className={`mt-3 flex items-center gap-1.5 text-xs font-medium transition-colors ${
-                    openShiftId === s.id ? "text-accent-ink" : "text-muted hover:text-accent-ink"
-                  }`}
-                >
-                  <ChecklistIcon className="h-3.5 w-3.5" />
-                  Tasks
-                </button>
-
-                {openShiftId === s.id && (
-                  <div className="mt-2.5 space-y-2.5">
-                    <div>
-                      <p className="text-xs font-semibold text-muted mb-1 flex items-center gap-1.5">
-                        <ChecklistIcon className="h-3.5 w-3.5" />
-                        Tasks for this shift
-                      </p>
-                      <DateTasksPanel employeeId={s.employeeId} taskDate={s.date} viewerId={viewerId} />
-                    </div>
-                  </div>
-                )}
+                </div>
+                <div className="divide-y divide-border">{group.shifts.map((s) => renderShiftRow(s))}</div>
               </div>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        ) : null}
         </>
       )}
     </div>
