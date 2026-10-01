@@ -1,11 +1,10 @@
 import { redirect } from "next/navigation";
-import { getCurrentEmployee } from "@/lib/auth";
+import { requireEmployeeOrRedirect } from "@/lib/auth";
 import { isAdmin, canAccessReports } from "@/lib/authorization";
 import ReportsView from "./ReportsView";
 
 export default async function ReportsPage() {
-  const employee = await getCurrentEmployee();
-  if (!employee) redirect("/login");
+  const employee = await requireEmployeeOrRedirect();
   // Correction brief #8 (Sept 2026), "Administrative access and role audit": a Supervisor now
   // gets this same page too, scoped to their own team (see ReportsView's `scope` prop and
   // getPayrollHoursReport's own scoping) — "accessing reports" is one of the capabilities
