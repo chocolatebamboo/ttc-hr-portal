@@ -64,50 +64,52 @@ export default function ClockedInNowSection({
     return () => window.clearInterval(id);
   }, [load]);
 
+  // Oct 2026 (CB, circling this exact "Nobody is clocked in right now" box on her Home
+  // dashboard: "if there isn't anything currently in the field then we shouldn't see it at all
+  // cause its cluttering the home page"): the whole section (header, Live badge, body) now
+  // disappears instead of showing an empty-state box. This is a real return inside the
+  // component itself, not a conditional wrapper in dashboard/page.tsx, so the 30s poll above
+  // can still bring it back the instant someone actually clocks in without the parent page
+  // needing to know that happened. Same call TeamScheduleGlance/TimeOffSection/
+  // AvailabilityStatusSection now make for their own empty states, all on this same page.
+  if (rows.length === 0) return null;
+
   return (
     <div className={className}>
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-sm font-medium text-muted">Clocked in now</h2>
-        {rows.length > 0 && (
-          <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-600">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />
-            Live
-          </span>
-        )}
+        <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-600">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />
+          Live
+        </span>
       </div>
 
-      {rows.length === 0 ? (
-        <div className="rounded-xl border border-border bg-surface px-4 py-4 text-sm text-muted">
-          Nobody is clocked in right now.
-        </div>
-      ) : (
-        <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
-          {rows.map((r) => {
-            const elapsedMs = Math.max(0, now.getTime() - new Date(r.clockIn).getTime());
-            return (
-              <div key={r.sessionId} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
-                <div className="min-w-0">
-                  <p className="font-medium truncate">{r.name}</p>
-                  <p className="text-xs text-muted truncate">
-                    {r.jobTitle}
-                    {r.department ? ` · ${r.department}` : ""}
+      <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
+        {rows.map((r) => {
+          const elapsedMs = Math.max(0, now.getTime() - new Date(r.clockIn).getTime());
+          return (
+            <div key={r.sessionId} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+              <div className="min-w-0">
+                <p className="font-medium truncate">{r.name}</p>
+                <p className="text-xs text-muted truncate">
+                  {r.jobTitle}
+                  {r.department ? ` · ${r.department}` : ""}
+                </p>
+                {r.isException && (
+                  <p className="mt-0.5 flex items-start gap-1 text-xs text-amber-700">
+                    <WarningIcon className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                    <span>Flagged{r.exceptionReason ? `: ${r.exceptionReason}` : ""}</span>
                   </p>
-                  {r.isException && (
-                    <p className="mt-0.5 flex items-start gap-1 text-xs text-amber-700">
-                      <WarningIcon className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                      <span>Flagged{r.exceptionReason ? `: ${r.exceptionReason}` : ""}</span>
-                    </p>
-                  )}
-                </div>
-                <div className="text-right shrink-0">
-                  <p className="tabular-nums font-semibold">{formatElapsedClock(elapsedMs)}</p>
-                  <p className="text-xs text-muted mt-0.5">since {formatClockTime(r.clockIn)}</p>
-                </div>
+                )}
               </div>
-            );
-          })}
-        </div>
-      )}
+              <div className="text-right shrink-0">
+                <p className="tabular-nums font-semibold">{formatElapsedClock(elapsedMs)}</p>
+                <p className="text-xs text-muted mt-0.5">since {formatClockTime(r.clockIn)}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
