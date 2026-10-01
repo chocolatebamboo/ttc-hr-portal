@@ -1,6 +1,6 @@
-import { redirect, notFound } from "next/navigation";
+import { notFound } from "next/navigation";
 import Link from "next/link";
-import { getCurrentEmployee } from "@/lib/auth";
+import { requireEmployeeOrRedirect } from "@/lib/auth";
 import { canAccessEmployeeRecords } from "@/lib/authorization";
 import { withRlsContext } from "@/lib/db";
 import TeamNotesThread from "@/components/TeamNotesThread";
@@ -18,8 +18,7 @@ export default async function ReviewEmployeePage(
 ) {
   const { employeeId } = await props.params;
 
-  const reviewer = await getCurrentEmployee();
-  if (!reviewer) redirect("/login");
+  const reviewer = await requireEmployeeOrRedirect();
 
   if (!(await canAccessEmployeeRecords(reviewer, employeeId))) {
     // Same response whether the id doesn't exist or the reviewer just isn't allowed to see
