@@ -1,5 +1,4 @@
-import { redirect } from "next/navigation";
-import { getCurrentEmployee } from "@/lib/auth";
+import { requireEmployeeOrRedirect } from "@/lib/auth";
 import { isAdmin } from "@/lib/authorization";
 import TeamAvailabilityCards from "@/components/TeamAvailabilityCards";
 import TeamPtoCards from "@/components/TeamPtoCards";
@@ -24,8 +23,7 @@ import AvailabilityView from "./AvailabilityView";
  * functions for both" taken at its word, rather than picking one or the other by role.
  */
 export default async function AvailabilityPage() {
-  const employee = await getCurrentEmployee();
-  if (!employee) redirect("/login");
+  const employee = await requireEmployeeOrRedirect();
 
   if (isAdmin(employee)) {
     return (
