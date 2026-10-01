@@ -26,6 +26,14 @@ function reportName(r: DirectReportDTO): string {
   return `${r.preferredName || r.firstName} ${r.lastName}`;
 }
 
+// Same local-copy convention every other consumer of "initials from a name" already follows in
+// this app (see TeamScheduleGlance.tsx's own doc comment on this exact choice) — used below for
+// the single-employee banner's avatar.
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
+}
+
 /**
  * Team Schedule — phase 1 of the scheduling workflow rebuild (client spec, Sept 2026): the
  * supervisor/admin-facing counterpart to My Schedule, plus the two actions that actually create
@@ -147,6 +155,20 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
       return true;
     });
   }, [shifts, employeeFilter, departmentFilter, statusFilter, dateFromFilter, dateToFilter]);
+
+  // Oct 2026 (CB, after seeing the filtered-to-one-person view in production): she didn't like
+  // that person's name repeating on every card below, and wanted the page "widgetized" and
+  // clean for this case — approved via mockup first (her new standing requirement for this kind
+  // of visual change) before this landed in real code. True only once an employee is picked AND
+  // that filter actually matches something, so an empty result still falls through to the
+  // ordinary empty state below rather than showing a banner for nobody.
+  const isSingleEmployeeView = employeeFilter !== "" && filtered.length > 0;
+  const singleEmployeeInfo = isSingleEmployeeView
+    ? { name: filtered[0].employeeName, jobTitle: filtered[0].employeeJobTitle }
+    : null;
+  const singleEmployeeMissedCount = isSingleEmployeeView
+    ? filtered.filter((s) => s.displayStatus === "MISSED").length
+    : 0;
 
   async function handleCreate(input: { employeeId: string; date: string; startTime: string; endTime: string; note: string }) {
     setActionError(null);
@@ -364,7 +386,39 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
       )}
 
       {loadState === "ready" && filtered.length > 0 && (
-        <div className="space-y-2.5">
+        <>
+          {/* Oct 2026 (CB, from live screenshots of this page filtered to one person): "I don't
+              like how it's showing up the same name multiple times... I need it to be
+              widgetized." Approved as a mockup before this landed (her new standing requirement
+              for this kind of visual change) — a single identity banner replaces the per-card
+              name/department line below, and the list collapses into slim divided rows. Only
+              shown when a specific employee is filtered to and that filter actually has results
+              (isSingleEmployeeView above); multi-employee views are untouched. */}
+          {isSingleEmployeeView && singleEmployeeInfo && (
+            <div
+              className="rounded-2xl overflow-hidden shadow-sm mb-4 p-5"
+              style={{ background: "linear-gradient(135deg, var(--ttc-pink-ink), var(--ttc-pink))" }}
+            >
+              <div className="flex items-center gap-3.5">
+                <span className="h-12 w-12 rounded-xl bg-white shrink-0 flex items-center justify-center">
+                  <span className="font-serif font-bold text-base text-accent-ink">{initialsOf(singleEmployeeInfo.name) || "?"}</span>
+                </span>
+                <div className="min-w-0">
+                  <p className="font-serif text-lg font-bold text-white truncate">{singleEmployeeInfo.name}</p>
+                  <p className="text-sm text-white/85 truncate">{singleEmployeeInfo.jobTitle}</p>
+                </div>
+                <div className="ml-auto text-right shrink-0">
+                  <p className="text-sm font-semibold text-white/90">
+                    {filtered.length} {filtered.length === 1 ? "shift" : "shifts"} shown
+                  </p>
+                  {singleEmployeeMissedCount > 0 && (
+                    <p className="text-xs text-white/70">{singleEmployeeMissedCount} no clock-in</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        <div className={isSingleEmployeeView ? "bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden" : "space-y-2.5"}>
           {filtered.map((s) => {
             // Phase 2: Cancel/Reassign stay available on a pending CHANGE_REQUESTED/
             // CANCELLATION_REQUESTED shift too — the spec's own response options to a request
@@ -373,15 +427,24 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
             const canManage = s.status === "UPCOMING" || s.status === "CHANGE_REQUESTED" || s.status === "CANCELLATION_REQUESTED";
             const hasPendingRequest = s.status === "CHANGE_REQUESTED" || s.status === "CANCELLATION_REQUESTED";
             return (
-              <div key={s.id} className="rounded-2xl border border-border bg-surface p-4">
+              <div key={s.id} className={isSingleEmployeeView ? "px-4 py-3.5" : "rounded-2xl border border-border bg-surface p-4"}>
                 <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold truncate">{s.employeeName}</p>
-                    <p className="text-sm text-muted">
-                      {formatSlotDate(s.date)} · {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
-                    </p>
-                    {s.departmentName && <p className="text-xs text-muted/70">{s.departmentName}</p>}
-                  </div>
+                  {isSingleEmployeeView ? (
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold">{formatSlotDate(s.date)}</p>
+                      <p className="text-sm text-muted">
+                        {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold truncate">{s.employeeName}</p>
+                      <p className="text-sm text-muted">
+                        {formatSlotDate(s.date)} · {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
+                      </p>
+                      {s.departmentName && <p className="text-xs text-muted/70">{s.departmentName}</p>}
+                    </div>
+                  )}
                   <ShiftStatusPill status={s.displayStatus} />
                 </div>
                 {s.note && <p className="text-sm text-muted italic mt-2">&ldquo;{s.note}&rdquo;</p>}
@@ -614,6 +677,7 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
             );
           })}
         </div>
+        </>
       )}
     </div>
   );
