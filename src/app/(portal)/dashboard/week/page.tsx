@@ -1,6 +1,5 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { getCurrentEmployee } from "@/lib/auth";
+import { requireEmployeeOrRedirect } from "@/lib/auth";
 import { withRlsContext } from "@/lib/db";
 import { formatSlotDate } from "@/lib/availability-format";
 import { formatMinutes } from "@/lib/time";
@@ -19,8 +18,7 @@ type WeekEntryRow = { workDate: Date; totalMinutes: number | null };
  * stopping at the total.
  */
 export default async function ThisWeekPage() {
-  const employee = await getCurrentEmployee();
-  if (!employee) redirect("/login");
+  const employee = await requireEmployeeOrRedirect();
 
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 6);
