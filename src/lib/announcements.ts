@@ -142,6 +142,18 @@ export interface CreateAnnouncementInput {
   employeeIds?: string[];
 }
 
+/** CB, Oct 2026, pointing at a "Quick reminder" post that had sat on the Home dashboard since
+ *  Sept 27 with no end in sight: "the announcement should always be at the top but should not be
+ *  there forever." The "Expires (optional)" field on the compose form (AnnouncementsView.tsx)
+ *  already lets an admin set an end date — this post just never had one set — so the fix here
+ *  isn't a new capability, it's a default for when that field is left blank: 7 days from publish,
+ *  confirmed via AskUserQuestion ("Yes, default to 7 days") rather than left open-ended. An admin
+ *  who actually wants something longer-lived (or permanent) still types a later date — or, if the
+ *  post genuinely never needs to expire, the UI doesn't currently offer "never" as distinct from
+ *  "I forgot," which is a product question for another day, not something this default decides on
+ *  its own. */
+const DEFAULT_EXPIRATION_DAYS = 7;
+
 /** Admin posts a new announcement. Audience is exactly one of Everyone (no rows), one or more
  *  departments, or one or more specific employees — never a mix, which is what keeps the admin
  *  list's audienceType/audienceLabel derivation above unambiguous. */
@@ -163,14 +175,18 @@ export async function createAnnouncement(actor: CurrentEmployee, input: CreateAn
     throw new InvalidAnnouncementError("Choose at least one team member.");
   }
 
+  const publishDate = input.publishDate ?? new Date();
+  const expirationDate =
+    input.expirationDate ?? new Date(publishDate.getTime() + DEFAULT_EXPIRATION_DAYS * 24 * 60 * 60 * 1000);
+
   return withRlsContext({ employeeId: actor.id, role: actor.role }, (tx) =>
     tx.announcement.create({
       data: {
         title: input.title.trim(),
         message: input.message.trim(),
         authorId: actor.id,
-        publishDate: input.publishDate ?? new Date(),
-        expirationDate: input.expirationDate ?? null,
+        publishDate,
+        expirationDate,
         audiences:
           input.audienceType === "DEPARTMENTS"
             ? { create: input.departmentIds!.map((departmentId) => ({ departmentId })) }
