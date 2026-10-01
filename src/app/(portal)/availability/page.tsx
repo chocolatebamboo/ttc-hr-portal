@@ -1,8 +1,7 @@
 import { requireEmployeeOrRedirect } from "@/lib/auth";
 import { isAdmin } from "@/lib/authorization";
-import TeamAvailabilityCards from "@/components/TeamAvailabilityCards";
+import TeamAvailabilityWeekPanel from "@/components/TeamAvailabilityWeekPanel";
 import TeamPtoCards from "@/components/TeamPtoCards";
-import ScheduleSomeoneButton from "@/components/ScheduleSomeoneButton";
 import AvailabilityView from "./AvailabilityView";
 
 /**
@@ -22,6 +21,16 @@ import AvailabilityView from "./AvailabilityView";
  * something real. Admins now get both, stacked: their own calendar/submit widget first (exactly
  * what a non-admin sees, unchanged), then the team review queue underneath — "combine the
  * functions for both" taken at its word, rather than picking one or the other by role.
+ *
+ * Redesign (Oct 2026, approved via mockup first — CB: "For admin i dont want to have them see
+ * this" on the Logged hours/Time off tiles, and "like how we have the schedule someone... it
+ * kind of needs to be in that same area where we have this week"): the admin branch now passes
+ * `isAdminViewer` down to AvailabilityView, which hides those two personal stat tiles for an
+ * admin and moves "Schedule someone" up into its own "This week" card header — this page no
+ * longer renders a separate ScheduleSomeoneButton of its own. "Team availability requests" is now
+ * TeamAvailabilityWeekPanel (week nav + the same TeamAvailabilityCards queue underneath, just
+ * bounded to one week at a time — see that component's own doc comment) instead of an unbounded
+ * list with its own header row here.
  */
 export default async function AvailabilityPage() {
   const employee = await requireEmployeeOrRedirect();
@@ -29,17 +38,9 @@ export default async function AvailabilityPage() {
   if (isAdmin(employee)) {
     return (
       <div className="max-w-3xl">
-        <AvailabilityView employeeId={employee.id} />
+        <AvailabilityView employeeId={employee.id} isAdminViewer />
         <div className="mt-6">
-          <div className="flex items-center justify-between gap-3 mb-2">
-            <h2 className="text-sm font-medium text-muted">Team availability requests</h2>
-            {/* Oct 2026 (CB: "for those admin accounts... we need to be able to make our team
-                member's schedule from here"): the same "Schedule someone" action Home's hero
-                already offers, so an admin can create any team member's shift without leaving
-                this page — see ScheduleSomeoneButton's own doc comment. */}
-            <ScheduleSomeoneButton />
-          </div>
-          <TeamAvailabilityCards viewerId={employee.id} />
+          <TeamAvailabilityWeekPanel viewerId={employee.id} />
         </div>
         <div className="mt-6">
           <h2 className="text-sm font-medium text-muted mb-2">Time off requests</h2>
