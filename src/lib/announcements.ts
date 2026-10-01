@@ -1,5 +1,6 @@
 import { withRlsContext } from "@/lib/db";
 import { isAdmin, ForbiddenError } from "@/lib/authorization";
+import { dismiss } from "@/lib/dashboard-dismissals";
 import type {
   CurrentEmployee,
   AnnouncementDTO,
@@ -196,6 +197,29 @@ export async function createAnnouncement(actor: CurrentEmployee, input: CreateAn
       },
     })
   );
+}
+
+/** Oct 2026 (CB, circling the "Quick reminder" card that had sat at the top of her Home
+ *  dashboard for days: "I should be able to clear this notification as well"): the key
+ *  dashboard/page.tsx and the dismiss route below both build, so there's exactly one place that
+ *  spells it — `announcement:${id}`. Identity-based rather than content-derived like
+ *  dashboard-notifications.ts's approvalsKey/messagesKey (those re-derive from a count that
+ *  changes; a given announcement's id never does), so there's no "different post, same key"
+ *  collision to guard against the way those two do. */
+export function announcementDismissKey(announcementId: string): string {
+  return `announcement:${announcementId}`;
+}
+
+/** Dismisses one announcement for just THIS employee — not to be confused with deleteAnnouncement
+ *  below, which an admin uses to remove a post for everyone. Any signed-in employee may call this
+ *  (no isAdmin check): dismissing is a personal "stop showing me this" preference, same spirit as
+ *  the approvals/messages banners' own per-employee dismissal (src/lib/dashboard-dismissals.ts),
+ *  not an administrative action. Gone for this employee for good — no "Show Again" — but the post
+ *  is untouched for everyone else, and listAnnouncementsForEmployee above (the full /announcements
+ *  feed) is untouched by this too; only the Home dashboard widget (dashboard/page.tsx) filters
+ *  dismissed posts out. */
+export async function dismissAnnouncementForEmployee(actor: CurrentEmployee, announcementId: string) {
+  await dismiss(actor, announcementDismissKey(announcementId));
 }
 
 /** Admin deletes an announcement outright — there's no archivedAt on this model (unlike
