@@ -10,6 +10,7 @@ import NewMessagePicker from "@/components/NewMessagePicker";
 import { ChecklistIcon, CheckCircleIcon, CalendarIcon, TrashIcon, ChatIcon } from "@/components/icons";
 import { slotChips, formatReviewedAt, type SlotChip } from "@/lib/availability-format";
 import { toneForStatus, YOU_TONE } from "@/lib/status-tone";
+import { dateKeyDaysFromNow } from "@/lib/time";
 import type { AdminAvailabilityDTO, AdminShiftDTO, AvailabilityDateDecision, DirectoryEntryDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
@@ -653,6 +654,12 @@ export function groupByEmployee(rows: AdminAvailabilityDTO[]): FolderGroup[] {
  */
 export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }) {
   const q = useTeamAvailabilityQueue();
+  // Oct 2026 (CB, screenshotted Decided cards with dates going back over a week, today being
+  // Oct 1): "it should archive the dates that are already complete or already done... show only
+  // what's for this week." Collapsed behind this toggle rather than lost — confirmed via
+  // AskUserQuestion ("Keep reachable via a 'View archived' link") — same spirit as the rest of
+  // this component's swipe-to-clear leaving a trail, not deleting anything.
+  const [showArchivedDecided, setShowArchivedDecided] = useState(false);
 
   if (q.loadState === "loading") {
     return (
@@ -671,6 +678,78 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
       </div>
     );
   }
+
+  // Same rolling-last-7-days definition as the Home dashboard's own "This week" stat
+  // (dashboard/page.tsx's sevenDaysAgo) — CB confirmed via AskUserQuestion this should match
+  // rather than invent a second "this week." Keyed off each submission's own slot dates (not
+  // reviewedAt/when it was decided): a request approved today for a shift two weeks out is still
+  // very much live and stays visible, while one whose every date has already passed — the "dates
+  // that are already complete or already done" CB pointed at — is what moves behind the link.
+  const recentCutoffKey = dateKeyDaysFromNow(-6);
+  const decidedRecent = q.decided.filter((s) => s.slots.some((slot) => slot.date >= recentCutoffKey));
+  const decidedArchived = q.decided.filter((s) => !s.slots.some((slot) => slot.date >= recentCutoffKey));
+
+  // Shared by both the normal Decided list and the collapsed archive below — same card, same
+  // handlers, just two different source arrays — so the two never drift into rendering a decided
+  // request differently depending on which bucket it landed in.
+  const renderDecidedGroup = (group: FolderGroup) => {
+    const soleId = group.submissions.length === 1 ? group.submissions[0].id : null;
+    const card = (
+      <Card
+        submissions={group.submissions}
+        viewerId={viewerId}
+        busy={group.submissions.some((s) => s.id === q.busyId)}
+        addingNote={soleId !== null && q.addingNoteId === soleId}
+        noteText={q.noteText}
+        decideError={group.submissions.some((s) => s.id === q.decideErrorId) ? q.decideError : undefined}
+        removing={soleId !== null && q.removingId === soleId}
+        removeError={group.submissions.some((s) => s.id === q.removeErrorId) ? q.removeError : undefined}
+        openDate={q.openDate}
+        shiftsByDate={q.shiftsByDate}
+        dmCounts={q.dmCounts}
+        onToggleDate={(submissionId, date) =>
+          q.setOpenDate(
+            q.openDate?.submissionId === submissionId && q.openDate.date === date ? null : { submissionId, date }
+          )
+        }
+        onAddNoteToggle={() => soleId && q.setAddingNoteId(q.addingNoteId === soleId ? null : soleId)}
+        onNoteTextChange={q.setNoteText}
+        onAddNote={q.addNote}
+        onAddDateNote={q.addDateNote}
+        onDecide={() => {}}
+        onDecideDate={() => {}}
+        onUndo={q.undo}
+        onUndoDate={q.undoDate}
+        onChangeDate={() => {}}
+        onRemoveConfirm={q.removeSubmission}
+        onRemoveCancel={q.cancelRemove}
+        onOpenChat={q.openChat}
+        onMessageAboutDate={q.openChatForDate}
+        onRemoveDate={q.removeDate}
+        onCreateShift={q.createShift}
+      />
+    );
+    return soleId !== null ? (
+      <SwipeReveal
+        key={group.employeeId}
+        actionSide="right"
+        actionLabel="Clear"
+        actionIcon={<CheckCircleIcon className="h-4 w-4" />}
+        actionClassName="bg-black/[0.06] text-accent-ink rounded-3xl"
+        onAction={() => q.clearDecided(soleId)}
+        secondaryAction={{
+          label: "Remove",
+          icon: <TrashIcon className="h-4 w-4" />,
+          className: "bg-rose-600 text-white rounded-3xl",
+          onAction: () => q.setRemovingId(soleId),
+        }}
+      >
+        {card}
+      </SwipeReveal>
+    ) : (
+      <div key={group.employeeId}>{card}</div>
+    );
+  };
 
   return (
     <>
@@ -748,71 +827,31 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
         </section>
       )}
 
-      {q.decided.length > 0 && (
+      {(decidedRecent.length > 0 || decidedArchived.length > 0) && (
         <section>
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted mb-2.5">
-            Decided ({q.decided.length})
-          </h2>
-          <div className="space-y-3">
-            {groupByEmployee(q.decided).map((group) => {
-              const soleId = group.submissions.length === 1 ? group.submissions[0].id : null;
-              const card = (
-                <Card
-                  submissions={group.submissions}
-                  viewerId={viewerId}
-                  busy={group.submissions.some((s) => s.id === q.busyId)}
-                  addingNote={soleId !== null && q.addingNoteId === soleId}
-                  noteText={q.noteText}
-                  decideError={group.submissions.some((s) => s.id === q.decideErrorId) ? q.decideError : undefined}
-                  removing={soleId !== null && q.removingId === soleId}
-                  removeError={group.submissions.some((s) => s.id === q.removeErrorId) ? q.removeError : undefined}
-                  openDate={q.openDate}
-                  shiftsByDate={q.shiftsByDate}
-                  dmCounts={q.dmCounts}
-                  onToggleDate={(submissionId, date) =>
-                    q.setOpenDate(
-                      q.openDate?.submissionId === submissionId && q.openDate.date === date ? null : { submissionId, date }
-                    )
-                  }
-                  onAddNoteToggle={() => soleId && q.setAddingNoteId(q.addingNoteId === soleId ? null : soleId)}
-                  onNoteTextChange={q.setNoteText}
-                  onAddNote={q.addNote}
-                  onAddDateNote={q.addDateNote}
-                  onDecide={() => {}}
-                  onDecideDate={() => {}}
-                  onUndo={q.undo}
-                  onUndoDate={q.undoDate}
-                  onChangeDate={() => {}}
-                  onRemoveConfirm={q.removeSubmission}
-                  onRemoveCancel={q.cancelRemove}
-                  onOpenChat={q.openChat}
-                  onMessageAboutDate={q.openChatForDate}
-                  onRemoveDate={q.removeDate}
-                  onCreateShift={q.createShift}
-                />
-              );
-              return soleId !== null ? (
-                <SwipeReveal
-                  key={group.employeeId}
-                  actionSide="right"
-                  actionLabel="Clear"
-                  actionIcon={<CheckCircleIcon className="h-4 w-4" />}
-                  actionClassName="bg-black/[0.06] text-accent-ink rounded-3xl"
-                  onAction={() => q.clearDecided(soleId)}
-                  secondaryAction={{
-                    label: "Remove",
-                    icon: <TrashIcon className="h-4 w-4" />,
-                    className: "bg-rose-600 text-white rounded-3xl",
-                    onAction: () => q.setRemovingId(soleId),
-                  }}
-                >
-                  {card}
-                </SwipeReveal>
-              ) : (
-                <div key={group.employeeId}>{card}</div>
-              );
-            })}
-          </div>
+          {decidedRecent.length > 0 && (
+            <>
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-muted mb-2.5">
+                Decided ({decidedRecent.length})
+              </h2>
+              <div className="space-y-3">{groupByEmployee(decidedRecent).map(renderDecidedGroup)}</div>
+            </>
+          )}
+
+          {decidedArchived.length > 0 && (
+            <div className={decidedRecent.length > 0 ? "mt-4" : ""}>
+              <button
+                type="button"
+                onClick={() => setShowArchivedDecided((v) => !v)}
+                className="text-xs font-medium text-accent-ink hover:underline"
+              >
+                {showArchivedDecided ? "Hide archived" : `View archived (${decidedArchived.length})`}
+              </button>
+              {showArchivedDecided && (
+                <div className="space-y-3 mt-2.5">{groupByEmployee(decidedArchived).map(renderDecidedGroup)}</div>
+              )}
+            </div>
+          )}
         </section>
       )}
     </>
