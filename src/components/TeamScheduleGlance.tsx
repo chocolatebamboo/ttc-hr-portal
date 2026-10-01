@@ -1,14 +1,9 @@
-"use client";
-
-// Oct 2026 (CB: "we shouldn't see like every upcoming date... that probably has a dropdown if
-// they want to see the other dates... it's cluttering up the home page"): the Upcoming list below
-// now collapses to the next few shifts with a "See more" toggle, which needs real client state —
-// hence "use client" here now. Props (shifts/upcomingShifts) are still plain serializable DTOs
-// from the dashboard/page.tsx Server Component, so this crosses the server/client boundary the
-// same ordinary way ClockedInNowSection already does; it changes nothing about the RSC-boundary
-// fix this file's initialsOf already has its own doc comment on below (initialsOf stays a local
-// copy either way, "use client" or not).
-import { Fragment, useState } from "react";
+// Oct 2026 (CB: "I shouldn't see the same name come up multiple times... it should be under its
+// respective name... and then when we click it we can see that person's full schedule down the
+// line"): the Upcoming list below no longer needs any client state of its own — no more in-place
+// "See more" toggle (see UPCOMING_COLLAPSED_COUNT's own doc comment) — so this file drops the
+// "use client" directive it picked up for that toggle and goes back to rendering straight from
+// dashboard/page.tsx, a Server Component, the same way it did before that toggle existed.
 import Link from "next/link";
 import ShiftStatusPill from "@/components/ShiftStatusPill";
 import { formatTime12h, formatSlotDate } from "@/lib/availability-format";
@@ -39,22 +34,47 @@ function colorFor(id: string): string {
   return AVATAR_COLORS[hash % AVATAR_COLORS.length];
 }
 
-/** One date's worth of consecutive upcoming shifts — `groupUpcomingByDate` below relies on
- *  `upcomingShifts` already arriving sorted by date (listAdminShifts's own orderBy), so it only
- *  ever has to compare each shift against the group it's currently building, never re-sort. */
-interface UpcomingDateGroup {
-  date: string;
-  shifts: AdminShiftDTO[];
+/** One employee's own upcoming shifts, collapsed to a single row — `groupUpcomingByEmployee`
+ *  below relies on `upcomingShifts` already arriving sorted by date (listAdminShifts's own
+ *  orderBy), so the first shift it sees for a given employee is always that employee's own
+ *  soonest one, with no re-sorting needed. */
+interface UpcomingEmployeeGroup {
+  employeeId: string;
+  employeeName: string;
+  employeeJobTitle: string;
+  /** This employee's own soonest upcoming shift — what the row's date/time line shows. */
+  nextShift: AdminShiftDTO;
+  /** How many upcoming shifts this employee has in total, nextShift included. */
+  count: number;
 }
 
-function groupUpcomingByDate(upcomingShifts: AdminShiftDTO[]): UpcomingDateGroup[] {
-  const groups: UpcomingDateGroup[] = [];
+// Oct 2026 (CB, screenshotted the Upcoming list showing "Haile Eugene" as a separate row for
+// every date she had a shift on): "I shouldn't see the same name come up multiple times... it
+// should be under its respective name... Haley should show up once." One row per employee
+// instead of one row per shift occurrence — the date-grouped version this replaced
+// (groupUpcomingByDate) read naturally for "who's on which day" but fell apart the moment one
+// person had several upcoming shifts, which is exactly the common case this list exists for.
+function groupUpcomingByEmployee(upcomingShifts: AdminShiftDTO[]): UpcomingEmployeeGroup[] {
+  const order: string[] = [];
+  const byEmployee = new Map<string, AdminShiftDTO[]>();
   for (const s of upcomingShifts) {
-    const current = groups[groups.length - 1];
-    if (current && current.date === s.date) current.shifts.push(s);
-    else groups.push({ date: s.date, shifts: [s] });
+    if (!byEmployee.has(s.employeeId)) {
+      byEmployee.set(s.employeeId, []);
+      order.push(s.employeeId);
+    }
+    byEmployee.get(s.employeeId)!.push(s);
   }
-  return groups;
+  return order.map((employeeId) => {
+    const shiftsForEmployee = byEmployee.get(employeeId)!;
+    const nextShift = shiftsForEmployee[0];
+    return {
+      employeeId,
+      employeeName: nextShift.employeeName,
+      employeeJobTitle: nextShift.employeeJobTitle,
+      nextShift,
+      count: shiftsForEmployee.length,
+    };
+  });
 }
 
 /**
@@ -72,30 +92,31 @@ function groupUpcomingByDate(upcomingShifts: AdminShiftDTO[]): UpcomingDateGroup
  * `upcomingShifts` (CB, Sept 2026 follow-up, screenshotted the exact scenario): "just because
  * somebody isn't working today, I should be able to see the upcoming schedules, cleanly." Every
  * future shift from tomorrow onward (dashboard/page.tsx's own dateKeyDaysFromNow(1) with no
- * dateTo cap, CANCELLED/REASSIGNED already filtered out there), grouped here by date under its
- * own "Upcoming" header, shown whenever there's anything in that window, whether or not `shifts`
- * (today) is empty, so the empty-today message is never a dead end but today having people on
- * doesn't hide what's coming next either. No status pill on these rows (unlike `shifts` above):
- * every one of them is, by construction, still ahead, and the date-group header already says
- * which day.
+ * dateTo cap, CANCELLED/REASSIGNED already filtered out there), grouped here by EMPLOYEE (see
+ * groupUpcomingByEmployee above) under its own "Upcoming" header, shown whenever there's
+ * anything in that window, whether or not `shifts` (today) is empty, so the empty-today message
+ * is never a dead end but today having people on doesn't hide what's coming next either.
  *
- * Collapsed-by-default (CB, Oct 2026, screenshotted a dashboard stretching from tomorrow to three
- * and a half weeks out with no cutoff): `upcomingShifts` itself still arrives uncapped from
- * dashboard/page.tsx exactly as before (nothing upstream changed), but only the first
- * UPCOMING_COLLAPSED_COUNT of them render until "See more" is tapped — confirmed via AskUserQuestion
- * ("Next 3, then 'See more'") rather than guessed. Counts individual shifts, not date-groups, so a
- * single busy day can still fill or exceed the collapsed view on its own.
+ * Capped at UPCOMING_COLLAPSED_COUNT employees (CB, Oct 2026: "on the home page probably should
+ * show like four max"), with a "See all" link to the full Team Schedule page instead of the old
+ * in-place "See more" toggle (CB, same pass: "I think it would be appropriate to go into that
+ * other page" rather than expanding the same list) — see the render below for exactly which
+ * link. `upcomingShifts` itself still arrives uncapped from dashboard/page.tsx exactly as
+ * before; only the rendered employee-row count is capped here.
  *
- * Every row, in both `shifts` and `upcomingShifts`, is a Link to `/team/${employeeId}` (CB, Oct
- * 2026: "I should be able to click on the team member and see information relating to that team
- * member there") — same review-employee page (timesheet, time off, availability, notes) that "My
- * Team"'s own list already links to (TeamListView.tsx), just reached from a second place. Safe
- * for whoever is actually looking at this widget: it only ever renders for a caller
- * canSeeAdminHomeDashboard already lets see it (dashboard/page.tsx), i.e. an admin (every
- * employeeId here is fair game) or a supervisor (dashboard/page.tsx's own listAdminShifts call
- * already narrows `shifts`/`upcomingShifts` to that supervisor's own direct reports) — exactly
- * the set canAccessEmployeeRecords (src/lib/authorization.ts), which /team/[employeeId] gates on,
- * already grants that same caller. No new access is being opened up here, just a path to it.
+ * Each `shifts` row still links to `/team/${employeeId}` (CB, earlier round: "I should be able
+ * to click on the team member and see information relating to that team member there") — the
+ * review-employee page (timesheet, time off, availability, notes). Each `upcomingShifts` row
+ * instead links to `/team/schedule?employeeId=${employeeId}` (CB, this round: "when we click it
+ * we can see that person's full schedule down the line") — the existing Team Schedule page,
+ * pre-filtered to just this person via the URL param it now reads on load (see
+ * TeamScheduleView's own doc comment), rather than duplicating a second shift list on the
+ * review page. Both are safe for whoever is actually looking at this widget: it only ever
+ * renders for a caller canSeeAdminHomeDashboard already lets see it (dashboard/page.tsx), i.e.
+ * an admin (every employeeId here is fair game) or a supervisor (dashboard/page.tsx's own
+ * listAdminShifts call already narrows `shifts`/`upcomingShifts` to that supervisor's own direct
+ * reports) — exactly the same set both /team/[employeeId] and /team/schedule already gate on.
+ * No new access is being opened up here, just a path to it.
  *
  * "Who's working right now" hides entirely — header, Full schedule link, and body — when `shifts`
  * is empty (Oct 2026, CB circling that exact header+"Nobody's scheduled today yet" pairing: "if
@@ -105,7 +126,7 @@ function groupUpcomingByDate(upcomingShifts: AdminShiftDTO[]): UpcomingDateGroup
  * scheduled next. If both are empty the whole widget renders nothing, same "no stray empty
  * section" call ClockedInNowSection/TimeOffSection/AvailabilityStatusSection now make too.
  */
-const UPCOMING_COLLAPSED_COUNT = 3;
+const UPCOMING_COLLAPSED_COUNT = 4;
 
 export default function TeamScheduleGlance({
   shifts,
@@ -116,11 +137,10 @@ export default function TeamScheduleGlance({
   upcomingShifts: AdminShiftDTO[];
   className?: string;
 }) {
-  const [showAllUpcoming, setShowAllUpcoming] = useState(false);
   const tomorrowKey = dateKeyDaysFromNow(1);
-  const visibleUpcomingShifts = showAllUpcoming ? upcomingShifts : upcomingShifts.slice(0, UPCOMING_COLLAPSED_COUNT);
-  const upcomingGroups = groupUpcomingByDate(visibleUpcomingShifts);
-  const hiddenUpcomingCount = upcomingShifts.length - visibleUpcomingShifts.length;
+  const upcomingGroups = groupUpcomingByEmployee(upcomingShifts);
+  const visibleUpcomingGroups = upcomingGroups.slice(0, UPCOMING_COLLAPSED_COUNT);
+  const hiddenUpcomingEmployeeCount = upcomingGroups.length - visibleUpcomingGroups.length;
 
   if (shifts.length === 0 && upcomingGroups.length === 0) return null;
 
@@ -167,52 +187,38 @@ export default function TeamScheduleGlance({
         <div className={shifts.length > 0 ? "mt-4" : ""}>
           <h2 className="text-sm font-medium text-muted mb-2">Upcoming</h2>
           <div className="bg-surface border border-border rounded-2xl divide-y divide-border overflow-hidden">
-            {upcomingGroups.map((group) => (
-              <Fragment key={group.date}>
-                <p className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted bg-black/[0.02]">
-                  {group.date === tomorrowKey ? `Tomorrow · ${formatSlotDate(group.date)}` : formatSlotDate(group.date)}
-                </p>
-                {group.shifts.map((s) => (
-                  <Link
-                    key={s.id}
-                    href={`/team/${s.employeeId}`}
-                    className="flex items-center gap-2.5 px-4 py-3 hover:bg-black/[0.02]"
-                  >
-                    <span
-                      className="h-9 w-9 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0"
-                      style={{ background: colorFor(s.employeeId) }}
-                    >
-                      {initialsOf(s.employeeName)}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold truncate">{s.employeeName}</p>
-                      <p className="text-xs text-muted truncate">{s.employeeJobTitle}</p>
-                    </div>
-                    <p className="text-xs text-muted tabular-nums shrink-0">
-                      {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
-                    </p>
-                  </Link>
-                ))}
-              </Fragment>
+            {visibleUpcomingGroups.map((g) => (
+              <Link
+                key={g.employeeId}
+                href={`/team/schedule?employeeId=${g.employeeId}`}
+                className="flex items-center gap-2.5 px-4 py-3 hover:bg-black/[0.02]"
+              >
+                <span
+                  className="h-9 w-9 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0"
+                  style={{ background: colorFor(g.employeeId) }}
+                >
+                  {initialsOf(g.employeeName)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold truncate">{g.employeeName}</p>
+                  <p className="text-xs text-muted truncate">
+                    {g.nextShift.date === tomorrowKey ? "Tomorrow" : formatSlotDate(g.nextShift.date)} ·{" "}
+                    {formatTime12h(g.nextShift.startTime)} – {formatTime12h(g.nextShift.endTime)}
+                  </p>
+                </div>
+                {g.count > 1 && (
+                  <span className="text-xs font-medium text-muted shrink-0">+{g.count - 1} more</span>
+                )}
+              </Link>
             ))}
           </div>
-          {hiddenUpcomingCount > 0 && (
-            <button
-              type="button"
-              onClick={() => setShowAllUpcoming(true)}
-              className="mt-2 text-xs font-medium text-accent-ink hover:underline"
+          {hiddenUpcomingEmployeeCount > 0 && (
+            <Link
+              href={`/team/schedule?dateFrom=${tomorrowKey}`}
+              className="mt-2 inline-block text-xs font-medium text-accent-ink hover:underline"
             >
-              See more ({hiddenUpcomingCount})
-            </button>
-          )}
-          {showAllUpcoming && upcomingShifts.length > UPCOMING_COLLAPSED_COUNT && (
-            <button
-              type="button"
-              onClick={() => setShowAllUpcoming(false)}
-              className="mt-2 text-xs font-medium text-accent-ink hover:underline"
-            >
-              Show less
-            </button>
+              See all upcoming ({upcomingGroups.length}) →
+            </Link>
           )}
         </div>
       )}
