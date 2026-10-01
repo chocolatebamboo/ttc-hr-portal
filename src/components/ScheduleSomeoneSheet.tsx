@@ -97,7 +97,10 @@ export default function ScheduleSomeoneSheet({
       onClick={onClose}
     >
       <div
-        className="w-full sm:max-w-sm bg-surface rounded-t-3xl sm:rounded-2xl p-5 max-h-[85vh] overflow-y-auto"
+        // Oct 2026 (CB: "on desktop, we need to make this window look a bit bigger... it's kind
+        // of small"): widened from max-w-sm (384px) to max-w-lg (512px) at sm breakpoint and up —
+        // same single-column content, mobile sheet width untouched.
+        className="w-full sm:max-w-lg bg-surface rounded-t-3xl sm:rounded-2xl p-5 max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sm:hidden w-10 h-1 rounded-full bg-border mx-auto mb-4" />
