@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { withUserIdContext } from "@/lib/db";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getAvatarPublicUrl } from "@/lib/storage";
@@ -84,4 +85,28 @@ export async function requireRealEmployee(): Promise<CurrentEmployee> {
   const employee = await getCurrentEmployee();
   if (!employee) throw new UnauthenticatedError();
   return employee;
+}
+
+/**
+ * For Server Component pages: the effective employee (requireEmployee above — the "View as"
+ * preview target when one is active, see src/lib/preview.ts), or a redirect to /login for a
+ * genuinely signed-out visitor. This is what nearly every portal page.tsx under
+ * src/app/(portal)/ should call — Oct 2026 (CB, after previewing as Jennay: "it's saying
+ * welcome chocolate... it should look exactly like how that team member is seeing it on their
+ * page"): every one of those pages was calling getCurrentEmployee() directly instead, which
+ * resolves the REAL signed-in employee, not the previewed one, even though the preview cookie
+ * was active. The portal layout (src/app/(portal)/layout.tsx) already got this right for the
+ * nav and header — `employee` there is explicitly the effective identity — which is exactly
+ * what made this bug confusing to spot from a screenshot alone: the nav and header already
+ * showed Jennay, while every page's own content underneath still rendered as the real admin.
+ * Every page that was doing its own `getCurrentEmployee()` + `if (!employee) redirect("/login")`
+ * two-liner now does this instead, one call, same redirect behavior for a real signed-out visit.
+ */
+export async function requireEmployeeOrRedirect(): Promise<CurrentEmployee> {
+  try {
+    return await requireEmployee();
+  } catch (err) {
+    if (err instanceof UnauthenticatedError) redirect("/login");
+    throw err;
+  }
 }
