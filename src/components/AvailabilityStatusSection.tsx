@@ -27,6 +27,13 @@ export default function AvailabilityStatusSection({
   className?: string;
   recentAvailability: AvailabilityDTO[];
 }) {
+  // Oct 2026 (CB, circling the "No availability submitted yet" box on her Home dashboard: "if
+  // there isn't anything currently in the field then we shouldn't see it at all cause its
+  // cluttering the home page"): nothing submitted yet means this section doesn't render at all
+  // — same call ClockedInNowSection/TimeOffSection/TeamScheduleGlance now make for their own
+  // empty states, all on this same page.
+  if (recentAvailability.length === 0) return null;
+
   return (
     <div className={className}>
       <div className="flex items-center justify-between mb-2">
@@ -38,24 +45,18 @@ export default function AvailabilityStatusSection({
           See all →
         </Link>
       </div>
-      {recentAvailability.length === 0 ? (
-        <div className="rounded-xl border border-border bg-surface px-4 py-4 text-sm text-muted">
-          No availability submitted yet.
-        </div>
-      ) : (
-        <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
-          {recentAvailability.map((a) => (
-            <Link
-              key={a.id}
-              href="/availability"
-              className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-black/[0.02] transition-colors"
-            >
-              <span className="truncate">{summarizeSlots(a.slots)}</span>
-              <AvailabilityStatusPill status={a.status} />
-            </Link>
-          ))}
-        </div>
-      )}
+      <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
+        {recentAvailability.map((a) => (
+          <Link
+            key={a.id}
+            href="/availability"
+            className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-black/[0.02] transition-colors"
+          >
+            <span className="truncate">{summarizeSlots(a.slots)}</span>
+            <AvailabilityStatusPill status={a.status} />
+          </Link>
+        ))}
+      </div>
     </div>
   );
 }
