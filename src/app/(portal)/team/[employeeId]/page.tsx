@@ -3,15 +3,23 @@ import Link from "next/link";
 import { requireEmployeeOrRedirect } from "@/lib/auth";
 import { canAccessEmployeeRecords } from "@/lib/authorization";
 import { withRlsContext } from "@/lib/db";
-import TeamNotesThread from "@/components/TeamNotesThread";
-import ReviewTimesheetView from "./ReviewTimesheetView";
-import TeamPtoSection from "./TeamPtoSection";
-import TeamAvailabilitySection from "./TeamAvailabilitySection";
+import { getAvatarPublicUrl } from "@/lib/storage";
+import ReviewEmployeeView from "./ReviewEmployeeView";
 
 /** Hand-declared rather than relying on inference through withRlsContext's callback — same
  *  convention src/lib/availability.ts's AvailabilityRow and dashboard/week/page.tsx's
- *  WeekEntryRow follow — narrowed to just the fields this page's select actually reads. */
-type ReviewTarget = { id: string; firstName: string; lastName: string; preferredName: string | null; jobTitle: string };
+ *  WeekEntryRow follow — narrowed to just the fields this page's select actually reads.
+ *  avatarStorageKey added Oct 2026 alongside the banner redesign below — same
+ *  avatarStorageKey-to-getAvatarPublicUrl() conversion src/lib/auth.ts and src/lib/profile.ts
+ *  already do, so the banner can show a real photo instead of always falling back to initials. */
+type ReviewTarget = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  preferredName: string | null;
+  jobTitle: string;
+  avatarStorageKey: string | null;
+};
 
 export default async function ReviewEmployeePage(
   props: PageProps<"/team/[employeeId]">
@@ -31,7 +39,14 @@ export default async function ReviewEmployeePage(
     async (tx) => {
       return tx.employee.findUnique({
         where: { id: employeeId },
-        select: { id: true, firstName: true, lastName: true, preferredName: true, jobTitle: true },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          preferredName: true,
+          jobTitle: true,
+          avatarStorageKey: true,
+        },
       });
     }
   );
@@ -42,26 +57,23 @@ export default async function ReviewEmployeePage(
       <Link href="/team" className="text-sm text-muted hover:text-accent-ink mb-3 inline-block">
         ← My Team
       </Link>
-      <h1 className="page-title text-2xl">
-        {target.preferredName || target.firstName} {target.lastName}
-      </h1>
-      <p className="text-sm text-muted mb-5">{target.jobTitle}</p>
-
-      <h2 className="text-sm font-medium text-muted mb-2">Timesheet</h2>
-      <ReviewTimesheetView employeeId={target.id} />
-
-      <h2 className="text-sm font-medium text-muted mb-2 mt-8">Time Off</h2>
-      <TeamPtoSection employeeId={target.id} />
-
-      <h2 className="text-sm font-medium text-muted mb-2 mt-8">Availability</h2>
-      <TeamAvailabilitySection employeeId={target.id} />
-
-      {/* CB, Sept 2026: "say I accept it, then I would be able to, like, add notes, add
-          documents... so we could communicate through there." Same thread whichever side you
-          view it from — this employee, reviewing it here, sees the exact messages the person
-          themselves sees on their own /notes page. */}
-      <h2 className="text-sm font-medium text-muted mb-2 mt-8">Notes</h2>
-      <TeamNotesThread employeeId={target.id} viewerId={reviewer.id} />
+      {/* Oct 2026 (CB, on this page: "it's too wordy... I want it to be widgetized and I want
+          it to be clean"): Timesheet/Time Off/Availability/Notes used to stack here as four
+          always-open sections, one after another under a plain text label — a long scroll of
+          everything at once even though a supervisor is usually here for ONE of those at a
+          time. Replaced with the banner-plus-tabs shell CB already approved for her own Profile
+          page (ProfileView.tsx's own doc comment: "mirroring the reference CB shared") — one
+          widget visible at a time, switched with a tap, instead of all four laid end to end.
+          See ReviewEmployeeView's own doc comment for the rest, including the Notes thread's
+          own history ("say I accept it, then I would be able to, like, add notes, add
+          documents... so we could communicate through there" — CB, Sept 2026). */}
+      <ReviewEmployeeView
+        employeeId={target.id}
+        employeeName={`${target.preferredName || target.firstName} ${target.lastName}`}
+        jobTitle={target.jobTitle}
+        avatarUrl={target.avatarStorageKey ? getAvatarPublicUrl(target.avatarStorageKey) : null}
+        viewerId={reviewer.id}
+      />
     </div>
   );
 }
