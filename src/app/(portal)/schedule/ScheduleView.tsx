@@ -25,6 +25,15 @@ const UPCOMING_STATUSES = new Set(["UPCOMING", "IN_PROGRESS", "CHANGE_REQUESTED"
  * submission's. Correction brief #2 (Sept 2026): the standalone per-shift conversation that used
  * to sit alongside that list is gone — each task now carries its own comment thread instead (see
  * DateTaskRow's own doc comment).
+ *
+ * Oct 2026 (CB, on this page specifically: "more aesthetic and clean" on desktop): the shift
+ * lists below used to be a single stacked column capped at max-w-2xl regardless of screen size —
+ * fine on a phone, but on desktop it left most of the page empty on either side. Widened to
+ * max-w-4xl (same width ProfileView and Team Schedule already settled on) with each section's
+ * cards laid out as a two-column grid at the sm breakpoint and up (grid-cols-1 sm:grid-cols-2 —
+ * the same responsive-grid convention Team Schedule's own filter row and EmployeesAdminView's
+ * forms already use), collapsing back to one column on mobile exactly as before. The cards
+ * themselves, and everything in them, are unchanged.
  */
 export default function ScheduleView({ employeeId }: { employeeId: string }) {
   const [shifts, setShifts] = useState<ShiftDTO[]>([]);
@@ -51,8 +60,8 @@ export default function ScheduleView({ employeeId }: { employeeId: string }) {
 
   if (loadState === "loading") {
     return (
-      <div className="max-w-2xl space-y-2.5">
-        {[0, 1, 2].map((i) => (
+      <div className="max-w-4xl grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+        {[0, 1, 2, 3].map((i) => (
           <div key={i} className="h-20 rounded-2xl border border-border bg-surface animate-pulse" />
         ))}
       </div>
@@ -61,7 +70,7 @@ export default function ScheduleView({ employeeId }: { employeeId: string }) {
 
   if (loadState === "error") {
     return (
-      <div className="max-w-2xl rounded-xl border border-border bg-surface p-6 text-sm text-accent">
+      <div className="max-w-4xl rounded-xl border border-border bg-surface p-6 text-sm text-accent">
         Unable to load your schedule. Please try again or contact HR.
       </div>
     );
@@ -71,7 +80,7 @@ export default function ScheduleView({ employeeId }: { employeeId: string }) {
   const past = shifts.filter((s) => !UPCOMING_STATUSES.has(s.displayStatus));
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-4xl">
       <h1 className="page-title text-2xl mb-1">My Schedule</h1>
       <p className="text-sm text-muted mb-4">
         Your confirmed shifts — dates a supervisor has actually scheduled you for, not just what
@@ -88,7 +97,7 @@ export default function ScheduleView({ employeeId }: { employeeId: string }) {
             shows up here.
           </div>
         ) : (
-          <div className="space-y-2.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             {upcoming.map((s) => (
               <ShiftCard
                 key={s.id}
@@ -108,7 +117,7 @@ export default function ScheduleView({ employeeId }: { employeeId: string }) {
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted mb-2.5">
             Past & other ({past.length})
           </h2>
-          <div className="space-y-2.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             {past.map((s) => (
               <ShiftCard
                 key={s.id}
