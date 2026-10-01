@@ -24,7 +24,12 @@ const LABEL: Record<ShiftStatus, string> = {
   CANCELLATION_REQUESTED: "Cancellation requested",
   CANCELLED: "Cancelled",
   REASSIGNED: "Reassigned",
-  MISSED: "Missed",
+  // Oct 2026 (CB): "Missed" read as an accusation to her when a shift just never got clocked
+  // in — she was workshopping alternatives live ("unclocked in... didn't clock in for this
+  // one... missed kind of sounds crazy") and picked this plainer, blame-neutral phrasing.
+  // Underlying ShiftStatus value stays "MISSED" (storage/derivation/filtering untouched) —
+  // this only changes what the pill displays.
+  MISSED: "No clock-in",
 };
 
 /** Renders the shift's DISPLAY status (ShiftDTO.displayStatus), not its raw stored one — see
