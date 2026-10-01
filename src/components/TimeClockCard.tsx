@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { deriveClockState, formatClockTime, formatMinutes } from "@/lib/time";
+import { deriveClockState, formatClockTime, formatElapsedClock, formatMinutes } from "@/lib/time";
 import type { TimeClockState, TimeEntryDTO } from "@/types";
 import { WarningIcon } from "@/components/icons";
 
@@ -225,11 +225,21 @@ export default function TimeClockCard({
     }
   }
 
+  // CB, Oct 2026: "were supposed to see the clock running when the team clocks in, that is
+  // very important" — raised after a report that a clock-out "didn't record at all" (it had;
+  // live-database inspection confirmed the session closed correctly). The real gap was that
+  // "Hours today" only ever updates once a session CLOSES (see computeTotalMinutes's own doc
+  // comment), so clocking in produced no visible, moving confirmation that anything was being
+  // tracked. openElapsedMs is driven by `now` (useLiveClock above, ticking every second) rather
+  // than a fresh Date() read at render time, so it's tied to the same 1-second heartbeat that
+  // already drives the time-of-day face — the number below visibly moves for the same reason
+  // the clock face does. liveTotalMinutes folds that still-open session into "Hours today" too,
+  // so that figure stops looking frozen the moment someone clocks in, not just at clock-out.
   const openSession = entry?.sessions.find((s) => s.clockOut === null);
-  const openMinutes = openSession
-    ? Math.floor((new Date().getTime() - new Date(openSession.clockIn).getTime()) / 60000)
-    : 0;
-  const showReminder = state === "CLOCKED_IN" && openSession != null && openMinutes * 60000 >= REMINDER_THRESHOLD_MS;
+  const openElapsedMs = openSession ? Math.max(0, now.getTime() - new Date(openSession.clockIn).getTime()) : 0;
+  const openMinutes = Math.floor(openElapsedMs / 60000);
+  const liveTotalMinutes = state === "CLOCKED_IN" ? (entry?.totalMinutes ?? 0) + openMinutes : (entry?.totalMinutes ?? null);
+  const showReminder = state === "CLOCKED_IN" && openSession != null && openElapsedMs >= REMINDER_THRESHOLD_MS;
 
   // Every session logged today, most recent last — so clocking in and out several times (a
   // break, an errand, whatever) shows up as a plain running list rather than only ever
@@ -271,11 +281,19 @@ export default function TimeClockCard({
       <div className="rounded-2xl border border-border bg-surface p-4">
         <div className="flex items-start justify-between gap-3 mb-3">
           <div>
-            <p className="text-base font-semibold">{STATUS_LABEL[state]}</p>
-            {state !== "BEFORE_WORK" && (
-              <p className="text-xs text-muted mt-0.5">
-                Hours today: {formatMinutes(entry?.totalMinutes ?? null)}
+            <p className="text-base font-semibold flex items-center gap-1.5">
+              {STATUS_LABEL[state]}
+              {state === "CLOCKED_IN" && (
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />
+              )}
+            </p>
+            {state === "CLOCKED_IN" && (
+              <p className="text-xs text-muted mt-0.5 tabular-nums">
+                Clocked in for {formatElapsedClock(openElapsedMs)} · {formatMinutes(liveTotalMinutes)} today
               </p>
+            )}
+            {state === "CLOCKED_OUT" && (
+              <p className="text-xs text-muted mt-0.5">Hours today: {formatMinutes(liveTotalMinutes)}</p>
             )}
           </div>
           {onClose && (
@@ -353,14 +371,30 @@ export default function TimeClockCard({
           <p className="text-5xl font-bold tabular-nums leading-none tracking-tight">{liveTime}</p>
           <p className="text-sm font-medium text-white/75 mt-1.5">{liveDate}</p>
         </div>
-        <p className="text-xl font-bold mb-4">{STATUS_LABEL[state]}</p>
+        <div className="flex items-center gap-2 mb-4">
+          <p className="text-xl font-bold">{STATUS_LABEL[state]}</p>
+          {state === "CLOCKED_IN" && (
+            <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-white/90">
+              <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" aria-hidden="true" />
+              Live
+            </span>
+          )}
+        </div>
 
         {state !== "BEFORE_WORK" && (
           <div className="mb-5">
-            <p className="text-xs text-white/70 mb-0.5">Hours today</p>
-            <p className="text-4xl font-bold tabular-nums leading-none">
-              {formatMinutes(entry?.totalMinutes ?? null)}
-            </p>
+            {state === "CLOCKED_IN" ? (
+              <>
+                <p className="text-xs text-white/70 mb-0.5">Clocked in for</p>
+                <p className="text-4xl font-bold tabular-nums leading-none">{formatElapsedClock(openElapsedMs)}</p>
+                <p className="text-xs text-white/70 mt-1.5">Hours today: {formatMinutes(liveTotalMinutes)}</p>
+              </>
+            ) : (
+              <>
+                <p className="text-xs text-white/70 mb-0.5">Hours today</p>
+                <p className="text-4xl font-bold tabular-nums leading-none">{formatMinutes(liveTotalMinutes)}</p>
+              </>
+            )}
           </div>
         )}
 
@@ -416,12 +450,30 @@ export default function TimeClockCard({
               down for this denser desktop card. */}
           <p className="text-3xl font-bold tabular-nums leading-none tracking-tight mb-1.5">{liveTime}</p>
           <p className="text-xs uppercase tracking-wide text-muted/60 mb-2">{liveDate}</p>
-          <p className="text-lg font-semibold">{STATUS_LABEL[state]}</p>
+          <p className="text-lg font-semibold flex items-center gap-2">
+            {STATUS_LABEL[state]}
+            {state === "CLOCKED_IN" && (
+              <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-600">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />
+                Live
+              </span>
+            )}
+          </p>
         </div>
         {state !== "BEFORE_WORK" && (
           <div className="text-right">
-            <p className="text-xs uppercase tracking-wide text-muted/70 mb-1">Hours today</p>
-            <p className="text-lg font-semibold tabular-nums">{formatMinutes(entry?.totalMinutes ?? null)}</p>
+            {state === "CLOCKED_IN" ? (
+              <>
+                <p className="text-xs uppercase tracking-wide text-muted/70 mb-1">Clocked in for</p>
+                <p className="text-lg font-semibold tabular-nums">{formatElapsedClock(openElapsedMs)}</p>
+                <p className="text-xs text-muted mt-1">Hours today: {formatMinutes(liveTotalMinutes)}</p>
+              </>
+            ) : (
+              <>
+                <p className="text-xs uppercase tracking-wide text-muted/70 mb-1">Hours today</p>
+                <p className="text-lg font-semibold tabular-nums">{formatMinutes(liveTotalMinutes)}</p>
+              </>
+            )}
           </div>
         )}
       </div>
