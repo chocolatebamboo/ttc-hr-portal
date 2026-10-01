@@ -1,6 +1,5 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { getCurrentEmployee } from "@/lib/auth";
+import { requireEmployeeOrRedirect } from "@/lib/auth";
 import { canSeeAdminHomeDashboard, isAdmin } from "@/lib/authorization";
 import { withRlsContext } from "@/lib/db";
 import { listDocumentsForEmployee } from "@/lib/documents";
@@ -27,8 +26,7 @@ import { formatHoursCompact, todayDateKey, dateKeyDaysFromNow } from "@/lib/time
 import type { DocumentDTO } from "@/types";
 
 export default async function DashboardPage() {
-  const employee = await getCurrentEmployee();
-  if (!employee) redirect("/login");
+  const employee = await requireEmployeeOrRedirect();
 
   // CB, Sept 2026: "on the administrator [side] that is approving, that should be a
   // notification... saying that this person wants to have that time approved. Once that
