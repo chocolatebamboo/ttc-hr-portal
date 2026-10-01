@@ -1,10 +1,8 @@
-import { redirect } from "next/navigation";
-import { getCurrentEmployee } from "@/lib/auth";
+import { requireEmployeeOrRedirect } from "@/lib/auth";
 import ScheduleView from "./ScheduleView";
 
 export default async function SchedulePage() {
-  const employee = await getCurrentEmployee();
-  if (!employee) redirect("/login");
+  const employee = await requireEmployeeOrRedirect();
 
   return <ScheduleView employeeId={employee.id} />;
 }
