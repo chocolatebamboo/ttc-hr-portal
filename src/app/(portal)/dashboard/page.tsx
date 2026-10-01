@@ -175,8 +175,9 @@ export default async function DashboardPage() {
       <DashboardNotifications className="animate-in animate-in-2 mt-4" initial={notificationsSummary} />
 
       {/* Mobile: bold color-block layout (CB's Sept 2026 aesthetic ask, reference screenshots
-          in chat). Desktop keeps the original layout below, completely untouched — this pass
-          was scoped to "mobile/app view" only. */}
+          in chat). Desktop below kept its own two-column layout rather than copying this
+          single-column style — see that block's own comment for how section order was brought
+          in line with this one without changing desktop's actual visual structure. */}
       <div className="md:hidden mt-5 space-y-5">
         {/* Oct 2026 (CB: "the announcement should always be at the top"): moved from its old
             spot near the bottom (after Team availability requests, before Time Off) to the very
@@ -264,7 +265,22 @@ export default async function DashboardPage() {
         <AvailabilityStatusSection className="animate-in animate-in-5" recentAvailability={recentAvailability} />
       </div>
 
-      {/* Desktop/tablet: unchanged from before this pass. */}
+      {/* Desktop/tablet: Oct 2026 (CB: "make sure the desktop is consistent with the mobile") —
+          reordered to match the mobile sequence above (Announcements first, then the hero,
+          Who's working right now, Clocked in now, the stat tiles, then the rest), and the
+          This week/Availability/Reports-or-Docs stat tiles now render here too — mobile had them,
+          desktop never did. Confirmed via AskUserQuestion this stays the existing two-column
+          grid/sidebar structure rather than a full rebuild into mobile's single-column
+          color-block style. Announcements sits above the grid, full width, same "always at the
+          top" placement mobile already has it in, rather than buried at the bottom of the
+          sidebar column where it used to live.
+
+          Quick actions is deliberately NOT part of that "match mobile" reorder (CB, same pass:
+          "I don't think we need quick actions for the home page on home for desktop") — it
+          stays out of this column entirely rather than moving somewhere else in it; the mobile
+          block above keeps its own copy unchanged (variant="mobile"), this is desktop-only. */}
+      <AnnouncementsSection className="hidden md:block animate-in animate-in-1 mt-5" initial={announcements} />
+
       <div className="hidden md:grid grid-cols-1 lg:grid-cols-3 gap-5 mt-5">
         <div className="lg:col-span-2 space-y-5">
           <div className="animate-in animate-in-2">
@@ -292,12 +308,28 @@ export default async function DashboardPage() {
             <ClockedInNowSection className="animate-in animate-in-2" initial={currentlyClockedIn} />
           )}
 
-          <div className="animate-in animate-in-3">
-            <QuickActionsCard role={employee.role} initialKeys={employee.quickActionKeys} variant="desktop" />
-          </div>
+          {/* Same tiles, same isAdmin(employee) gate, as the mobile block above — see that
+              block's own comment for the full history (admin accounts don't see this row at
+              all; Daijour/SUPERVISOR does, same as any regular employee). */}
+          {!isAdmin(employee) && (
+            <div className="animate-in animate-in-3 grid grid-cols-3 gap-3">
+              <StatCard label="This week" value={formatHoursCompact(weekMinutes)} tone="blue" href="/dashboard/week" />
+              <StatCard
+                label="Availability"
+                value={String(pendingPtoCount + pendingMyAvailabilityCount)}
+                tone="pink"
+                href="/dashboard/availability"
+              />
+              {canSeeAdminHomeDashboard(employee) ? (
+                <StatCard label="Reports" icon={ChartIcon} tone="amber" href="/admin/reports" />
+              ) : (
+                <StatCard label="Docs to review" value={String(pendingAcknowledgments.length)} tone="amber" href="/documents" />
+              )}
+            </div>
+          )}
 
-          <TimeOffSection className="animate-in animate-in-4" recentPto={recentPto} />
-          <AvailabilityStatusSection className="animate-in animate-in-4" recentAvailability={recentAvailability} />
+          <TimeOffSection className="animate-in animate-in-3" recentPto={recentPto} />
+          <AvailabilityStatusSection className="animate-in animate-in-3" recentAvailability={recentAvailability} />
         </div>
 
         <div className="space-y-5">
@@ -312,7 +344,6 @@ export default async function DashboardPage() {
             initialPending={pendingTeamAvailability}
             viewerId={employee.id}
           />
-          <AnnouncementsSection className="animate-in animate-in-3" initial={announcements} />
         </div>
       </div>
     </div>
