@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { SearchIcon, MailIcon, PhoneIcon, UserCircleIcon } from "@/components/icons";
+import Link from "next/link";
+import { SearchIcon, MailIcon, PhoneIcon, ChatIcon, UserCircleIcon } from "@/components/icons";
 import type { DirectoryEntryDTO, Role } from "@/types";
 
 type LoadState = "loading" | "ready" | "error" | "empty";
@@ -17,8 +18,17 @@ const ROLE_LABEL: Record<Role, string> = {
  * Every active team member, searchable client-side — a company this size (see the eligible-count
  * math on the Documents Manage tab, capped at a few dozen people) doesn't need server-side
  * pagination, and a directory people actually use should feel instant while typing.
+ *
+ * Oct 2026 (CB: each row should get a message shortcut, a quick way "to deep-link into
+ * composing/opening a message thread with that person" straight from the directory): each row
+ * now also gets a Message button alongside the existing Email/Call ones, linking to
+ * `/messages?dm=<employeeId>&name=<employeeName>` — the exact same deep link
+ * TeamAvailabilityCards' own chat button already opens (see that file's openChat/doc comment),
+ * which MessagesInboxView reads off the URL on mount and opens straight into that conversation.
+ * Hidden on the viewer's own row, same "messaging yourself isn't a real conversation" rule that
+ * button already follows.
  */
-export default function DirectoryView() {
+export default function DirectoryView({ viewerId }: { viewerId: string }) {
   const [entries, setEntries] = useState<DirectoryEntryDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [query, setQuery] = useState("");
@@ -105,6 +115,15 @@ export default function DirectoryView() {
                 </p>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
+                {entry.id !== viewerId && (
+                  <Link
+                    href={`/messages?dm=${entry.id}&name=${encodeURIComponent(entry.name)}`}
+                    aria-label={`Message ${entry.name}`}
+                    className="btn-neutral text-xs px-2.5 py-1.5 flex items-center gap-1"
+                  >
+                    <ChatIcon className="h-3.5 w-3.5" />
+                  </Link>
+                )}
                 <a
                   href={`mailto:${entry.email}`}
                   aria-label={`Email ${entry.name}`}
