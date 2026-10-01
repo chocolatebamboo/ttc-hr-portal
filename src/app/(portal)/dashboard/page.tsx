@@ -4,7 +4,8 @@ import { getCurrentEmployee } from "@/lib/auth";
 import { canSeeAdminHomeDashboard, isAdmin } from "@/lib/authorization";
 import { withRlsContext } from "@/lib/db";
 import { listDocumentsForEmployee } from "@/lib/documents";
-import { listAnnouncementsForEmployee } from "@/lib/announcements";
+import { listAnnouncementsForEmployee, announcementDismissKey } from "@/lib/announcements";
+import { listDismissedKeys } from "@/lib/dashboard-dismissals";
 import { getOnboardingAttention } from "@/lib/onboarding";
 import { listMyAvailability, listAdminAvailability } from "@/lib/availability";
 import { listAdminShifts } from "@/lib/shifts";
@@ -17,16 +18,13 @@ import ClockedInNowSection from "@/components/ClockedInNowSection";
 import TimeOffSection from "@/components/TimeOffSection";
 import AvailabilityStatusSection from "@/components/AvailabilityStatusSection";
 import TeamAvailabilityRequestsSection from "@/components/TeamAvailabilityRequestsSection";
+import AnnouncementsSection from "@/components/AnnouncementsSection";
 import DateTasksSection from "@/components/DateTasksSection";
 import QuickActionsCard from "@/components/QuickActionsCard";
 import DashboardNotifications, { MessagesBadgeLink } from "@/components/DashboardNotifications";
-import { MegaphoneIcon, ChartIcon, type IconProps } from "@/components/icons";
+import { ChartIcon, type IconProps } from "@/components/icons";
 import { formatHoursCompact, todayDateKey, dateKeyDaysFromNow } from "@/lib/time";
-import type { AnnouncementDTO, DocumentDTO } from "@/types";
-
-function formatAnnouncementDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
+import type { DocumentDTO } from "@/types";
 
 export default async function DashboardPage() {
   const employee = await getCurrentEmployee();
@@ -50,8 +48,21 @@ export default async function DashboardPage() {
   const documents = await listDocumentsForEmployee(employee);
   const pendingAcknowledgments = documents.filter((d) => d.requiresAcknowledgment && !d.acknowledgedAt);
   const onboardingAttention = await getOnboardingAttention(employee);
-  const announcements = (await listAnnouncementsForEmployee(employee)).slice(0, 3);
-  const [featuredAnnouncement, ...otherAnnouncements] = announcements;
+  // Oct 2026 (CB: "I should be able to clear this notification as well," circling the Quick
+  // reminder card that had sat at the top of her Home dashboard for days): filtered down to
+  // just what this employee hasn't already dismissed before slicing to the dashboard widget's
+  // 3-post cap, same per-employee server dismissal (src/lib/dashboard-dismissals.ts) the
+  // approvals/messages banners already use — so dismissing one card promotes the next
+  // undismissed post into view instead of just shrinking the list. The full /announcements feed
+  // (api/announcements/route.ts) is untouched by this — dismissing here only affects this widget.
+  const allAnnouncements = await listAnnouncementsForEmployee(employee);
+  const dismissedAnnouncementKeys = await listDismissedKeys(
+    employee,
+    allAnnouncements.map((a) => announcementDismissKey(a.id))
+  );
+  const announcements = allAnnouncements
+    .filter((a) => !dismissedAnnouncementKeys.has(announcementDismissKey(a.id)))
+    .slice(0, 3);
 
   // CB, Sept 2026 (redesign follow-up): "I want [team availability requests] to be like where
   // the announcements are... for the admin, that would be covering schedules and stuff like
@@ -169,16 +180,12 @@ export default async function DashboardPage() {
       <div className="md:hidden mt-5 space-y-5">
         {/* Oct 2026 (CB: "the announcement should always be at the top"): moved from its old
             spot near the bottom (after Team availability requests, before Time Off) to the very
-            first thing in the mobile scroll — ahead of the clock-in hero itself. Still exactly
-            the same AnnouncementsSection component/data as before (featuredAnnouncement/
-            otherAnnouncements, both already computed above from listAnnouncementsForEmployee),
-            just rendered in a different spot; "but should not be there forever" is a separate,
-            still-open ask about default expiration, not a layout change. */}
-        <AnnouncementsSection
-          className="animate-in animate-in-1"
-          featuredAnnouncement={featuredAnnouncement}
-          otherAnnouncements={otherAnnouncements}
-        />
+            first thing in the mobile scroll — ahead of the clock-in hero itself. `announcements`
+            is computed above from listAnnouncementsForEmployee, already filtered to exclude
+            anything this employee has dismissed (see that computation's own comment) — "but
+            should not be there forever" is a separate, already-shipped default-expiration change,
+            not a layout change. */}
+        <AnnouncementsSection className="animate-in animate-in-1" initial={announcements} />
 
         <div className="animate-in animate-in-2">
           {canSeeAdminHomeDashboard(employee) ? (
@@ -194,15 +201,15 @@ export default async function DashboardPage() {
         </div>
 
         {canSeeAdminHomeDashboard(employee) && (
-          <div className="animate-in animate-in-2">
-            <TeamScheduleGlance shifts={todaysShifts} upcomingShifts={upcomingShifts} />
-          </div>
+          <TeamScheduleGlance
+            className="animate-in animate-in-2"
+            shifts={todaysShifts}
+            upcomingShifts={upcomingShifts}
+          />
         )}
 
         {canSeeAdminHomeDashboard(employee) && (
-          <div className="animate-in animate-in-2">
-            <ClockedInNowSection initial={currentlyClockedIn} />
-          </div>
+          <ClockedInNowSection className="animate-in animate-in-2" initial={currentlyClockedIn} />
         )}
 
         {/* Oct 2026 (CB, circling this exact row on a screenshot of her own admin dashboard):
@@ -274,15 +281,15 @@ export default async function DashboardPage() {
           </div>
 
           {canSeeAdminHomeDashboard(employee) && (
-            <div className="animate-in animate-in-2">
-              <TeamScheduleGlance shifts={todaysShifts} upcomingShifts={upcomingShifts} />
-            </div>
+            <TeamScheduleGlance
+              className="animate-in animate-in-2"
+              shifts={todaysShifts}
+              upcomingShifts={upcomingShifts}
+            />
           )}
 
           {canSeeAdminHomeDashboard(employee) && (
-            <div className="animate-in animate-in-2">
-              <ClockedInNowSection initial={currentlyClockedIn} />
-            </div>
+            <ClockedInNowSection className="animate-in animate-in-2" initial={currentlyClockedIn} />
           )}
 
           <div className="animate-in animate-in-3">
@@ -305,11 +312,7 @@ export default async function DashboardPage() {
             initialPending={pendingTeamAvailability}
             viewerId={employee.id}
           />
-          <AnnouncementsSection
-            className="animate-in animate-in-3"
-            featuredAnnouncement={featuredAnnouncement}
-            otherAnnouncements={otherAnnouncements}
-          />
+          <AnnouncementsSection className="animate-in animate-in-3" initial={announcements} />
         </div>
       </div>
     </div>
@@ -405,57 +408,8 @@ function NeedsAttentionSection({
   );
 }
 
-function AnnouncementsSection({
-  className,
-  featuredAnnouncement,
-  otherAnnouncements,
-}: {
-  className?: string;
-  featuredAnnouncement: AnnouncementDTO | undefined;
-  otherAnnouncements: AnnouncementDTO[];
-}) {
-  return (
-    <div className={className}>
-      <h2 className="text-sm font-medium text-muted mb-2">Announcements</h2>
-      {!featuredAnnouncement ? (
-        <div className="rounded-xl border border-border bg-surface px-4 py-4 text-sm text-muted">
-          No announcements right now.
-        </div>
-      ) : (
-        <div className="space-y-2.5">
-          <Link
-            href="/announcements"
-            className="block rounded-2xl p-4 text-white transition-transform hover:-translate-y-0.5"
-            style={{ background: "linear-gradient(135deg, var(--ttc-pink-ink), var(--ttc-pink))" }}
-          >
-            <div className="flex items-center gap-1.5 text-xs font-medium text-white/80 mb-1.5">
-              <MegaphoneIcon className="h-3.5 w-3.5" />
-              {formatAnnouncementDate(featuredAnnouncement.publishDate)}
-            </div>
-            <p className="font-semibold text-sm mb-1">{featuredAnnouncement.title}</p>
-            <p className="text-xs text-white/85 line-clamp-2">{featuredAnnouncement.message}</p>
-          </Link>
-          {otherAnnouncements.length > 0 && (
-            <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
-              {otherAnnouncements.map((a) => (
-                <Link
-                  key={a.id}
-                  href="/announcements"
-                  className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-black/[0.02] transition-colors"
-                >
-                  <span className="truncate">{a.title}</span>
-                  <span className="text-muted text-xs whitespace-nowrap shrink-0">
-                    {formatAnnouncementDate(a.publishDate)}
-                  </span>
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
+// AnnouncementsSection now lives in src/components/AnnouncementsSection.tsx (Oct 2026) so it can
+// carry its own swipe-to-clear dismissal — see that file's own doc comment.
+//
 // PendingApprovalsBanner and MessagesBanner now live in src/components/DashboardNotifications.tsx
 // (Sept 2026) so they can be wrapped in swipe-to-clear — see that file's own doc comment.
