@@ -66,6 +66,29 @@ export function isStaff(actor: CurrentEmployee): boolean {
 }
 
 /**
+ * Home dashboard's admin-style view (AdminHomeHero, TeamScheduleGlance, the pending Team
+ * availability queue, the Reports stat tile) — CB, Sept 2026: "Daijour['s]... role... user
+ * experience isn't looking like what we [see as] admin... we need to make sure that's working."
+ * Daijour is SUPERVISOR, not HR_ADMIN/SUPER_ADMIN, so isAdmin() alone left him on the plain-
+ * employee Home layout even though he already has real team-management authority elsewhere in
+ * this app (canAccessReports, assertCanReviewAvailability and friends below, the /team/
+ * [employeeId] pages) — this closes that gap for the Home dashboard specifically. Same
+ * three-role "staff" cut isStaff/canAccessReports already draw — named separately here, like
+ * those two, so dashboard/page.tsx's call sites read as what they're actually gating rather
+ * than borrowing a DM- or Reports-flavored name for an unrelated capability.
+ *
+ * Confirmed with CB: this stays scoped exactly like everywhere else a Supervisor already has
+ * reach (listAdminShifts's own supervisorId narrowing, Reports) rather than opening company-wide
+ * visibility — a Supervisor's admin-style Home shows only their own direct reports, an admin's
+ * still shows everyone. See listAdminShifts (src/lib/shifts.ts) and listAdminAvailability
+ * (src/lib/availability.ts), both of which narrow their own query by supervisorId for a
+ * non-admin caller rather than relying on this function to do that scoping.
+ */
+export function canSeeAdminHomeDashboard(actor: CurrentEmployee): boolean {
+  return isAdmin(actor) || actor.role === "SUPERVISOR";
+}
+
+/**
  * True if `actor` may view/act on `targetEmployeeId`'s work-related records (time entries,
  * PTO). Admins: anyone. Supervisors: their direct reports only — checked against the
  * database, not a client-supplied "I am their supervisor" claim. Employees: themselves only.
