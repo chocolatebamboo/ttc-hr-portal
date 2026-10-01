@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentEmployee } from "@/lib/auth";
-import { isAdmin } from "@/lib/authorization";
+import { canSeeAdminHomeDashboard } from "@/lib/authorization";
 import { withRlsContext } from "@/lib/db";
 import { listDocumentsForEmployee } from "@/lib/documents";
 import { listAnnouncementsForEmployee } from "@/lib/announcements";
@@ -56,19 +56,24 @@ export default async function DashboardPage() {
   // that." Same admin-only pending queue TeamAvailabilityCards shows in full on /availability
   // (heading there renamed to match — "Team availability requests"), just the compact summary
   // for this Home sidebar slot — see TeamAvailabilityRequestsSection's own doc comment for why
-  // this stays a read-only list rather than the full interactive card. Non-admins never call
-  // listAdminAvailability at all (it throws ForbiddenError for them) — isAdmin gates the fetch
-  // itself, not just the render.
-  const pendingTeamAvailability = isAdmin(employee) ? (await listAdminAvailability(employee)).pending : [];
+  // this stays a read-only list rather than the full interactive card. Anyone who isn't an admin
+  // or Daijour's own SUPERVISOR role never calls listAdminAvailability at all (it throws
+  // ForbiddenError otherwise) — canSeeAdminHomeDashboard gates the fetch itself, not just the
+  // render; listAdminAvailability itself narrows to just the caller's own reports when they're a
+  // Supervisor rather than an admin (see its own doc comment).
+  const pendingTeamAvailability = canSeeAdminHomeDashboard(employee)
+    ? (await listAdminAvailability(employee)).pending
+    : [];
 
   // CB, Sept 2026 (admin Home redesign): "I should see a dashboard of pretty much all the
   // different people that have the schedule right now... just so I could get like a glance of
   // who is supposed to be working right now." Every shift for TODAY, org-wide — feeds both
   // AdminHomeHero's "Scheduled today"/"In progress" stats and TeamScheduleGlance's list below.
-  // Non-admins never call listAdminShifts at all, same isAdmin-gates-the-fetch pattern as
-  // pendingTeamAvailability just above.
+  // Same canSeeAdminHomeDashboard-gates-the-fetch pattern as pendingTeamAvailability just above;
+  // listAdminShifts itself already narrows to the caller's own reports for a Supervisor actor
+  // (its own employeeFilter.supervisorId, src/lib/shifts.ts) — org-wide for an admin, unchanged.
   const todayKey = todayDateKey();
-  const todaysShifts = isAdmin(employee)
+  const todaysShifts = canSeeAdminHomeDashboard(employee)
     ? await listAdminShifts(employee, { dateFrom: todayKey, dateTo: todayKey })
     : [];
   const scheduledTodayCount = todaysShifts.length;
@@ -86,7 +91,7 @@ export default async function DashboardPage() {
   // does) since a cancelled or reassigned-away shift isn't really "upcoming" for the person it
   // used to belong to; every other status for a future date is still deriveShiftDisplayStatus's
   // plain "UPCOMING" or an in-review change/cancellation request, both still worth showing.
-  const upcomingShiftsRaw = isAdmin(employee)
+  const upcomingShiftsRaw = canSeeAdminHomeDashboard(employee)
     ? await listAdminShifts(employee, { dateFrom: dateKeyDaysFromNow(1) })
     : [];
   const upcomingShifts = upcomingShiftsRaw.filter(
@@ -153,7 +158,7 @@ export default async function DashboardPage() {
           was scoped to "mobile/app view" only. */}
       <div className="md:hidden mt-5 space-y-5">
         <div className="animate-in animate-in-2">
-          {isAdmin(employee) ? (
+          {canSeeAdminHomeDashboard(employee) ? (
             <AdminHomeHero
               variant="hero"
               scheduledToday={scheduledTodayCount}
@@ -165,7 +170,7 @@ export default async function DashboardPage() {
           )}
         </div>
 
-        {isAdmin(employee) && (
+        {canSeeAdminHomeDashboard(employee) && (
           <div className="animate-in animate-in-2">
             <TeamScheduleGlance shifts={todaysShifts} upcomingShifts={upcomingShifts} />
           </div>
@@ -182,8 +187,11 @@ export default async function DashboardPage() {
           {/* CB, Sept 2026: "for admins, I want that to be replaced... switch them out for
               reports... keep it yellow" — an admin's yellow tile becomes a straight tap-through
               to Reports instead of their own doc acknowledgments (still visible either way,
-              under Needs your attention below). Everyone else keeps Docs to review as-is. */}
-          {isAdmin(employee) ? (
+              under Needs your attention below). Daijour (SUPERVISOR) already has real Reports
+              access (canAccessReports, src/lib/authorization.ts) via Correction brief #8, so he
+              gets this tile too now rather than Docs to review, same as any admin. Everyone else
+              keeps Docs to review as-is. */}
+          {canSeeAdminHomeDashboard(employee) ? (
             <StatCard label="Reports" icon={ChartIcon} tone="amber" href="/admin/reports" />
           ) : (
             <StatCard label="Docs to review" value={String(pendingAcknowledgments.length)} tone="amber" href="/documents" />
@@ -218,7 +226,7 @@ export default async function DashboardPage() {
       <div className="hidden md:grid grid-cols-1 lg:grid-cols-3 gap-5 mt-5">
         <div className="lg:col-span-2 space-y-5">
           <div className="animate-in animate-in-2">
-            {isAdmin(employee) ? (
+            {canSeeAdminHomeDashboard(employee) ? (
               <AdminHomeHero
                 variant="default"
                 scheduledToday={scheduledTodayCount}
@@ -230,7 +238,7 @@ export default async function DashboardPage() {
             )}
           </div>
 
-          {isAdmin(employee) && (
+          {canSeeAdminHomeDashboard(employee) && (
             <div className="animate-in animate-in-2">
               <TeamScheduleGlance shifts={todaysShifts} upcomingShifts={upcomingShifts} />
             </div>
