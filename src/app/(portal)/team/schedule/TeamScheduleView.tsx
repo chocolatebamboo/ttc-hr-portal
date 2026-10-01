@@ -38,6 +38,17 @@ function reportName(r: DirectReportDTO): string {
  * TTC's actual shift volume is small enough that a second round-trip per filter change would be
  * pure overhead; src/lib/shifts.ts's listAdminShifts still accepts real server-side filters for
  * whenever that stops being true.
+ *
+ * Oct 2026 (CB, on the Home dashboard's Upcoming widget: "when we click it we can see that
+ * person's full schedule down the line," and separately, "if I click on see more then it should
+ * go into another page"): `employeeFilter`/`dateFromFilter` now seed themselves from this page's
+ * own URL — `?employeeId=<id>` (one Upcoming row) or `?dateFrom=<date>` ("See all upcoming") —
+ * so TeamScheduleGlance's links can land here pre-filtered instead of dumping an admin on an
+ * unfiltered, org-wide list they'd have to filter themselves. Read straight off
+ * window.location.search in the mount effect below, not next/navigation's useSearchParams, so
+ * this page doesn't need a Suspense boundary — same reasoning MessagesInboxView.tsx's own
+ * dm/name URL read already documents. The filter selects/inputs further down are still fully
+ * interactive afterward, so nothing about adjusting or clearing a filter once here changes.
  */
 export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIsAdmin: boolean; viewerId: string }) {
   const [shifts, setShifts] = useState<AdminShiftDTO[]>([]);
@@ -108,6 +119,22 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
     loadShifts();
     loadOptions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Oct 2026: picks up ?employeeId=/?dateFrom= from a TeamScheduleGlance link (see this
+  // component's own doc comment above) and clears them from the URL right after, same "don't
+  // keep re-applying a filter on every refresh" cleanup MessagesInboxView's own dm/name read
+  // does — an admin who clears the filter manually afterward shouldn't have it silently come
+  // back if they reload the page.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const employeeId = params.get("employeeId");
+    const dateFrom = params.get("dateFrom");
+    if (!employeeId && !dateFrom) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (employeeId) setEmployeeFilter(employeeId);
+    if (dateFrom) setDateFromFilter(dateFrom);
+    window.history.replaceState(null, "", window.location.pathname);
   }, []);
 
   const filtered = useMemo(() => {
