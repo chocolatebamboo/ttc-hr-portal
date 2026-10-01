@@ -1,5 +1,4 @@
-import { redirect } from "next/navigation";
-import { getCurrentEmployee } from "@/lib/auth";
+import { requireEmployeeOrRedirect } from "@/lib/auth";
 import { isAdmin, isStaff } from "@/lib/authorization";
 import { listTeamNoteTopicCounts, listAllTeamNoteTopicCounts } from "@/lib/team-notes";
 import { listConversationSummaries } from "@/lib/direct-messages";
@@ -16,8 +15,7 @@ import MessagesInboxView from "./MessagesInboxView";
  *  existing topic conversations, in parallel, so MessagesInboxView can render one unified
  *  inbox rather than two separate pages. */
 export default async function MessagesPage() {
-  const employee = await getCurrentEmployee();
-  if (!employee) redirect("/login");
+  const employee = await requireEmployeeOrRedirect();
 
   const [topicCounts, directConversations] = await Promise.all([
     isAdmin(employee) ? listAllTeamNoteTopicCounts(employee) : listTeamNoteTopicCounts(employee, employee.id),
