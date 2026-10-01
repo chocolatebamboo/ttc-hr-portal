@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import SwipeReveal from "@/components/SwipeReveal";
-import { MegaphoneIcon, CheckCircleIcon } from "@/components/icons";
+import { MegaphoneIcon, CheckCircleIcon, XIcon } from "@/components/icons";
 import type { AnnouncementDTO } from "@/types";
 
 function formatAnnouncementDate(iso: string): string {
@@ -45,6 +45,15 @@ async function dismissAnnouncement(announcementId: string): Promise<void> {
  * card promotes the next one up into that spot immediately instead of leaving a gap where it
  * used to be. Renders nothing at all once nothing's left to show (Oct 2026, same "don't leave an
  * empty box cluttering the home page" rule the other dashboard widgets now follow).
+ *
+ * Oct 2026 (CB, after this shipped: "I'm not necessarily seeing where I could clear out that
+ * announcement, on desktop or mobile"): SwipeReveal's gesture-only reveal has no on-screen hint
+ * that a Clear action even exists, which is fine on the cards that already had a hover/tap
+ * toolbar elsewhere in this app but left this one genuinely undiscoverable, especially for a
+ * mouse-only desktop user with nothing telling them to scroll-drag a card sideways. Each card
+ * now ALSO gets a small always-visible × button (stopping its own click from following the
+ * card's Link, same `clear()` the swipe action calls) — the swipe keeps working for anyone used
+ * to it, the × is there for everyone else to actually find.
  */
 export default function AnnouncementsSection({
   className,
@@ -78,14 +87,26 @@ export default function AnnouncementsSection({
         >
           <Link
             href="/announcements"
-            className="block rounded-2xl p-4 text-white transition-transform hover:-translate-y-0.5"
+            className="relative block rounded-2xl p-4 text-white transition-transform hover:-translate-y-0.5"
             style={{ background: "linear-gradient(135deg, var(--ttc-pink-ink), var(--ttc-pink))" }}
           >
-            <div className="flex items-center gap-1.5 text-xs font-medium text-white/80 mb-1.5">
+            <button
+              type="button"
+              aria-label="Clear announcement"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                clear(featured.id);
+              }}
+              className="absolute top-3 right-3 rounded-full p-1 text-white/80 bg-white/10 hover:bg-white/25 hover:text-white transition-colors"
+            >
+              <XIcon className="h-3.5 w-3.5" />
+            </button>
+            <div className="flex items-center gap-1.5 text-xs font-medium text-white/80 mb-1.5 pr-6">
               <MegaphoneIcon className="h-3.5 w-3.5" />
               {formatAnnouncementDate(featured.publishDate)}
             </div>
-            <p className="font-semibold text-sm mb-1">{featured.title}</p>
+            <p className="font-semibold text-sm mb-1 pr-6">{featured.title}</p>
             <p className="text-xs text-white/85 line-clamp-2">{featured.message}</p>
           </Link>
         </SwipeReveal>
@@ -107,8 +128,22 @@ export default function AnnouncementsSection({
                   className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-black/[0.02] transition-colors"
                 >
                   <span className="truncate">{a.title}</span>
-                  <span className="text-muted text-xs whitespace-nowrap shrink-0">
-                    {formatAnnouncementDate(a.publishDate)}
+                  <span className="flex items-center gap-2 shrink-0">
+                    <span className="text-muted text-xs whitespace-nowrap">
+                      {formatAnnouncementDate(a.publishDate)}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label="Clear announcement"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        clear(a.id);
+                      }}
+                      className="rounded-full p-1 text-muted hover:bg-black/[0.06] hover:text-accent-ink transition-colors"
+                    >
+                      <XIcon className="h-3.5 w-3.5" />
+                    </button>
                   </span>
                 </Link>
               </SwipeReveal>
