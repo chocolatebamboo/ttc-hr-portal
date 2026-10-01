@@ -85,6 +85,17 @@ function groupUpcomingByDate(upcomingShifts: AdminShiftDTO[]): UpcomingDateGroup
  * UPCOMING_COLLAPSED_COUNT of them render until "See more" is tapped — confirmed via AskUserQuestion
  * ("Next 3, then 'See more'") rather than guessed. Counts individual shifts, not date-groups, so a
  * single busy day can still fill or exceed the collapsed view on its own.
+ *
+ * Every row, in both `shifts` and `upcomingShifts`, is a Link to `/team/${employeeId}` (CB, Oct
+ * 2026: "I should be able to click on the team member and see information relating to that team
+ * member there") — same review-employee page (timesheet, time off, availability, notes) that "My
+ * Team"'s own list already links to (TeamListView.tsx), just reached from a second place. Safe
+ * for whoever is actually looking at this widget: it only ever renders for a caller
+ * canSeeAdminHomeDashboard already lets see it (dashboard/page.tsx), i.e. an admin (every
+ * employeeId here is fair game) or a supervisor (dashboard/page.tsx's own listAdminShifts call
+ * already narrows `shifts`/`upcomingShifts` to that supervisor's own direct reports) — exactly
+ * the set canAccessEmployeeRecords (src/lib/authorization.ts), which /team/[employeeId] gates on,
+ * already grants that same caller. No new access is being opened up here, just a path to it.
  */
 const UPCOMING_COLLAPSED_COUNT = 3;
 
@@ -117,7 +128,11 @@ export default function TeamScheduleGlance({
       ) : (
         <div className="bg-surface border border-border rounded-2xl divide-y divide-border overflow-hidden">
           {shifts.map((s) => (
-            <div key={s.id} className="flex items-center gap-2.5 px-4 py-3">
+            <Link
+              key={s.id}
+              href={`/team/${s.employeeId}`}
+              className="flex items-center gap-2.5 px-4 py-3 hover:bg-black/[0.02]"
+            >
               <span
                 className="h-9 w-9 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0"
                 style={{ background: colorFor(s.employeeId) }}
@@ -134,7 +149,7 @@ export default function TeamScheduleGlance({
                 </p>
                 <ShiftStatusPill status={s.displayStatus} />
               </div>
-            </div>
+            </Link>
           ))}
         </div>
       )}
@@ -149,7 +164,11 @@ export default function TeamScheduleGlance({
                   {group.date === tomorrowKey ? `Tomorrow · ${formatSlotDate(group.date)}` : formatSlotDate(group.date)}
                 </p>
                 {group.shifts.map((s) => (
-                  <div key={s.id} className="flex items-center gap-2.5 px-4 py-3">
+                  <Link
+                    key={s.id}
+                    href={`/team/${s.employeeId}`}
+                    className="flex items-center gap-2.5 px-4 py-3 hover:bg-black/[0.02]"
+                  >
                     <span
                       className="h-9 w-9 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0"
                       style={{ background: colorFor(s.employeeId) }}
@@ -163,7 +182,7 @@ export default function TeamScheduleGlance({
                     <p className="text-xs text-muted tabular-nums shrink-0">
                       {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
                     </p>
-                  </div>
+                  </Link>
                 ))}
               </Fragment>
             ))}
