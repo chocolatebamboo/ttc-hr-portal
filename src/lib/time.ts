@@ -79,6 +79,25 @@ export function formatMinutes(totalMinutes: number | null): string {
   return `${h}h ${String(m).padStart(2, "0")}m`;
 }
 
+/** A live, second-precision "how long has this session been open" readout — "H:MM:SS" (no
+ *  leading zero on the hour, always two digits for minutes/seconds), e.g. "0:04:12", "1:32:07".
+ *  Added alongside TimeClockCard's live-ticking clock-in timer (CB, Oct 2026: "were supposed to
+ *  see the clock running when the team clocks in, that is very important" — raised after a
+ *  report that a clock-out "didn't record at all," which live-database inspection showed had in
+ *  fact recorded correctly; the real gap was that nothing visibly moved while clocked in).
+ *  formatMinutes above only ever changes once a minute at best — exactly the "looks frozen"
+ *  problem that request was about — so this is deliberately seconds-precision, meant to be paired
+ *  with a 1-second tick (the same useLiveClock pattern TimeClockCard's time-of-day face already
+ *  uses) so the number is unmistakably, visibly running rather than something you have to trust
+ *  is updating. */
+export function formatElapsedClock(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
 /** Same value as formatMinutes, but to one decimal place with no "m" — for the Timesheet
  *  calendar's day cells (src/components/TimesheetCalendar.tsx), which are too narrow to fit
  *  "8h 00m" legibly at a glance the way the full detail panel below the grid can. */
