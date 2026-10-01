@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getCurrentEmployee } from "@/lib/auth";
+import { requireEmployeeOrRedirect } from "@/lib/auth";
 import { isAdmin } from "@/lib/authorization";
 import TeamScheduleView from "./TeamScheduleView";
 
@@ -9,8 +9,7 @@ import TeamScheduleView from "./TeamScheduleView";
  *  Admin-only one — see this page's own href living in both SUPERVISOR_NAV and ADMIN_NAV
  *  (src/lib/nav.ts), one page, gated by role instead of two competing ones. */
 export default async function TeamSchedulePage() {
-  const employee = await getCurrentEmployee();
-  if (!employee) redirect("/login");
+  const employee = await requireEmployeeOrRedirect();
   if (!isAdmin(employee) && employee.role !== "SUPERVISOR") redirect("/dashboard");
 
   return <TeamScheduleView viewerIsAdmin={isAdmin(employee)} viewerId={employee.id} />;
