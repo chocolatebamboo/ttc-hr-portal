@@ -1,11 +1,9 @@
-import { redirect } from "next/navigation";
-import { getCurrentEmployee } from "@/lib/auth";
+import { requireEmployeeOrRedirect } from "@/lib/auth";
 import { isAdmin } from "@/lib/authorization";
 import OnboardingView from "./OnboardingView";
 
 export default async function OnboardingPage() {
-  const employee = await getCurrentEmployee();
-  if (!employee) redirect("/login");
+  const employee = await requireEmployeeOrRedirect();
 
   const admin = isAdmin(employee);
   // A supervisor gets the Manage tab too — scoped to their own direct reports, for approving
