@@ -1,7 +1,7 @@
 import { withRlsContext } from "@/lib/db";
 import { isAdmin, ForbiddenError } from "@/lib/authorization";
 import { todayDateKey } from "@/lib/time";
-import type { AdminAttendanceRowDTO, CurrentEmployee } from "@/types";
+import type { AdminAttendanceRowDTO, CurrentEmployee, CurrentlyClockedInRowDTO } from "@/types";
 
 /**
  * HR-wide attendance dashboard (src/app/(portal)/admin/attendance) — one row per active
@@ -77,6 +77,78 @@ export async function listAdminAttendance(
       department: e.department?.name ?? null,
       awaitingApprovalCount: awaitingByEmployee.get(e.id) ?? 0,
       missingClockOutCount: missingByEmployee.get(e.id) ?? 0,
+    }));
+  });
+}
+
+/**
+ * "Clocked in now" (CB, Oct 2026): "were supposed to see the clock running when the team clocks
+ * in, that is very important" — raised alongside a report that Donique's clock-out "didn't
+ * record at all." Direct database inspection showed her session actually DID record correctly
+ * end-to-end; the real gap was that nothing anywhere showed a supervisor/admin which team
+ * members are actually clocked in right now — only who's SCHEDULED to be (TeamScheduleGlance,
+ * fed by listAdminShifts), a different thing entirely from a real clock punch. This reads real
+ * TimeSession rows directly: every session across the org (or, for a Supervisor, just their own
+ * direct reports) that's still open — clockOut null — right now.
+ *
+ * Same admin-sees-everyone / supervisor-sees-own-reports shape as listAdminShifts (src/lib/
+ * shifts.ts): isAdmin() sees every active employee, a Supervisor is narrowed to
+ * supervisorId = their own id. time_session_select (prisma/rls.sql) already grants exactly this
+ * same read independently (admin, or "employeeId" under my own supervisorId) — this query's own
+ * filter is the same belt-and-suspenders the rest of this file and listAdminShifts already keep,
+ * not something RLS leaves open on its own.
+ *
+ * Deliberately NOT filtered by todayDateKey()/workDate — a session still open from before
+ * midnight is still genuinely running, and catching exactly that (not just "today's" sessions)
+ * is the point of a "right now" view. Ordered oldest-clocked-in-first so whoever's been in
+ * longest — the one most likely to need a nudge — sorts to the top.
+ */
+export async function listCurrentlyClockedIn(actor: CurrentEmployee): Promise<CurrentlyClockedInRowDTO[]> {
+  if (actor.role !== "SUPERVISOR" && !isAdmin(actor)) throw new ForbiddenError();
+
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const sessions = await tx.timeSession.findMany({
+      where: {
+        clockOut: null,
+        timeEntry: {
+          employee: {
+            deactivatedAt: null,
+            ...(isAdmin(actor) ? {} : { supervisorId: actor.id }),
+          },
+        },
+      },
+      select: {
+        id: true,
+        clockIn: true,
+        isException: true,
+        exceptionReason: true,
+        timeEntry: {
+          select: {
+            employee: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                preferredName: true,
+                jobTitle: true,
+                department: { select: { name: true } },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { clockIn: "asc" },
+    });
+
+    return sessions.map((s) => ({
+      sessionId: s.id,
+      employeeId: s.timeEntry.employee.id,
+      name: `${s.timeEntry.employee.preferredName || s.timeEntry.employee.firstName} ${s.timeEntry.employee.lastName}`,
+      jobTitle: s.timeEntry.employee.jobTitle,
+      department: s.timeEntry.employee.department?.name ?? null,
+      clockIn: s.clockIn.toISOString(),
+      isException: s.isException,
+      exceptionReason: s.exceptionReason,
     }));
   });
 }
