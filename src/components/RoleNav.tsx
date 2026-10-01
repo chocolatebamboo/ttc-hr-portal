@@ -5,23 +5,48 @@ import { usePathname } from "next/navigation";
 import { navForRole, type NavItem } from "@/lib/nav";
 import type { Role } from "@/types";
 
-function NavLink({ item, showDot }: { item: NavItem; showDot: boolean }) {
+function NavLink({ item, showDot, nested = false }: { item: NavItem; showDot: boolean; nested?: boolean }) {
   const pathname = usePathname();
   const active = pathname === item.href;
   const Icon = item.icon;
   return (
     <Link
       href={item.href}
-      className={`flex items-center gap-2.5 rounded-full px-3 py-2 text-sm transition-colors ${
+      className={`flex items-center gap-2.5 rounded-full transition-colors ${
+        nested ? "px-3 py-1.5 text-[13px]" : "px-3 py-2 text-sm"
+      } ${
         active
           ? "bg-accent-ink text-white font-semibold shadow-sm"
           : "text-muted hover:bg-black/[0.03] hover:text-foreground"
       }`}
     >
-      <Icon className="h-[18px] w-[18px] shrink-0" />
+      <Icon className={`${nested ? "h-4 w-4" : "h-[18px] w-[18px]"} shrink-0`} />
       <span className="flex-1">{item.label}</span>
       {showDot && <span aria-label="Needs attention" className="h-1.5 w-1.5 rounded-full bg-accent shrink-0" />}
     </Link>
+  );
+}
+
+/**
+ * Oct 2026 (CB, on the mockup: "team availability need to be the main page and the remaining
+ * pages under it... subpages... so it reads cleanly"): a NavItem with `children` renders its
+ * own link, then its children indented and connected by a left border underneath — same
+ * parent/subpage grouping approved on the Availability mockup board, applied here to the real
+ * sidebar. A NavItem without children renders exactly as before (see NavLink above).
+ */
+function NavGroup({ item }: { item: NavItem }) {
+  if (!item.children || item.children.length === 0) {
+    return <NavLink item={item} showDot={false} />;
+  }
+  return (
+    <div className="flex flex-col gap-0.5">
+      <NavLink item={item} showDot={false} />
+      <div className="ml-5 pl-3.5 border-l border-border flex flex-col gap-0.5">
+        {item.children.map((child) => (
+          <NavLink key={child.href} item={child} showDot={false} nested />
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -59,7 +84,7 @@ export default function RoleNav({ role, needsOnboardingAttention = false }: { ro
             Administration
           </div>
           {extra.map((item) => (
-            <NavLink key={item.href} item={item} showDot={false} />
+            <NavGroup key={item.href} item={item} />
           ))}
         </div>
       )}
