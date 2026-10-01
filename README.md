@@ -243,6 +243,21 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   know what time of day it is) — nothing else in the app has needed one before this, so it's
   hardcoded to `America/New_York` (`ORG_TIMEZONE` in `src/lib/shift-reminders.ts`) rather than
   configurable, per CB confirming that's where TTC's shifts are.
+- **Notification emails** — CB, Sept 2026: "we need to make sure that any notification goes to
+  their email as well so they know." Rather than teaching every one of the in-app notification
+  system's 13 `NotificationType` call sites (`src/lib/shifts.ts`, `availability.ts`,
+  `pto-actions.ts`, `date-tasks.ts` — see `writeNotification` in `src/lib/notifications.ts`) to
+  also send its own email, `src/lib/notification-emails.ts` emails whatever `writeNotification`
+  already wrote: the same title/body text a person sees in the header bell's feed, reused as-is
+  for the email subject/body. Runs async from the real action, same shared Resend setup as the
+  other reminder emails above — deliberately NOT sent inline from inside `writeNotification`'s
+  own transaction, since that already runs inside the same transaction as the real mutation it's
+  a side effect of, and blocking that open on an external HTTP call would reopen the connection-
+  pool-exhaustion problem `withConnectionLimit()` (`src/lib/db.ts`) was hotfixed for. Tracked by
+  `Notification.emailedAt` (null until sent, stamped once, never touched again) so a later run
+  never double-sends — same shape the shift-reminder/clock-out-reminder jobs already use their
+  own dedicated tracking column/row for. Runs from `POST /api/cron/notification-emails`, same
+  15-minute schedule and shared `CRON_SECRET` as the other reminder-style jobs.
 - **Scheduled messages** — "Schedule message" (Sept 2026, part of the reply-chain redesign):
   composing a DM lets you pick a future date/time instead of sending right away
   (`src/lib/direct-messages.ts`'s `postMessage`/`sendDueScheduledMessages`). A scheduled message
@@ -255,7 +270,7 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   schedule and `CRON_SECRET`-protected shape as the three jobs above — a message scheduled for,
   say, 3:00 PM goes out sometime within that run's 15-minute window, not necessarily on the exact
   minute.
-- **What actually calls those four cron endpoints on a schedule** — a GitHub Actions workflow
+- **What actually calls those five cron endpoints on a schedule** — a GitHub Actions workflow
   (`.github/workflows/reminder-emails.yml`), not a Render Cron Job: Render's Cron Jobs have no
   free tier, and this repo already lives on GitHub, so a scheduled Action reuses an account
   that already exists rather than adding a new paid resource. It needs a repository secret
