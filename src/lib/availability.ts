@@ -1147,23 +1147,33 @@ function decidedDismissalKey(row: { id: string; status: AvailabilityStatus; revi
   return `availability-decided:${row.id}:${row.status}:${row.reviewedAt ?? ""}`;
 }
 
-/** HR-wide availability roster (src/app/(portal)/admin/availability) — admin-only, like
- *  listAdminPto: no new RLS policy needed since is_admin() already grants availability_select
- *  full org-wide read access (prisma/rls.sql). Split into a Pending queue HR needs to act on
- *  and everything already Decided, same shape listAdminPto uses for pending/decided. Decided
- *  is capped to the most recent 200 so this stays one page rather than growing forever, and
- *  (Correction brief #9) anything this admin has already swiped Decided cards to dismiss is
+/** HR-wide availability roster (src/app/(portal)/admin/availability, and now also the Home
+ *  dashboard's admin-style queue for a Supervisor — see canSeeAdminHomeDashboard in
+ *  src/lib/authorization.ts) — split into a Pending queue the reviewer needs to act on and
+ *  everything already Decided, same shape listAdminPto uses for pending/decided. Decided is
+ *  capped to the most recent 200 so this stays one page rather than growing forever, and
+ *  (Correction brief #9) anything this reviewer has already swiped Decided cards to dismiss is
  *  filtered out here — server-side and permanent, same as the dashboard notification banners,
- *  rather than a client-only Set that resets on reload. */
+ *  rather than a client-only Set that resets on reload.
+ *
+ *  Sept 2026 (CB: "make sure [Daijour's admin experience is] working"): opened to SUPERVISOR,
+ *  narrowed here to that supervisor's own direct reports via `employeeFilter` below — the exact
+ *  same employeeFilter.supervisorId narrowing listAdminShifts (src/lib/shifts.ts) already uses
+ *  for the identical isAdmin()-vs-SUPERVISOR split, and exactly what availability_select's own
+ *  RLS policy already permits a supervisor to read (prisma/rls.sql) — this is the application
+ *  layer catching up to a read the database already allowed, not a new grant. An admin still
+ *  sees every submission org-wide, unfiltered, same as before. */
 export async function listAdminAvailability(
   actor: CurrentEmployee
 ): Promise<{ pending: AdminAvailabilityDTO[]; decided: AdminAvailabilityDTO[] }> {
-  if (!isAdmin(actor)) throw new ForbiddenError();
+  if (!isAdmin(actor) && actor.role !== "SUPERVISOR") throw new ForbiddenError();
+
+  const employeeFilter = isAdmin(actor) ? {} : { employee: { supervisorId: actor.id } };
 
   const { pending, decided } = await withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const [pending, decided] = await Promise.all([
       tx.availabilitySubmission.findMany({
-        where: { status: "PENDING" },
+        where: { status: "PENDING", ...employeeFilter },
         include: { employee: { select: { firstName: true, lastName: true, preferredName: true } } },
         orderBy: { submittedAt: "asc" },
       }),
@@ -1171,7 +1181,7 @@ export async function listAdminAvailability(
         // Correction brief #10 (Sept 2026): REMOVED is explicitly "remove it from the normal
         // active/decided interface" — excluded here the same way PENDING already is, so a
         // removed request doesn't reappear in Decided right after an admin clears it out.
-        where: { status: { notIn: ["PENDING", "REMOVED"] } },
+        where: { status: { notIn: ["PENDING", "REMOVED"] }, ...employeeFilter },
         include: { employee: { select: { firstName: true, lastName: true, preferredName: true } } },
         orderBy: { reviewedAt: "desc" },
         take: 200,
