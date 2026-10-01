@@ -8,10 +8,12 @@ import { listAnnouncementsForEmployee } from "@/lib/announcements";
 import { getOnboardingAttention } from "@/lib/onboarding";
 import { listMyAvailability, listAdminAvailability } from "@/lib/availability";
 import { listAdminShifts } from "@/lib/shifts";
+import { listCurrentlyClockedIn } from "@/lib/attendance-admin";
 import { getDashboardNotificationsSummary } from "@/lib/dashboard-notifications";
 import TimeClockCard from "@/components/TimeClockCard";
 import AdminHomeHero from "@/components/AdminHomeHero";
 import TeamScheduleGlance from "@/components/TeamScheduleGlance";
+import ClockedInNowSection from "@/components/ClockedInNowSection";
 import TimeOffSection from "@/components/TimeOffSection";
 import AvailabilityStatusSection from "@/components/AvailabilityStatusSection";
 import TeamAvailabilityRequestsSection from "@/components/TeamAvailabilityRequestsSection";
@@ -98,6 +100,14 @@ export default async function DashboardPage() {
     (s) => s.displayStatus !== "CANCELLED" && s.displayStatus !== "REASSIGNED"
   );
 
+  // CB, Oct 2026: "were supposed to see the clock running when the team clocks in, that is
+  // very important" — a real clock-punch view (every open TimeSession right now), distinct from
+  // the schedule-derived "In progress" stat/TeamScheduleGlance above, which only reflects who's
+  // SCHEDULED to be working, not who's actually clocked in. Same canSeeAdminHomeDashboard-gates-
+  // the-fetch pattern as pendingTeamAvailability/todaysShifts above; listCurrentlyClockedIn
+  // itself narrows to the caller's own reports for a Supervisor actor, org-wide for an admin.
+  const currentlyClockedIn = canSeeAdminHomeDashboard(employee) ? await listCurrentlyClockedIn(employee) : [];
+
   // One transaction, four reads: recent PTO history (existing), plus the numbers the mobile
   // stat row needs (Sept 2026 aesthetic pass) that nothing on this page fetched before.
   // "This week" is a rolling last-7-days window, not a calendar week — TTC has no fixed
@@ -176,6 +186,12 @@ export default async function DashboardPage() {
           </div>
         )}
 
+        {canSeeAdminHomeDashboard(employee) && (
+          <div className="animate-in animate-in-2">
+            <ClockedInNowSection initial={currentlyClockedIn} />
+          </div>
+        )}
+
         <div className="animate-in animate-in-3 grid grid-cols-3 gap-3">
           <StatCard label="This week" value={formatHoursCompact(weekMinutes)} tone="blue" href="/dashboard/week" />
           <StatCard
@@ -241,6 +257,12 @@ export default async function DashboardPage() {
           {canSeeAdminHomeDashboard(employee) && (
             <div className="animate-in animate-in-2">
               <TeamScheduleGlance shifts={todaysShifts} upcomingShifts={upcomingShifts} />
+            </div>
+          )}
+
+          {canSeeAdminHomeDashboard(employee) && (
+            <div className="animate-in animate-in-2">
+              <ClockedInNowSection initial={currentlyClockedIn} />
             </div>
           )}
 
