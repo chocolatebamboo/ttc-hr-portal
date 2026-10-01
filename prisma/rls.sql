@@ -958,6 +958,22 @@ create policy notification_update on "Notification" for update using (
   "recipientId" = current_employee_id()
 );
 
+-- Narrow system-actor bypass for the notification-email cron (POST /api/cron/notification-
+-- emails) — deliberately NOT a blanket is_admin() grant, per this table's own "no admin
+-- override" design two comments up: adding is_admin() here would quietly let any real
+-- SUPER_ADMIN/HR_ADMIN browse and edit everyone's personal notifications, which that comment
+-- explicitly says this table was built to avoid. Scoped to the exact literal actor id
+-- sendPendingNotificationEmails' own SYSTEM_ACTOR uses (src/lib/notification-emails.ts) — a
+-- real employee id is always a uuid, so this can never match a signed-in person's own session.
+-- Same shape direct_message_system_dispatch above already uses for the identical "one specific
+-- cron job, nothing else" bypass.
+drop policy if exists notification_system_email on "Notification";
+create policy notification_system_email on "Notification" for all using (
+  current_role_name() = 'SUPER_ADMIN' and current_employee_id() = 'system:notification-email'
+) with check (
+  current_role_name() = 'SUPER_ADMIN' and current_employee_id() = 'system:notification-email'
+);
+
 -- Correction brief (Sept 2026, "Correction & Refinement Brief" #1/#9): real server-side
 -- read/unread tracking (MessageReadState) and persisted banner dismissal (DashboardDismissal) —
 -- see both models' own doc comments in prisma/schema.prisma. Unlike Notification just above,
