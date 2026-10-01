@@ -13,13 +13,17 @@ name: Reminder emails
 #     "Schedule message," Sept 2026: dispatches any DM whose scheduledFor has passed. Not an
 #     email despite this workflow's name — same shared-secret shape as the other three, just a
 #     different kind of "thing that happens on a timer" reusing the same free schedule.)
-# All four are idempotent/self-limiting server-side (dedup tracking for the two reminder jobs,
-# auto-clockout only ever touches a session that's already past its cap so a late or doubled-up
-# run can't force-close something early, and scheduled-messages only ever flips a row that's
-# still unsent past its own due time) and tolerate a few minutes of scheduling jitter — GitHub's
-# own docs note scheduled workflows can run a few minutes late under load, which is fine here but
-# wouldn't be for something needing exact timing (a message scheduled for 3:00 PM goes out
-# sometime in that run's window, not necessarily on the minute).
+#   - POST /api/cron/notification-emails (src/lib/notification-emails.ts — CB, Sept 2026: "we
+#     need to make sure that any notification goes to their email as well so they know." Emails
+#     every in-app Notification (src/lib/notifications.ts's writeNotification — shift/availability/
+#     PTO/task events) that hasn't been emailed yet.)
+# All five are idempotent/self-limiting server-side (dedup tracking for the reminder and
+# notification-email jobs, auto-clockout only ever touches a session that's already past its cap
+# so a late or doubled-up run can't force-close something early, and scheduled-messages only ever
+# flips a row that's still unsent past its own due time) and tolerate a few minutes of scheduling
+# jitter — GitHub's own docs note scheduled workflows can run a few minutes late under load, which
+# is fine here but wouldn't be for something needing exact timing (a message scheduled for
+# 3:00 PM goes out sometime in that run's window, not necessarily on the minute).
 #
 # Requires a repository secret named CRON_SECRET, matching the CRON_SECRET set on the Render
 # web service's own environment — see README's "Clock-out reminders"/"Shift reminders"
@@ -55,4 +59,8 @@ jobs:
       - name: Scheduled messages
         run: |
           curl -sS -X POST https://ttc-hr-portal.onrender.com/api/cron/scheduled-messages \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+      - name: Notification emails
+        run: |
+          curl -sS -X POST https://ttc-hr-portal.onrender.com/api/cron/notification-emails \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
