@@ -20,6 +20,12 @@ export interface NavItem {
   label: string;
   href: string;
   icon: (props: IconProps) => React.ReactElement;
+  // Oct 2026 (CB, on the Team Availability admin nav item: "team availability need to be the
+  // main page and the remaining pages under it... need to be like subpages... so it reads
+  // cleanly"): optional nested items a NavItem can carry, rendered indented beneath their
+  // parent by RoleNav. Only ADMIN_NAV's Team Availability entry uses this today — everything
+  // else stays a flat, childless item, same as before.
+  children?: NavItem[];
 }
 
 export const EMPLOYEE_NAV: NavItem[] = [
@@ -78,17 +84,30 @@ export const SUPERVISOR_NAV: NavItem[] = [
 // re-added.
 export const ADMIN_NAV: NavItem[] = [
   { label: "Team Members", href: "/admin/employees", icon: IdCardIcon },
-  { label: "Attendance", href: "/admin/attendance", icon: ClockIcon },
-  { label: "PTO Management", href: "/admin/pto", icon: CalendarIcon },
+  // Restructured (CB, Oct 2026, on the mockup's Availability board: "team availability need to
+  // be the main page and the remaining pages under it like attendance, pto management and team
+  // schedule needs to be like subpages in a way so it reads cleanly"): Attendance, PTO
+  // Management and Team Schedule are now nested under Team Availability as its children,
+  // instead of six flat, same-weight items in a row. Hrefs are unchanged — this only changes
+  // how the sidebar groups and indents them, not where any of them live or what gates them.
+  //
   // Labeled "Team Availability" rather than plain "Availability" — every role already has a
   // personal "Availability" link up in EMPLOYEE_NAV (for submitting your own), so an admin
   // account was seeing the word "Availability" twice in the sidebar with nothing to tell the
   // two apart at a glance (CB, Sept 2026). Same fix in spirit as SUPERVISOR_NAV's "My Team"
   // just above — name the admin-facing link by what it's FOR, not just the resource.
-  { label: "Team Availability", href: "/admin/availability", icon: CalendarIcon },
-  // Same page SUPERVISOR_NAV links to above, at the same /team/schedule href — an admin needs
-  // it too (org-wide rather than just their own reports), not a second competing page.
-  { label: "Team Schedule", href: "/team/schedule", icon: CalendarIcon },
+  {
+    label: "Team Availability",
+    href: "/admin/availability",
+    icon: CalendarIcon,
+    children: [
+      { label: "Attendance", href: "/admin/attendance", icon: ClockIcon },
+      { label: "PTO Management", href: "/admin/pto", icon: CalendarIcon },
+      // Same page SUPERVISOR_NAV links to above, at the same /team/schedule href — an admin
+      // needs it too (org-wide rather than just their own reports), not a second competing page.
+      { label: "Team Schedule", href: "/team/schedule", icon: CalendarIcon },
+    ],
+  },
   { label: "Reports", href: "/admin/reports", icon: ChartIcon },
   { label: "Administration", href: "/admin/administration", icon: GearIcon },
 ];
