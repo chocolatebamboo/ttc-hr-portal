@@ -86,6 +86,26 @@ export interface AdminAttendanceRowDTO {
   missingClockOutCount: number;
 }
 
+/** One row of "Clocked in now" (CB, Oct 2026: "were supposed to see the clock running when the
+ *  team clocks in, that is very important") — one currently-OPEN TimeSession, org-wide for an
+ *  admin or just-your-own-reports for a Supervisor, same scoping shape as AdminShiftDTO. Deli-
+ *  berately not filtered by today's workDate — a session open since before midnight is still
+ *  genuinely running, and is exactly the kind of thing this view exists to catch. See
+ *  listCurrentlyClockedIn in src/lib/attendance-admin.ts. */
+export interface CurrentlyClockedInRowDTO {
+  sessionId: string;
+  employeeId: string;
+  name: string;
+  jobTitle: string;
+  department: string | null;
+  clockIn: string; // ISO datetime
+  /** Phase 3 flag — same meaning as TimeSessionDTO.isException/exceptionReason, carried through
+   *  so a supervisor/admin glancing at this list sees an unscheduled or outside-window clock-in
+   *  flagged here too, not just on the employee's own card or the Attendance review screen. */
+  isException: boolean;
+  exceptionReason: string | null;
+}
+
 /** One row in the Employees admin page (src/app/(portal)/admin/employees) — every employee,
  *  active or deactivated, with the full HR record (unlike DirectoryEntryDTO, which deliberately
  *  omits personal contact info). Only ever returned to an admin — see src/lib/employees-admin.ts. */
