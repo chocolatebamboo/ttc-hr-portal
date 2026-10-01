@@ -2,9 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-import { MailIcon, LockIcon } from "@/components/icons";
 
 // Google's official four-color "G" mark, per Google's own branding guidelines for sign-in
 // buttons — not a decorative icon, so it's reproduced exactly rather than recolored.
@@ -42,9 +40,6 @@ const OAUTH_ERROR_COPY: Record<string, string> = {
 };
 
 export default function LoginPage() {
-  const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState("");
   const [googleLoading, setGoogleLoading] = useState(false);
@@ -58,25 +53,6 @@ export default function LoginPage() {
       window.history.replaceState(null, "", "/login");
     }
   }, []);
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setStatus("loading");
-    setErrorMessage("");
-
-    const supabase = createSupabaseBrowserClient();
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-
-    if (error) {
-      setStatus("error");
-      // Deliberately generic — never confirm/deny whether an email exists in the system.
-      setErrorMessage("That email and password don't match. Please try again.");
-      return;
-    }
-
-    router.push("/dashboard");
-    router.refresh();
-  }
 
   /** Google sign-in relies on Supabase Auth's own automatic identity linking: since HR's
    *  invite already created a confirmed-email account for this person (see
@@ -98,7 +74,7 @@ export default function LoginPage() {
     if (error) {
       setGoogleLoading(false);
       setStatus("error");
-      setErrorMessage("Unable to start Google sign-in. Please try again, or use your email and password below.");
+      setErrorMessage("Unable to start Google sign-in. Please try again.");
     }
     // On success the browser navigates away to Google — nothing further to do here.
   }
@@ -138,81 +114,31 @@ export default function LoginPage() {
 
         {/* The frosted-glass card itself — this is the one place in the app that gets that
             treatment right now (see BottomNav/TimeClockCard's doc comments on why the rest of
-            the mobile pass stayed solid-color instead). */}
+            the mobile pass stayed solid-color instead).
+            Oct 2026 (CB: "I want the google log in button but not just the typing in your email
+            and password"): dropped the email/password form entirely — Google is now the only
+            sign-in path on this page. signInWithPassword and the /forgot-password link both
+            still exist in the codebase (handleGoogle's own doc comment above explains why a
+            plain, un-invited Google sign-in still safely bounces back here with ?error=
+            not_invited rather than landing on a broken dashboard), so nothing about how an
+            account actually authenticates changed — only this page stopped offering the
+            password field as a visible way in. */}
         <div className="rounded-3xl border border-white/40 bg-white/70 backdrop-blur-xl shadow-2xl p-6">
           <button
             type="button"
             onClick={handleGoogle}
-            disabled={googleLoading || status === "loading"}
+            disabled={googleLoading}
             className="w-full flex items-center justify-center gap-2.5 rounded-full border border-white/60 bg-white/80 py-3 text-sm font-medium hover:bg-white transition-colors disabled:opacity-60"
           >
             <GoogleIcon />
             {googleLoading ? "Redirecting to Google…" : "Continue with Google"}
           </button>
 
-          <div className="flex items-center gap-3 my-5">
-            <div className="h-px flex-1 bg-black/10" />
-            <span className="text-xs text-muted">or</span>
-            <div className="h-px flex-1 bg-black/10" />
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-3.5">
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium mb-1.5">
-                TTC email
-              </label>
-              <div className="relative">
-                <MailIcon className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 h-[18px] w-[18px] text-muted" />
-                <input
-                  id="email"
-                  type="email"
-                  required
-                  autoComplete="username"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full rounded-full border border-black/10 bg-white/80 pl-11 pr-4 py-3 text-base outline-none focus:ring-2 focus:ring-accent"
-                  placeholder="you@talentedteenclub.org"
-                />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label htmlFor="password" className="block text-sm font-medium">
-                  Password
-                </label>
-                <a href="/forgot-password" className="text-xs text-accent-ink font-medium hover:underline">
-                  Forgot?
-                </a>
-              </div>
-              <div className="relative">
-                <LockIcon className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 h-[18px] w-[18px] text-muted" />
-                <input
-                  id="password"
-                  type="password"
-                  required
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full rounded-full border border-black/10 bg-white/80 pl-11 pr-4 py-3 text-base outline-none focus:ring-2 focus:ring-accent"
-                />
-              </div>
-            </div>
-
-            {status === "error" && (
-              <p role="alert" className="text-sm text-accent">
-                {errorMessage}
-              </p>
-            )}
-
-            <button
-              type="submit"
-              disabled={status === "loading"}
-              className="btn-primary w-full py-3 text-base"
-            >
-              {status === "loading" ? "Signing in…" : "Sign in"}
-            </button>
-          </form>
+          {status === "error" && (
+            <p role="alert" className="text-sm text-accent mt-4 text-center">
+              {errorMessage}
+            </p>
+          )}
         </div>
       </div>
     </main>
