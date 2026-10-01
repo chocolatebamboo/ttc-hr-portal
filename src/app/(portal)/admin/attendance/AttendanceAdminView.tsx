@@ -7,12 +7,37 @@ import type { AdminAttendanceRowDTO, AssignmentOptionsDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error" | "empty";
 
+// Same local-copy convention every other consumer of "initials from a name" already follows in
+// this app (see TeamScheduleGlance.tsx's own doc comment on this exact choice).
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
+}
+
 /**
  * HR-wide attendance dashboard — every active employee for the selected week, with a
  * department filter and the two things README's roadmap calls out: entries still awaiting
  * approval, and missing clock-outs. Clicking a row goes to the same per-employee review page
  * a supervisor uses (src/app/(portal)/team/[employeeId]) — admins can already open any
  * employee there (canAccessEmployeeRecords' admin bypass), so no separate review UI is needed.
+ *
+ * Oct 2026 (CB, from live screenshots: "it's still showing the department as operations, that
+ * doesn't make sense... I need it to look more widgetized... we need to clearly communicate on
+ * whether it's the current seven-day work schedule... I should see an option to kind of look at
+ * the past archive ones... or being able to see what's in the future as well"). Approved via
+ * mockup first (her standing requirement for this kind of visual change) before landing here:
+ * - The plain table becomes person-cards — avatar, name, real job title. The Department column
+ *   is gone; it was "Operations" for almost everyone here and added nothing the job title
+ *   didn't already say (same call already made on Team Schedule's person headers). The
+ *   department FILTER above is untouched — still useful even though it's no longer its own
+ *   column.
+ * - The week nav's "This week" badge only shows when `offset` is actually 0, so it's never
+ *   ambiguous which range is on screen. Previously `offset` could only go negative (the "Next
+ *   week" button was disabled past 0) — that's lifted below so paging forward into future weeks
+ *   works the same as paging back into past ones.
+ * - A row with nothing outstanding reads as "All caught up" in quiet gray instead of printing
+ *   two more "0" pills — only what actually needs attention gets a colored pill, so scanning the
+ *   list means scanning for color, not reading every number.
  */
 export default function AttendanceAdminView() {
   const [offset, setOffset] = useState(0);
@@ -64,24 +89,28 @@ export default function AttendanceAdminView() {
       </p>
 
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2">
           <button
             onClick={() => setOffset((o) => o - 1)}
-            className="btn-neutral h-8 w-8 text-sm"
+            className="h-7 w-7 rounded-full border border-border flex items-center justify-center text-sm text-muted hover:text-foreground hover:bg-black/[0.03]"
             aria-label="Previous week"
           >
-            ←
+            ‹
           </button>
-          <span className="text-sm text-muted min-w-[150px] text-center tabular-nums">
-            {formatWeekRange(week.start, week.end)}
+          <span className="text-sm font-semibold min-w-[140px] text-center tabular-nums">
+            Week of {formatWeekRange(week.start, week.end)}
           </span>
+          {offset === 0 && (
+            <span className="text-[11px] font-semibold text-accent-ink bg-accent/10 rounded-full px-2.5 py-0.5">
+              This week
+            </span>
+          )}
           <button
-            onClick={() => setOffset((o) => Math.min(0, o + 1))}
-            disabled={offset === 0}
-            className="btn-neutral h-8 w-8 text-sm"
+            onClick={() => setOffset((o) => o + 1)}
+            className="h-7 w-7 rounded-full border border-border flex items-center justify-center text-sm text-muted hover:text-foreground hover:bg-black/[0.03]"
             aria-label="Next week"
           >
-            →
+            ›
           </button>
         </div>
 
@@ -136,48 +165,48 @@ export default function AttendanceAdminView() {
       )}
 
       {loadState === "ready" && (
-        <div className="bg-surface border border-border rounded-xl overflow-hidden overflow-x-auto">
-          <table className="w-full text-sm min-w-[640px]">
-            <thead>
-              <tr className="border-b border-border text-left text-xs text-muted uppercase tracking-wide">
-                <th className="px-4 py-2.5 font-medium">Team Member</th>
-                <th className="px-4 py-2.5 font-medium">Department</th>
-                <th className="px-4 py-2.5 font-medium text-right">Awaiting Approval</th>
-                <th className="px-4 py-2.5 font-medium text-right">Missing Clock-Outs</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {rows.map((row) => (
-                <tr key={row.employeeId} className="hover:bg-black/[0.02]">
-                  <td className="px-4 py-2.5">
-                    <Link href={`/team/${row.employeeId}`} className="font-medium hover:underline">
-                      {row.name}
-                    </Link>
-                    <p className="text-xs text-muted">{row.jobTitle}</p>
-                  </td>
-                  <td className="px-4 py-2.5 text-muted">{row.department ?? "—"}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">
-                    {row.awaitingApprovalCount > 0 ? (
-                      <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-800">
-                        {row.awaitingApprovalCount}
-                      </span>
-                    ) : (
-                      <span className="text-muted">0</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">
-                    {row.missingClockOutCount > 0 ? (
-                      <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-rose-100 text-rose-800">
-                        {row.missingClockOutCount}
-                      </span>
-                    ) : (
-                      <span className="text-muted">0</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="bg-surface border border-border rounded-xl overflow-hidden">
+          {rows.map((row, i) => {
+            const hasOutstanding = row.awaitingApprovalCount > 0 || row.missingClockOutCount > 0;
+            return (
+              <Link
+                key={row.employeeId}
+                href={`/team/${row.employeeId}`}
+                className={`flex items-center gap-3.5 px-5 py-3.5 hover:bg-black/[0.02] transition-colors ${
+                  i > 0 ? "border-t border-border" : ""
+                }`}
+              >
+                <span
+                  className="h-9 w-9 rounded-full shrink-0 flex items-center justify-center text-white text-xs font-semibold"
+                  style={{ background: "linear-gradient(135deg, var(--ttc-pink-ink), var(--ttc-pink))" }}
+                >
+                  {initialsOf(row.name) || "?"}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold truncate">{row.name}</p>
+                  <p className="text-xs text-muted truncate">{row.jobTitle}</p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {hasOutstanding ? (
+                    <>
+                      {row.awaitingApprovalCount > 0 && (
+                        <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-800">
+                          {row.awaitingApprovalCount} awaiting approval
+                        </span>
+                      )}
+                      {row.missingClockOutCount > 0 && (
+                        <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-rose-100 text-rose-800">
+                          {row.missingClockOutCount} missing {row.missingClockOutCount === 1 ? "clock-out" : "clock-outs"}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-xs text-muted">All caught up</span>
+                  )}
+                </div>
+              </Link>
+            );
+          })}
         </div>
       )}
     </div>
