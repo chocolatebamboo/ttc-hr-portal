@@ -41,47 +41,49 @@ export default function TimeOffSection({
     }
   }
 
+  // Oct 2026 (CB, circling the "No time-off requests yet" box on her Home dashboard: "if there
+  // isn't anything currently in the field then we shouldn't see it at all cause its cluttering
+  // the home page"): disappears entirely once `rows` is empty — including the moment
+  // handleDelete above empties out the last Cancelled row, since `rows` is this component's own
+  // live state, not a static prop re-read on every render. Same call ClockedInNowSection/
+  // AvailabilityStatusSection/TeamScheduleGlance now make for their own empty states.
+  if (rows.length === 0) return null;
+
   return (
     <div className={className}>
       <h2 className="text-sm font-medium text-muted mb-2">Time off</h2>
-      {rows.length === 0 ? (
-        <div className="rounded-xl border border-border bg-surface px-4 py-4 text-sm text-muted">
-          No time-off requests yet.
-        </div>
-      ) : (
-        <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
-          {rows.map((r) => (
-            <div key={r.id} className="flex items-center hover:bg-black/[0.02] transition-colors">
-              {/* Links through to Availability's own Time Off section (CB, Sept 2026: "I
-                  don't see where Sean could see those messages") — same "tap through to where
-                  the detail actually lives" pattern AvailabilityStatusSection already uses for
-                  its own rows. Points straight at /availability rather than through /time
-                  (which itself just redirects there, per correction brief #6) so this link
-                  lands in one hop instead of two. */}
-              <Link href="/availability" className="flex-1 min-w-0 flex items-center justify-between gap-3 px-4 py-3 text-sm">
-                <span className="truncate">
-                  {PTO_TYPE_LABEL[r.type]} · {formatDateRange(r.startDate.toISOString(), r.endDate.toISOString())}
-                </span>
-                <PtoStatusPill status={r.status} />
-              </Link>
-              {/* Cancelled-only — that's the one status with nothing left for anyone to act on
-                  or refer back to, matching exactly what CB circled. A separate button (not
-                  nested inside the Link above) so this stays valid, clickable markup. */}
-              {r.status === "CANCELLED" && (
-                <button
-                  type="button"
-                  onClick={() => handleDelete(r.id)}
-                  disabled={deletingId === r.id}
-                  aria-label="Delete this request"
-                  className="shrink-0 h-8 w-8 mr-2.5 rounded-full flex items-center justify-center text-muted hover:text-accent hover:bg-accent/10 transition-colors disabled:opacity-50"
-                >
-                  <TrashIcon className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+      <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
+        {rows.map((r) => (
+          <div key={r.id} className="flex items-center hover:bg-black/[0.02] transition-colors">
+            {/* Links through to Availability's own Time Off section (CB, Sept 2026: "I
+                don't see where Sean could see those messages") — same "tap through to where
+                the detail actually lives" pattern AvailabilityStatusSection already uses for
+                its own rows. Points straight at /availability rather than through /time
+                (which itself just redirects there, per correction brief #6) so this link
+                lands in one hop instead of two. */}
+            <Link href="/availability" className="flex-1 min-w-0 flex items-center justify-between gap-3 px-4 py-3 text-sm">
+              <span className="truncate">
+                {PTO_TYPE_LABEL[r.type]} · {formatDateRange(r.startDate.toISOString(), r.endDate.toISOString())}
+              </span>
+              <PtoStatusPill status={r.status} />
+            </Link>
+            {/* Cancelled-only — that's the one status with nothing left for anyone to act on
+                or refer back to, matching exactly what CB circled. A separate button (not
+                nested inside the Link above) so this stays valid, clickable markup. */}
+            {r.status === "CANCELLED" && (
+              <button
+                type="button"
+                onClick={() => handleDelete(r.id)}
+                disabled={deletingId === r.id}
+                aria-label="Delete this request"
+                className="shrink-0 h-8 w-8 mr-2.5 rounded-full flex items-center justify-center text-muted hover:text-accent hover:bg-accent/10 transition-colors disabled:opacity-50"
+              >
+                <TrashIcon className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
