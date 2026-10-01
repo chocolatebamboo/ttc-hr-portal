@@ -377,7 +377,11 @@ function ComposeAnnouncementForm({ onCreated }: { onCreated: () => void }) {
           </select>
         </div>
         <div>
-          <label className="block text-sm font-medium mb-1.5">Expires (optional)</label>
+          {/* Oct 2026 (CB: "should not be there forever"): leaving this blank no longer means
+              "never expires" — createAnnouncement (src/lib/announcements.ts) now defaults a
+              blank Expires to 7 days after the publish date, so the label says so rather than
+              leaving "optional" implying indefinite. */}
+          <label className="block text-sm font-medium mb-1.5">Expires (defaults to 7 days if left blank)</label>
           <input
             type="date"
             value={expirationDate}
