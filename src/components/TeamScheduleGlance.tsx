@@ -96,15 +96,25 @@ function groupUpcomingByDate(upcomingShifts: AdminShiftDTO[]): UpcomingDateGroup
  * already narrows `shifts`/`upcomingShifts` to that supervisor's own direct reports) — exactly
  * the set canAccessEmployeeRecords (src/lib/authorization.ts), which /team/[employeeId] gates on,
  * already grants that same caller. No new access is being opened up here, just a path to it.
+ *
+ * "Who's working right now" hides entirely — header, Full schedule link, and body — when `shifts`
+ * is empty (Oct 2026, CB circling that exact header+"Nobody's scheduled today yet" pairing: "if
+ * there isn't anything currently in the field then we shouldn't see it at all cause its
+ * cluttering the home page"). Upcoming is unaffected by that rule — it already only renders when
+ * it has something to show (upcomingGroups.length > 0 below) — so a quiet today never hides what's
+ * scheduled next. If both are empty the whole widget renders nothing, same "no stray empty
+ * section" call ClockedInNowSection/TimeOffSection/AvailabilityStatusSection now make too.
  */
 const UPCOMING_COLLAPSED_COUNT = 3;
 
 export default function TeamScheduleGlance({
   shifts,
   upcomingShifts,
+  className,
 }: {
   shifts: AdminShiftDTO[];
   upcomingShifts: AdminShiftDTO[];
+  className?: string;
 }) {
   const [showAllUpcoming, setShowAllUpcoming] = useState(false);
   const tomorrowKey = dateKeyDaysFromNow(1);
@@ -112,50 +122,49 @@ export default function TeamScheduleGlance({
   const upcomingGroups = groupUpcomingByDate(visibleUpcomingShifts);
   const hiddenUpcomingCount = upcomingShifts.length - visibleUpcomingShifts.length;
 
-  return (
-    <div>
-      <div className="flex items-baseline justify-between mb-2">
-        <h2 className="text-sm font-medium text-muted">Who&apos;s working right now</h2>
-        <Link href="/team/schedule" className="text-xs font-medium text-accent-ink hover:underline shrink-0">
-          Full schedule →
-        </Link>
-      </div>
+  if (shifts.length === 0 && upcomingGroups.length === 0) return null;
 
-      {shifts.length === 0 ? (
-        <div className="rounded-2xl border border-border bg-surface p-4 text-sm text-muted">
-          Nobody&apos;s scheduled today yet.
-        </div>
-      ) : (
-        <div className="bg-surface border border-border rounded-2xl divide-y divide-border overflow-hidden">
-          {shifts.map((s) => (
-            <Link
-              key={s.id}
-              href={`/team/${s.employeeId}`}
-              className="flex items-center gap-2.5 px-4 py-3 hover:bg-black/[0.02]"
-            >
-              <span
-                className="h-9 w-9 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0"
-                style={{ background: colorFor(s.employeeId) }}
-              >
-                {initialsOf(s.employeeName)}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold truncate">{s.employeeName}</p>
-                <p className="text-xs text-muted truncate">{s.employeeJobTitle}</p>
-              </div>
-              <div className="text-right shrink-0">
-                <p className="text-xs text-muted tabular-nums mb-1">
-                  {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
-                </p>
-                <ShiftStatusPill status={s.displayStatus} />
-              </div>
+  return (
+    <div className={className}>
+      {shifts.length > 0 && (
+        <>
+          <div className="flex items-baseline justify-between mb-2">
+            <h2 className="text-sm font-medium text-muted">Who&apos;s working right now</h2>
+            <Link href="/team/schedule" className="text-xs font-medium text-accent-ink hover:underline shrink-0">
+              Full schedule →
             </Link>
-          ))}
-        </div>
+          </div>
+          <div className="bg-surface border border-border rounded-2xl divide-y divide-border overflow-hidden">
+            {shifts.map((s) => (
+              <Link
+                key={s.id}
+                href={`/team/${s.employeeId}`}
+                className="flex items-center gap-2.5 px-4 py-3 hover:bg-black/[0.02]"
+              >
+                <span
+                  className="h-9 w-9 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0"
+                  style={{ background: colorFor(s.employeeId) }}
+                >
+                  {initialsOf(s.employeeName)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold truncate">{s.employeeName}</p>
+                  <p className="text-xs text-muted truncate">{s.employeeJobTitle}</p>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-xs text-muted tabular-nums mb-1">
+                    {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
+                  </p>
+                  <ShiftStatusPill status={s.displayStatus} />
+                </div>
+              </Link>
+            ))}
+          </div>
+        </>
       )}
 
       {upcomingGroups.length > 0 && (
-        <div className="mt-4">
+        <div className={shifts.length > 0 ? "mt-4" : ""}>
           <h2 className="text-sm font-medium text-muted mb-2">Upcoming</h2>
           <div className="bg-surface border border-border rounded-2xl divide-y divide-border overflow-hidden">
             {upcomingGroups.map((group) => (
