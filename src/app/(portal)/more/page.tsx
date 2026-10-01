@@ -1,13 +1,11 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { getCurrentEmployee } from "@/lib/auth";
+import { requireEmployeeOrRedirect } from "@/lib/auth";
 import { getOnboardingAttention } from "@/lib/onboarding";
 import { navForRole, bottomNavForRole } from "@/lib/nav";
 import { ChevronRightIcon } from "@/components/icons";
 
 export default async function MorePage() {
-  const employee = await getCurrentEmployee();
-  if (!employee) redirect("/login");
+  const employee = await requireEmployeeOrRedirect();
 
   const { primary, extra } = navForRole(employee.role);
   // Whatever's already in this role's bottom bar (Home/Availability plus either My Messages or
