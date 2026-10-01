@@ -1,4 +1,14 @@
-import { Fragment } from "react";
+"use client";
+
+// Oct 2026 (CB: "we shouldn't see like every upcoming date... that probably has a dropdown if
+// they want to see the other dates... it's cluttering up the home page"): the Upcoming list below
+// now collapses to the next few shifts with a "See more" toggle, which needs real client state —
+// hence "use client" here now. Props (shifts/upcomingShifts) are still plain serializable DTOs
+// from the dashboard/page.tsx Server Component, so this crosses the server/client boundary the
+// same ordinary way ClockedInNowSection already does; it changes nothing about the RSC-boundary
+// fix this file's initialsOf already has its own doc comment on below (initialsOf stays a local
+// copy either way, "use client" or not).
+import { Fragment, useState } from "react";
 import Link from "next/link";
 import ShiftStatusPill from "@/components/ShiftStatusPill";
 import { formatTime12h, formatSlotDate } from "@/lib/availability-format";
@@ -68,7 +78,16 @@ function groupUpcomingByDate(upcomingShifts: AdminShiftDTO[]): UpcomingDateGroup
  * doesn't hide what's coming next either. No status pill on these rows (unlike `shifts` above):
  * every one of them is, by construction, still ahead, and the date-group header already says
  * which day.
+ *
+ * Collapsed-by-default (CB, Oct 2026, screenshotted a dashboard stretching from tomorrow to three
+ * and a half weeks out with no cutoff): `upcomingShifts` itself still arrives uncapped from
+ * dashboard/page.tsx exactly as before (nothing upstream changed), but only the first
+ * UPCOMING_COLLAPSED_COUNT of them render until "See more" is tapped — confirmed via AskUserQuestion
+ * ("Next 3, then 'See more'") rather than guessed. Counts individual shifts, not date-groups, so a
+ * single busy day can still fill or exceed the collapsed view on its own.
  */
+const UPCOMING_COLLAPSED_COUNT = 3;
+
 export default function TeamScheduleGlance({
   shifts,
   upcomingShifts,
@@ -76,8 +95,11 @@ export default function TeamScheduleGlance({
   shifts: AdminShiftDTO[];
   upcomingShifts: AdminShiftDTO[];
 }) {
+  const [showAllUpcoming, setShowAllUpcoming] = useState(false);
   const tomorrowKey = dateKeyDaysFromNow(1);
-  const upcomingGroups = groupUpcomingByDate(upcomingShifts);
+  const visibleUpcomingShifts = showAllUpcoming ? upcomingShifts : upcomingShifts.slice(0, UPCOMING_COLLAPSED_COUNT);
+  const upcomingGroups = groupUpcomingByDate(visibleUpcomingShifts);
+  const hiddenUpcomingCount = upcomingShifts.length - visibleUpcomingShifts.length;
 
   return (
     <div>
@@ -146,6 +168,24 @@ export default function TeamScheduleGlance({
               </Fragment>
             ))}
           </div>
+          {hiddenUpcomingCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowAllUpcoming(true)}
+              className="mt-2 text-xs font-medium text-accent-ink hover:underline"
+            >
+              See more ({hiddenUpcomingCount})
+            </button>
+          )}
+          {showAllUpcoming && upcomingShifts.length > UPCOMING_COLLAPSED_COUNT && (
+            <button
+              type="button"
+              onClick={() => setShowAllUpcoming(false)}
+              className="mt-2 text-xs font-medium text-accent-ink hover:underline"
+            >
+              Show less
+            </button>
+          )}
         </div>
       )}
     </div>
