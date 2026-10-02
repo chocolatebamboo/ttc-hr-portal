@@ -184,12 +184,21 @@ export default function AttendanceAdminView({ scope }: { scope: "all" | "team" }
                   i > 0 ? "border-t border-border" : ""
                 }`}
               >
-                <span
-                  className="h-9 w-9 rounded-full shrink-0 flex items-center justify-center text-white text-xs font-semibold"
-                  style={{ background: "linear-gradient(135deg, var(--ttc-pink-ink), var(--ttc-pink))" }}
-                >
-                  {initialsOf(row.name) || "?"}
-                </span>
+                {row.avatarUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- public storage URL
+                  <img
+                    src={row.avatarUrl}
+                    alt=""
+                    className="h-9 w-9 rounded-full object-cover border border-border shrink-0"
+                  />
+                ) : (
+                  <span
+                    className="h-9 w-9 rounded-full shrink-0 flex items-center justify-center text-white text-xs font-semibold"
+                    style={{ background: "linear-gradient(135deg, var(--ttc-pink-ink), var(--ttc-pink))" }}
+                  >
+                    {initialsOf(row.name) || "?"}
+                  </span>
+                )}
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold truncate">{row.name}</p>
                   <p className="text-xs text-muted truncate">{row.jobTitle}</p>
