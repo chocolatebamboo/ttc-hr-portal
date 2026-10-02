@@ -38,8 +38,15 @@ function initialsOf(name: string): string {
  * - A row with nothing outstanding reads as "All caught up" in quiet gray instead of printing
  *   two more "0" pills — only what actually needs attention gets a colored pill, so scanning the
  *   list means scanning for color, not reading every number.
+ *
+ * `scope`, set by the server page from the viewer's own role (Oct 2026, same split
+ * ReportsView/PtoAdminView already take): "all" for HR/Super Admin — every active employee,
+ * department filter included. "team" for a Supervisor — listAdminAttendance itself narrows the
+ * rows to their own direct reports regardless of what this prop says; it only drives the copy
+ * below so a Supervisor doesn't read "every active team member" over a list that's actually
+ * just theirs.
  */
-export default function AttendanceAdminView() {
+export default function AttendanceAdminView({ scope }: { scope: "all" | "team" }) {
   const [offset, setOffset] = useState(0);
   const [departmentId, setDepartmentId] = useState("");
   const [departments, setDepartments] = useState<AssignmentOptionsDTO["departments"]>([]);
@@ -84,8 +91,9 @@ export default function AttendanceAdminView() {
     <div>
       <h1 className="page-title text-2xl mb-1">Attendance</h1>
       <p className="text-sm text-muted mb-4">
-        Every active team member&apos;s timesheet status for the selected week. Click a row to review
-        and approve that team member&apos;s time.
+        {scope === "team"
+          ? "Your own team's timesheet status for the selected week. Click a row to review and approve that team member's time."
+          : "Every active team member's timesheet status for the selected week. Click a row to review and approve that team member's time."}
       </p>
 
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
