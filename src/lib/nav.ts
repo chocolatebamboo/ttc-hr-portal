@@ -65,6 +65,17 @@ export const SUPERVISOR_NAV: NavItem[] = [
   // of under the admin-only URL space. Same href in ADMIN_NAV below — one page, gated to
   // whichever of the two roles is actually viewing it, not two competing pages.
   { label: "Team Schedule", href: "/team/schedule", icon: CalendarIcon },
+  // Added Oct 2026 (CB, after flagging that Daijour's sidebar was missing Attendance and PTO
+  // Management: "give him Attendance + PTO Management for his own team"): same hrefs ADMIN_NAV
+  // nests under "Team Availability" below, flat here instead — SUPERVISOR_NAV has never had a
+  // nested group, and there's no supervisor-facing "Team Availability" landing page the way
+  // ADMIN_NAV's parent links to /admin/availability. Each page itself narrows to the caller's
+  // own direct reports (see canAccessAttendance/canAccessPtoManagement in
+  // src/lib/authorization.ts and the scoping in listAdminAttendance/listAdminPto) — this is a
+  // path to data Daijour already has real authority over elsewhere (his own reports' timesheets
+  // and PTO via /team/[employeeId]), not new access.
+  { label: "Attendance", href: "/admin/attendance", icon: ClockIcon },
+  { label: "PTO Management", href: "/admin/pto", icon: CalendarIcon },
   // Found missing Oct 2026 (CB: "did you make sure that Daijour's role... is looking like the
   // admin"): /admin/reports/page.tsx has granted a Supervisor this page, scoped to their own team
   // (canAccessReports), ever since Correction brief #8 — but this sidebar list was never updated
