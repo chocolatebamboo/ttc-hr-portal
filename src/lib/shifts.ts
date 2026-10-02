@@ -114,7 +114,18 @@ export function deriveShiftDisplayStatus(
 
 /** Batches the "did this employee log any time on this date" lookup for a whole list of shifts
  *  at once instead of one query per row — same batching shape src/lib/team-notes.ts's
- *  aggregateTopicCounts uses for per-date message counts. */
+ *  aggregateTopicCounts uses for per-date message counts.
+ *
+ * Bugfix (Oct 2026, CB, looking at her own Home dashboard while Haile was actively clocked in:
+ * "it's saying upcoming for that person that's clocked in... a little bit misleading" — wants
+ * "in progress" instead, without touching the live session): this used to only check
+ * totalMinutes > 0, but computeTotalMinutes (src/lib/time.ts) only sums CLOSED sessions and
+ * stays 0 for as long as today's session is still open — so a shift someone is actively working
+ * right now read as "no logged time yet" and deriveShiftDisplayStatus fell back to UPCOMING
+ * instead of IN_PROGRESS, for the entire window between clock-in and clock-out. Now also counts
+ * an currently-open TimeSession (clockOut still null) as logged time, same as a completed one —
+ * a pure read added to this same query, nothing about clock-in/clock-out itself changes, so an
+ * already-running session is never touched. */
 async function loadLoggedTimeFlags(
   tx: PrismaClient,
   shifts: { employeeId: string; date: string }[]
@@ -129,7 +140,12 @@ async function loadLoggedTimeFlags(
   if (uniquePairs.size === 0) return new Set();
 
   const entries = await tx.timeEntry.findMany({
-    where: { OR: [...uniquePairs.values()], totalMinutes: { gt: 0 } },
+    where: {
+      AND: [
+        { OR: [...uniquePairs.values()] },
+        { OR: [{ totalMinutes: { gt: 0 } }, { sessions: { some: { clockOut: null } } }] },
+      ],
+    },
     select: { employeeId: true, workDate: true },
   });
 
