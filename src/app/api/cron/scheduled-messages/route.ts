@@ -3,9 +3,9 @@ import { sendDueScheduledMessages } from "@/lib/direct-messages";
 
 /**
  * POST /api/cron/scheduled-messages — "Schedule message" (Sept 2026, confirmed for deployment).
- * Hit on a schedule by the same GitHub Actions workflow as the other three cron endpoints
+ * Hit on a schedule by the same GitHub Actions workflow as the other cron endpoints
  * (.github/workflows/reminder-emails.yml), not by any user-facing UI. Same shape as
- * /api/cron/shift-reminders: no signed-in employee behind this call, so it's protected by the
+ * /api/cron/clockin-reminders: no signed-in employee behind this call, so it's protected by the
  * same shared secret (CRON_SECRET) instead of requireEmployee()/assertIsAdmin() — see README's
  * "Scheduled messages" section for how the workflow is configured to send it.
  */
