@@ -35,7 +35,7 @@ function colorFor(id: string): string {
   return AVATAR_COLORS[hash % AVATAR_COLORS.length];
 }
 
-/** One row inside a stat-tile menu — same visual shape as TeamScheduleGlance's own
+/** One row inside the stat-tile menu — same visual shape as TeamScheduleGlance's own
  *  ShiftGlanceRow (avatar, name, job title, time, status pill), kept as its own local copy here
  *  rather than imported since ShiftGlanceRow isn't exported from that file (it's a same-page
  *  helper there, same as initialsOf/colorFor above). */
@@ -76,33 +76,34 @@ function MenuRow({ s, onNavigate }: { s: AdminShiftDTO; onNavigate: () => void }
 }
 
 /**
- * The floating "who's on this tile" menu (Oct 2026 redo — CB rejected the first version of this
+ * The floating "today's schedule" menu (Oct 2026 redo — CB rejected the first version of this
  * feature, a same-page scroll-jump: "It's not functioning right it's supposed to function like
  * you can see the names what you click on it like it's on menu," and asked to see a mockup
- * before anything shipped again — approved, "Yes I like that," before this was written). Tapping
- * a stat tile now pops this panel right under it, showing the real people behind the number,
- * instead of jumping to TeamScheduleGlance further down the page.
+ * before anything shipped again — approved, "Yes I like that," before this was built). Tapping
+ * either stat tile pops this one panel right under it, showing the real people behind today's
+ * numbers, instead of jumping to TeamScheduleGlance further down the page.
  *
- * `align`: which edge of the tile the panel hangs from — "start" (left-anchored, extends right)
- * for the first/leftmost tile, "end" (right-anchored, extends left) for the second/rightmost
- * one. Both tiles sharing one row means a fixed-width panel wider than either tile will overhang
- * its own tile either way; anchoring each to the OUTER edge of its tile (left edge for the first
- * tile, right edge for the second) keeps the panel inside the hero card's own bounds instead of
- * running off the side of the screen on a narrow phone — the opposite choice (anchoring both to
- * the same side) would push the second tile's panel past the right edge of the hero on anything
- * narrower than about a tablet.
+ * ONE combined panel, not two separate ones (CB, immediate follow-up after the first version of
+ * this went out: "we should see the schedule today as well" — confirmed via a follow-up
+ * question: "Either tile opens the same panel: 'Working right now' at the top, then everyone
+ * else scheduled today underneath. One tap shows the whole picture"). So both tiles open this
+ * exact component with the exact same `shifts` (todaysShifts, unfiltered) — which tile you
+ * tapped only decides which side the panel hangs from (`align`), not what's inside it. Split
+ * into the same two groups, with the same two labels, as TeamScheduleGlance's own "Who's working
+ * right now"/"Today" split just below this hero on the page (rightNowShifts/restOfToday there) —
+ * deliberately the same grouping and the same words, so this panel and that section never
+ * disagree about who's in which bucket.
+ *
+ * `align`: which edge of the panel lines up with the tapped tile — "start" (left-anchored,
+ * extends right) for the first/leftmost tile, "end" (right-anchored, extends left) for the
+ * second/rightmost one. A fixed-width panel wider than either tile will overhang its own tile
+ * either way; anchoring to the OUTER edge of whichever tile was tapped keeps it inside the hero
+ * card's own bounds instead of running off the side of the screen on a narrow phone.
  */
-function StatMenu({
-  title,
-  rows,
-  align,
-  onClose,
-}: {
-  title: string;
-  rows: AdminShiftDTO[];
-  align: "start" | "end";
-  onClose: () => void;
-}) {
+function StatMenu({ shifts, align, onClose }: { shifts: AdminShiftDTO[]; align: "start" | "end"; onClose: () => void }) {
+  const rightNowShifts = shifts.filter((s) => s.displayStatus === "IN_PROGRESS");
+  const restOfToday = shifts.filter((s) => s.displayStatus !== "IN_PROGRESS");
+
   return (
     <>
       {/* Tapping anywhere outside the panel closes it (CB's mockup caption: "Tapping outside...
@@ -115,15 +116,33 @@ function StatMenu({
         className="fixed inset-0 z-20 cursor-default"
       />
       <div
-        className={`absolute top-[calc(100%+10px)] ${align === "start" ? "left-0" : "right-0"} z-30 w-72 max-w-[calc(100vw-2.5rem)] rounded-2xl border border-border bg-surface shadow-xl overflow-hidden animate-in`}
+        className={`absolute top-[calc(100%+10px)] ${align === "start" ? "left-0" : "right-0"} z-30 w-80 max-w-[calc(100vw-2.5rem)] rounded-2xl border border-border bg-surface shadow-xl overflow-hidden animate-in`}
       >
-        <div className="px-3.5 pt-3 pb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">
-          {title}
-        </div>
-        <div className="divide-y divide-border max-h-72 overflow-y-auto">
-          {rows.map((s) => (
-            <MenuRow key={s.id} s={s} onNavigate={onClose} />
-          ))}
+        <div className="max-h-80 overflow-y-auto">
+          {rightNowShifts.length > 0 && (
+            <div>
+              <div className="px-3.5 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                Working right now
+              </div>
+              <div className="divide-y divide-border">
+                {rightNowShifts.map((s) => (
+                  <MenuRow key={s.id} s={s} onNavigate={onClose} />
+                ))}
+              </div>
+            </div>
+          )}
+          {restOfToday.length > 0 && (
+            <div>
+              <div className="px-3.5 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                Today
+              </div>
+              <div className="divide-y divide-border">
+                {restOfToday.map((s) => (
+                  <MenuRow key={s.id} s={s} onNavigate={onClose} />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
         <Link
           href="/team/schedule"
@@ -150,18 +169,20 @@ function StatMenu({
  *
  * `todaysShifts` is dashboard/page.tsx's own `todaysShifts` — every shift for today, the exact
  * same array TeamScheduleGlance renders below this hero — passed through whole rather than as
- * pre-computed counts, so both the stat numbers AND the two tiles' dropdown menus come from one
- * fetch with no risk of the tile's number and its menu's contents ever disagreeing.
- * `scheduledToday`/`inProgressShifts` below are derived from it, not fetched separately.
+ * pre-computed counts, so both the stat numbers AND the stat-tile menu's rows come from one
+ * fetch with no risk of the tile's number and the menu's contents ever disagreeing.
+ * `scheduledToday`/`inProgress` below are derived from it, not fetched separately.
  *
  * Both stat tiles (Oct 2026, CB, circling them on a screenshot: "is it possible for us to...
  * click in these areas... and we see who's clocked in currently and... who's scheduled today")
- * are buttons that open a StatMenu (above) listing the actual people behind the number — a
- * same-page scroll-jump was the first attempt at this and CB rejected it (see StatMenu's own
- * doc comment); this version opens no new page and makes no new fetch, just reads from
- * `todaysShifts` already in hand. A tile with nothing behind it (zero today, or nobody currently
- * in progress) renders as a plain non-interactive block instead of a button — nothing to show in
- * a menu, so nothing to tap.
+ * open the SAME StatMenu (above) — see that component's own doc comment for why this is one
+ * combined panel rather than two separate ones; `openFrom` tracks which tile was tapped only to
+ * decide which side the panel hangs from (`align`), not what's inside it. Opens no new page and
+ * makes no new fetch, just reads from `todaysShifts` already in hand. Both tiles are
+ * non-interactive (plain block, no button, no chevron) when `todaysShifts` is empty entirely —
+ * nothing to show in the menu either way, so nothing to tap — but stay tappable even when that
+ * specific tile's own number is 0, since the combined menu can still have something in its other
+ * section (e.g. "In progress" reads 0 but there's still a "Today" list to see).
  *
  * `clocksIn` is Employee.clocksIn (see its own doc comment in prisma/schema.prisma) — CB:
  * "Shawn the founder will never clock in... Randall [won't either]... but Daijour we also need
@@ -180,25 +201,25 @@ export default function AdminHomeHero({
   const router = useRouter();
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [clockExpanded, setClockExpanded] = useState(false);
-  const [openMenu, setOpenMenu] = useState<"scheduled" | "progress" | null>(null);
+  const [openFrom, setOpenFrom] = useState<"scheduled" | "progress" | null>(null);
   const now = useLiveClock();
   const liveDate = now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
   const liveTime = now.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 
-  const inProgressShifts = todaysShifts.filter((s) => s.displayStatus === "IN_PROGRESS");
   const scheduledToday = todaysShifts.length;
-  const inProgress = inProgressShifts.length;
+  const inProgress = todaysShifts.filter((s) => s.displayStatus === "IN_PROGRESS").length;
+  const hasAnything = scheduledToday > 0;
 
   // Escape closes the open menu same as tapping outside it — cheap to support, standard for any
   // floating panel.
   useEffect(() => {
-    if (!openMenu) return;
+    if (!openFrom) return;
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpenMenu(null);
+      if (e.key === "Escape") setOpenFrom(null);
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [openMenu]);
+  }, [openFrom]);
 
   function handleCreated() {
     setScheduleOpen(false);
@@ -234,6 +255,10 @@ export default function AdminHomeHero({
     </svg>
   );
 
+  function toggle(from: "scheduled" | "progress") {
+    setOpenFrom((cur) => (cur === from ? null : from));
+  }
+
   if (variant === "hero") {
     return (
       <>
@@ -245,17 +270,17 @@ export default function AdminHomeHero({
 
           <div className="flex gap-2.5 mb-5">
             <div className="relative flex-1">
-              {scheduledToday > 0 ? (
+              {hasAnything ? (
                 <button
                   type="button"
-                  onClick={() => setOpenMenu((m) => (m === "scheduled" ? null : "scheduled"))}
+                  onClick={() => toggle("scheduled")}
                   className={`block w-full text-left rounded-2xl px-3.5 py-2.5 transition-colors ${
-                    openMenu === "scheduled" ? "bg-white/28 outline outline-2 outline-white/60" : "bg-white/15 active:bg-white/25"
+                    openFrom === "scheduled" ? "bg-white/28 outline outline-2 outline-white/60" : "bg-white/15 active:bg-white/25"
                   }`}
                 >
                   <p className="text-2xl font-bold tabular-nums leading-none">{scheduledToday}</p>
                   <p className="text-[11px] font-medium text-white/80 mt-1 flex items-center gap-1">
-                    Scheduled today {chevron(openMenu === "scheduled")}
+                    Scheduled today {chevron(openFrom === "scheduled")}
                   </p>
                 </button>
               ) : (
@@ -264,23 +289,23 @@ export default function AdminHomeHero({
                   <p className="text-[11px] font-medium text-white/80 mt-1">Scheduled today</p>
                 </div>
               )}
-              {openMenu === "scheduled" && (
-                <StatMenu title="Scheduled today" rows={todaysShifts} align="start" onClose={() => setOpenMenu(null)} />
+              {openFrom === "scheduled" && (
+                <StatMenu shifts={todaysShifts} align="start" onClose={() => setOpenFrom(null)} />
               )}
             </div>
 
             <div className="relative flex-1">
-              {inProgress > 0 ? (
+              {hasAnything ? (
                 <button
                   type="button"
-                  onClick={() => setOpenMenu((m) => (m === "progress" ? null : "progress"))}
+                  onClick={() => toggle("progress")}
                   className={`block w-full text-left rounded-2xl px-3.5 py-2.5 transition-colors ${
-                    openMenu === "progress" ? "bg-white/28 outline outline-2 outline-white/60" : "bg-white/15 active:bg-white/25"
+                    openFrom === "progress" ? "bg-white/28 outline outline-2 outline-white/60" : "bg-white/15 active:bg-white/25"
                   }`}
                 >
                   <p className="text-2xl font-bold tabular-nums leading-none">{inProgress}</p>
                   <p className="text-[11px] font-medium text-white/80 mt-1 flex items-center gap-1">
-                    In progress {chevron(openMenu === "progress")}
+                    In progress {chevron(openFrom === "progress")}
                   </p>
                 </button>
               ) : (
@@ -289,8 +314,8 @@ export default function AdminHomeHero({
                   <p className="text-[11px] font-medium text-white/80 mt-1">In progress</p>
                 </div>
               )}
-              {openMenu === "progress" && (
-                <StatMenu title="Working right now" rows={inProgressShifts} align="end" onClose={() => setOpenMenu(null)} />
+              {openFrom === "progress" && (
+                <StatMenu shifts={todaysShifts} align="end" onClose={() => setOpenFrom(null)} />
               )}
             </div>
           </div>
@@ -328,15 +353,15 @@ export default function AdminHomeHero({
           </div>
           <div className="flex gap-5">
             <div className="relative">
-              {scheduledToday > 0 ? (
+              {hasAnything ? (
                 <button
                   type="button"
-                  onClick={() => setOpenMenu((m) => (m === "scheduled" ? null : "scheduled"))}
+                  onClick={() => toggle("scheduled")}
                   className="text-right block hover:opacity-70 transition-opacity"
                 >
                   <p className="text-lg font-semibold tabular-nums">{scheduledToday}</p>
                   <p className="text-xs text-muted flex items-center gap-1 justify-end">
-                    Scheduled today {chevron(openMenu === "scheduled")}
+                    Scheduled today {chevron(openFrom === "scheduled")}
                   </p>
                 </button>
               ) : (
@@ -345,21 +370,21 @@ export default function AdminHomeHero({
                   <p className="text-xs text-muted">Scheduled today</p>
                 </div>
               )}
-              {openMenu === "scheduled" && (
-                <StatMenu title="Scheduled today" rows={todaysShifts} align="start" onClose={() => setOpenMenu(null)} />
+              {openFrom === "scheduled" && (
+                <StatMenu shifts={todaysShifts} align="start" onClose={() => setOpenFrom(null)} />
               )}
             </div>
 
             <div className="relative">
-              {inProgress > 0 ? (
+              {hasAnything ? (
                 <button
                   type="button"
-                  onClick={() => setOpenMenu((m) => (m === "progress" ? null : "progress"))}
+                  onClick={() => toggle("progress")}
                   className="text-right block hover:opacity-70 transition-opacity"
                 >
                   <p className="text-lg font-semibold tabular-nums">{inProgress}</p>
                   <p className="text-xs text-muted flex items-center gap-1 justify-end">
-                    In progress {chevron(openMenu === "progress")}
+                    In progress {chevron(openFrom === "progress")}
                   </p>
                 </button>
               ) : (
@@ -368,8 +393,8 @@ export default function AdminHomeHero({
                   <p className="text-xs text-muted">In progress</p>
                 </div>
               )}
-              {openMenu === "progress" && (
-                <StatMenu title="Working right now" rows={inProgressShifts} align="end" onClose={() => setOpenMenu(null)} />
+              {openFrom === "progress" && (
+                <StatMenu shifts={todaysShifts} align="end" onClose={() => setOpenFrom(null)} />
               )}
             </div>
           </div>
