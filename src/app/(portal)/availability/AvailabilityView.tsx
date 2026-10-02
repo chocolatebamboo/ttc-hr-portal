@@ -79,15 +79,29 @@ function weekRangeLabel(start: Date): string {
 export default function AvailabilityView({
   employeeId,
   isAdminViewer = false,
+  canManageTeam = false,
 }: {
   employeeId: string;
-  /** Oct 2026 (CB, on the Availability mockup: "like how we have the schedule someone... it kind
-   *  of needs to be in that same area where we have this week" and, separately, "For admin i
-   *  dont want to have them see this" on the Logged hours/Time off tiles): set only by
-   *  AvailabilityPage's admin branch, where this same widget is stacked above the team review
-   *  queue. A non-admin employee (the default, `false`) renders exactly as this component
-   *  always has — unaffected by either change below. */
+  /** Oct 2026 (CB, on the Availability mockup: "For admin i dont want to have them see this" on
+   *  the Logged hours/Time off tiles): set only for a true HR_ADMIN/SUPER_ADMIN viewer, who
+   *  doesn't need their own personal stat tiles cluttering a page they're mostly using to manage
+   *  the team. Daijour (SUPERVISOR) does NOT get this — see canManageTeam's own doc comment just
+   *  below for why he still keeps this row, same as any regular employee. A non-admin employee
+   *  (the default, `false`) renders exactly as this component always has — unaffected by either
+   *  change below. */
   isAdminViewer?: boolean;
+  /** Oct 2026 bugfix: "schedule someone... on the availability page" wasn't showing for Daijour
+   *  — AvailabilityPage's admin branch used to gate this whole widget's team-management bits on
+   *  a bare isAdmin() check, same bug canAccessTeamAvailability's own doc comment (src/lib/
+   *  authorization.ts) describes already having been fixed on the sibling /admin/availability
+   *  page. This is that same fix applied here: canManageTeam is true for isAdmin() OR SUPERVISOR
+   *  (AvailabilityPage passes canAccessTeamAvailability(employee)), and controls only the
+   *  ScheduleSomeoneButton below — separate from isAdminViewer, so Daijour gets "Schedule
+   *  someone" without losing his own Logged hours/Time off tiles, consistent with how he keeps
+   *  his personal "This week"/"Availability" numbers on the Home dashboard (see
+   *  canSeeAdminHomeDashboard's own doc comment for that same "treated like a regular employee
+   *  for his own stuff" principle). */
+  canManageTeam?: boolean;
 }) {
   const [submissions, setSubmissions] = useState<AvailabilityDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
@@ -492,7 +506,7 @@ export default function AvailabilityView({
                 admin branch) — same action, same ScheduleSomeoneButton/ScheduleSomeoneSheet, just
                 relocated so an admin can schedule someone without scrolling past their own
                 calendar widget first. */}
-            {isAdminViewer && <ScheduleSomeoneButton className="btn-primary text-xs px-3.5 py-1.5 shrink-0" />}
+            {canManageTeam && <ScheduleSomeoneButton className="btn-primary text-xs px-3.5 py-1.5 shrink-0" />}
             <button
               type="button"
               onClick={() => setCalendarOpen((v) => !v)}
