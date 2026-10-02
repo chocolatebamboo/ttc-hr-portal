@@ -83,12 +83,17 @@ export default async function DashboardPage() {
   // Same canSeeAdminHomeDashboard-gates-the-fetch pattern as pendingTeamAvailability just above;
   // listAdminShifts itself already narrows to the caller's own reports for a Supervisor actor
   // (its own employeeFilter.supervisorId, src/lib/shifts.ts) — org-wide for an admin, unchanged.
+  //
+  // Oct 2026 (stat-tile click-to-jump redo — CB rejected the scroll-anchor first attempt and
+  // asked for an actual names-in-a-menu popover instead, approved by mockup before this was
+  // built): AdminHomeHero now takes this whole `todaysShifts` array directly rather than
+  // pre-reduced scheduledToday/inProgress counts, so its own two stat tiles can derive both their
+  // numbers AND their dropdown menus' rows from the one array — see that component's own doc
+  // comment. No new fetch; this is the exact same array TeamScheduleGlance already renders below.
   const todayKey = todayDateKey();
   const todaysShifts = canSeeAdminHomeDashboard(employee)
     ? await listAdminShifts(employee, { dateFrom: todayKey, dateTo: todayKey })
     : [];
-  const scheduledTodayCount = todaysShifts.length;
-  const inProgressCount = todaysShifts.filter((s) => s.displayStatus === "IN_PROGRESS").length;
 
   // CB, Sept 2026 (follow-up to the above): "just because somebody isn't working today, I
   // should be able to see the upcoming schedules, cleanly." Every future shift from tomorrow
@@ -190,8 +195,7 @@ export default async function DashboardPage() {
           {canSeeAdminHomeDashboard(employee) ? (
             <AdminHomeHero
               variant="hero"
-              scheduledToday={scheduledTodayCount}
-              inProgress={inProgressCount}
+              todaysShifts={todaysShifts}
               clocksIn={employee.clocksIn}
             />
           ) : (
@@ -285,8 +289,7 @@ export default async function DashboardPage() {
             {canSeeAdminHomeDashboard(employee) ? (
               <AdminHomeHero
                 variant="default"
-                scheduledToday={scheduledTodayCount}
-                inProgress={inProgressCount}
+                todaysShifts={todaysShifts}
                 clocksIn={employee.clocksIn}
               />
             ) : (
