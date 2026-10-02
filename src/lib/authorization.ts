@@ -83,6 +83,28 @@ export function assertCanAccessPtoManagement(actor: CurrentEmployee): void {
 }
 
 /**
+ * Same rule and reasoning as canAccessAttendance/canAccessPtoManagement just above, for the
+ * standalone Team Availability admin page (src/app/(portal)/admin/availability) — kept as its
+ * own named function per this file's convention. listAdminAvailability (src/lib/availability.ts)
+ * already does its own authorization AND scoping independently of this function (admin sees
+ * every submission org-wide; a Supervisor is narrowed to supervisorId = their own id) — this
+ * gates the PAGE itself, which until Oct 2026 called isAdmin() directly and redirected every
+ * Supervisor straight back to /dashboard before that downstream scoping ever got a chance to
+ * run. Found Oct 2026 (CB, comparing Daijour's sidebar to her own: "it's not looking exactly
+ * kind of like mine where the team availability is the main and then the breakdown") while
+ * nesting Attendance/PTO Management/Team Schedule under a Team Availability parent for
+ * SUPERVISOR_NAV the same way ADMIN_NAV already does — that parent link needed somewhere real to
+ * go.
+ */
+export function canAccessTeamAvailability(actor: CurrentEmployee): boolean {
+  return isAdmin(actor) || actor.role === "SUPERVISOR";
+}
+
+export function assertCanAccessTeamAvailability(actor: CurrentEmployee): void {
+  if (!canAccessTeamAvailability(actor)) throw new ForbiddenError();
+}
+
+/**
  * Phase 5c (CB, Sept 2026): "an option to add an internal comment" on a direct message,
  * confirmed scope "hidden from the team member." Same three-role "staff" cut canAccessReports
  * already draws (isAdmin() plus SUPERVISOR) — given its own name here since internal DM notes
@@ -101,7 +123,7 @@ export function isStaff(actor: CurrentEmployee): boolean {
  * experience isn't looking like what we [see as] admin... we need to make sure that's working."
  * Daijour is SUPERVISOR, not HR_ADMIN/SUPER_ADMIN, so isAdmin() alone left him on the plain-
  * employee Home layout even though he already has real team-management authority elsewhere in
- * this app (canAccessReports, assertCanReviewAvailability and friends below, the /team/
+ * this app (canAccessReports, assertCanReviewTimesheet and friends below, the /team/
  * [employeeId] pages) — this closes that gap for the Home dashboard specifically. Same
  * three-role "staff" cut isStaff/canAccessReports already draw — named separately here, like
  * those two, so dashboard/page.tsx's call sites read as what they're actually gating rather
