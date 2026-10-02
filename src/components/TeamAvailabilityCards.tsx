@@ -652,13 +652,32 @@ export function groupByEmployee(rows: AdminAvailabilityDTO[]): FolderGroup[] {
  * exactly one submission, so they're only offered while a group still represents exactly one —
  * `soleId` below is that submission's id, or null once a card has genuinely merged more than one.
  */
-export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }) {
+export default function TeamAvailabilityCards({
+  viewerId,
+  weekStart,
+  weekEnd,
+}: {
+  viewerId: string;
+  /** Oct 2026 (CB, on the Availability mockup: "I should see an option to kind of look at the
+   *  past archive ones... or being able to see what's in the future as well"): when both are
+   *  given (YYYY-MM-DD, inclusive — same bounds shape getWeek/@lib/week returns), this list is
+   *  bounded to submissions with at least one slot date inside [weekStart, weekEnd], instead of
+   *  the fixed "last 7 days, archive the rest" split below. The caller
+   *  (TeamAvailabilityWeekPanel, used by AvailabilityPage's admin branch) owns the actual
+   *  week-nav UI; this component only needs the resolved bounds. Omit both to keep the original
+   *  unbounded Pending + recent/archived Decided behavior — AvailabilityAdminView.tsx still
+   *  calls it this way. */
+  weekStart?: string;
+  weekEnd?: string;
+}) {
   const q = useTeamAvailabilityQueue();
   // Oct 2026 (CB, screenshotted Decided cards with dates going back over a week, today being
   // Oct 1): "it should archive the dates that are already complete or already done... show only
   // what's for this week." Collapsed behind this toggle rather than lost — confirmed via
   // AskUserQuestion ("Keep reachable via a 'View archived' link") — same spirit as the rest of
-  // this component's swipe-to-clear leaving a trail, not deleting anything.
+  // this component's swipe-to-clear leaving a trail, not deleting anything. Only relevant in the
+  // unbounded mode above (weekStart/weekEnd omitted) — a week-bounded caller already has its own
+  // nav to reach older/newer weeks, so there's nothing left to "archive" out of this list.
   const [showArchivedDecided, setShowArchivedDecided] = useState(false);
 
   if (q.loadState === "loading") {
@@ -679,15 +698,30 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
     );
   }
 
+  // Week-bounded mode (weekStart/weekEnd given): both Pending and Decided are filtered down to
+  // submissions with at least one slot date inside the caller's selected week — see this
+  // component's own doc comment above. Unbounded mode (both omitted) keeps the original
+  // behavior below unchanged.
+  const weekBounded = !!weekStart && !!weekEnd;
+  const inSelectedWeek = (s: AdminAvailabilityDTO) =>
+    s.slots.some((slot) => slot.date >= weekStart! && slot.date <= weekEnd!);
+  const pending = weekBounded ? q.pending.filter(inSelectedWeek) : q.pending;
+
   // Same rolling-last-7-days definition as the Home dashboard's own "This week" stat
   // (dashboard/page.tsx's sevenDaysAgo) — CB confirmed via AskUserQuestion this should match
   // rather than invent a second "this week." Keyed off each submission's own slot dates (not
   // reviewedAt/when it was decided): a request approved today for a shift two weeks out is still
   // very much live and stays visible, while one whose every date has already passed — the "dates
   // that are already complete or already done" CB pointed at — is what moves behind the link.
+  // Only applies in unbounded mode — a week-bounded caller filters by its own selected week
+  // instead (see weekBounded above), with nothing left over to archive.
   const recentCutoffKey = dateKeyDaysFromNow(-6);
-  const decidedRecent = q.decided.filter((s) => s.slots.some((slot) => slot.date >= recentCutoffKey));
-  const decidedArchived = q.decided.filter((s) => !s.slots.some((slot) => slot.date >= recentCutoffKey));
+  const decidedRecent = weekBounded
+    ? q.decided.filter(inSelectedWeek)
+    : q.decided.filter((s) => s.slots.some((slot) => slot.date >= recentCutoffKey));
+  const decidedArchived = weekBounded
+    ? []
+    : q.decided.filter((s) => !s.slots.some((slot) => slot.date >= recentCutoffKey));
 
   // Shared by both the normal Decided list and the collapsed archive below — same card, same
   // handlers, just two different source arrays — so the two never drift into rendering a decided
@@ -758,13 +792,13 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
           — heading and all — now disappears entirely once its own count hits zero, rather than
           showing an empty "(0)" heading plus a "Nothing pending/decided" placeholder; if both are
           empty, this whole queue just renders nothing. */}
-      {q.pending.length > 0 && (
+      {pending.length > 0 && (
         <section className="mb-8">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted mb-2.5">
-            Pending ({q.pending.length})
+            Pending ({pending.length})
           </h2>
           <div className="space-y-3">
-            {groupByEmployee(q.pending).map((group) => {
+            {groupByEmployee(pending).map((group) => {
               const soleId = group.submissions.length === 1 ? group.submissions[0].id : null;
               const card = (
                 <Card
@@ -853,6 +887,17 @@ export default function TeamAvailabilityCards({ viewerId }: { viewerId: string }
             </div>
           )}
         </section>
+      )}
+
+      {/* Week-bounded mode only: the unbounded queue just renders nothing at all once both
+          sections are empty (see this component's own doc comment above), which reads fine
+          there since there's no week nav to make "empty" ambiguous. Here, with a week nav right
+          above this list, a silent blank space could easily read as "still loading" instead of
+          "nothing for this week" — so this mode says so explicitly. */}
+      {weekBounded && pending.length === 0 && decidedRecent.length === 0 && (
+        <div className="rounded-xl border border-border bg-surface p-6 text-sm text-muted">
+          No availability requests for this week.
+        </div>
       )}
     </>
   );
