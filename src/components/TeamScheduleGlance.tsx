@@ -200,18 +200,16 @@ export default function TeamScheduleGlance({
 
   // Oct 2026 (CB, circling "Scheduled today"/"In progress" on AdminHomeHero's own stat tiles:
   // "is it possible for us to... click in these areas... and we see who's clocked in currently
-  // and... who's scheduled today"): these two anchor ids are what those tiles scroll to (see
-  // AdminHomeHero's own doc comment — each tile is now a plain `<a href="#...">`) — same-page
-  // jump, no navigation, no extra fetch. "today-schedule" wraps BOTH sections
-  // below since "Scheduled today"'s own count (dashboard/page.tsx's scheduledTodayCount) is
-  // `shifts.length` as a whole, i.e. rightNowShifts + restOfToday combined, not just one of
-  // them. "working-now" is scoped to just the rightNowShifts section, since "In progress"'s own
-  // count is exactly `rightNowShifts.length` — same displayStatus === "IN_PROGRESS" filter, same
-  // number, so the tile and the section it jumps to never disagree.
+  // and... who's scheduled today"): a first attempt made these two ids same-page scroll targets
+  // for the stat tiles above; CB rejected that ("it's supposed to function like you can see the
+  // names... like it's on menu") and asked for an actual names-in-a-menu popover instead, which
+  // is what AdminHomeHero's own tiles now open directly from the same `todaysShifts` array this
+  // component renders — see that component's own doc comment. No more scroll-jump here, so this
+  // section no longer needs its own anchor ids.
   return (
-    <div id="today-schedule" className={className}>
+    <div className={className}>
       {rightNowShifts.length > 0 && (
-        <div id="working-now">
+        <div>
           <div className="flex items-baseline justify-between mb-2">
             <h2 className="text-sm font-medium text-muted">Who&apos;s working right now</h2>
             {fullScheduleLink}
