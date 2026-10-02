@@ -5,6 +5,7 @@ import { todayDateKey } from "@/lib/time";
 import { writeAuditLog } from "@/lib/audit-log";
 import { writeNotification } from "@/lib/notifications";
 import { dismiss as dismissKey, listDismissedKeys } from "@/lib/dashboard-dismissals";
+import { getAvatarPublicUrl } from "@/lib/storage";
 import { Prisma } from "@prisma/client";
 import type {
   AdminAvailabilityDTO,
@@ -1121,7 +1122,9 @@ export async function getAvailabilitySubmissionForReview(
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const row = await tx.availabilitySubmission.findUnique({
       where: { id: submissionId },
-      include: { employee: { select: { firstName: true, lastName: true, preferredName: true } } },
+      include: {
+        employee: { select: { firstName: true, lastName: true, preferredName: true, avatarStorageKey: true } },
+      },
     });
     if (!row) return null;
     const names = await resolveReviewerNames(tx, [row]);
@@ -1129,6 +1132,7 @@ export async function getAvailabilitySubmissionForReview(
       ...toDTO(row, names),
       employeeId: row.employeeId,
       employeeName: `${row.employee.preferredName || row.employee.firstName} ${row.employee.lastName}`,
+      employeeAvatarUrl: row.employee.avatarStorageKey ? getAvatarPublicUrl(row.employee.avatarStorageKey) : null,
     };
   });
 }
@@ -1174,7 +1178,9 @@ export async function listAdminAvailability(
     const [pending, decided] = await Promise.all([
       tx.availabilitySubmission.findMany({
         where: { status: "PENDING", ...employeeFilter },
-        include: { employee: { select: { firstName: true, lastName: true, preferredName: true } } },
+        include: {
+          employee: { select: { firstName: true, lastName: true, preferredName: true, avatarStorageKey: true } },
+        },
         orderBy: { submittedAt: "asc" },
       }),
       tx.availabilitySubmission.findMany({
@@ -1182,17 +1188,24 @@ export async function listAdminAvailability(
         // active/decided interface" — excluded here the same way PENDING already is, so a
         // removed request doesn't reappear in Decided right after an admin clears it out.
         where: { status: { notIn: ["PENDING", "REMOVED"] }, ...employeeFilter },
-        include: { employee: { select: { firstName: true, lastName: true, preferredName: true } } },
+        include: {
+          employee: { select: { firstName: true, lastName: true, preferredName: true, avatarStorageKey: true } },
+        },
         orderBy: { reviewedAt: "desc" },
         take: 200,
       }),
     ]);
 
     const names = await resolveReviewerNames(tx, [...pending, ...decided]);
+    // Oct 2026 (CB: "also make sure the profile pictures are consistant if they changed it
+    // throughout") — same avatarStorageKey-to-public-URL resolution as every other admin DTO's
+    // avatarUrl (see toAdminDTO's own comment in src/lib/shifts.ts); TeamAvailabilityCards'
+    // Card component reads this as employeeAvatarUrl.
     const toAdminDTO = (r: (typeof pending)[number]): AdminAvailabilityDTO => ({
       ...toDTO(r, names),
       employeeId: r.employeeId,
       employeeName: `${r.employee.preferredName || r.employee.firstName} ${r.employee.lastName}`,
+      employeeAvatarUrl: r.employee.avatarStorageKey ? getAvatarPublicUrl(r.employee.avatarStorageKey) : null,
     });
 
     return { pending: pending.map(toAdminDTO), decided: decided.map(toAdminDTO) };
