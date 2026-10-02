@@ -96,6 +96,22 @@ model Employee {
   emergencyContactPhone String?
   emergencyContactRelation String?
 
+  // Notification preferences — My Profile > Notifications (CB, Oct 2026: "I kind of want a
+  // notifications tab... they could toggle on which notifications that they could have,"
+  // confirmed to route to "whichever number attached to their profile or email," i.e. the
+  // existing ttcEmail/workPhone/personalPhone fields above, NOT a separate contact field).
+  // Phase A (email only — "Email now, text later," confirmed via AskUserQuestion): these four
+  // gate the email side for clock-in, clock-out, announcement, and message notifications. All
+  // default true so nothing changes for anyone until they turn one off themselves; the two
+  // existing reminder emails (clock-in/out) already went out unconditionally before this
+  // existed, and the two new ones (announcement/message) start the same way everything else in
+  // this app does — on by default, opt-out rather than opt-in. A text-message column for each of
+  // these isn't added yet — there's no SMS provider wired up to read it (Phase B).
+  notifyClockInEmail      Boolean @default(true)
+  notifyClockOutEmail     Boolean @default(true)
+  notifyAnnouncementEmail Boolean @default(true)
+  notifyMessageEmail      Boolean @default(true)
+
   deactivatedAt DateTime? // set the instant HR ends access; checked on every request
 
   // Which Quick Actions tiles this person has chosen to keep on their own dashboard — CB,
@@ -362,6 +378,12 @@ model Shift {
   status ShiftStatus @default(UPCOMING)
 
   note String?
+
+  // Dedup stamp for the clock-in reminder (src/lib/clockin-reminders.ts) — one-shot-per-shift,
+  // same shape as TimeSession.reminderSentAt (clockout-reminders.ts). Replaces the older
+  // AvailabilitySubmission-keyed reminder in the now-retired shift-reminders.ts, which never
+  // cleared after convert-to-shift and could double-send alongside this one for the same shift.
+  clockInReminderSentAt DateTime?
 
   sourceAvailabilitySubmissionId String?
   sourceAvailabilitySubmission   AvailabilitySubmission? @relation(fields: [sourceAvailabilitySubmissionId], references: [id], onDelete: SetNull)
@@ -946,6 +968,13 @@ model Announcement {
   expirationDate DateTime?
   createdAt      DateTime  @default(now())
 
+  // Cron-gate stamp for the new announcement-notification dispatcher
+  // (src/lib/announcement-notifications.ts): publishDate can be future-dated, so notifying at
+  // createAnnouncement() call time would fire before anyone can actually see the post. A cron
+  // finds publishDate <= now() AND notifiedAt IS NULL, writes one Notification per resolved
+  // recipient, and stamps this — same one-shot shape as every other dedup column in this app.
+  notifiedAt DateTime?
+
   audiences AnnouncementAudience[]
 
   @@index([publishDate])
@@ -995,6 +1024,14 @@ enum NotificationType {
   DATE_TASK_ASSIGNED
   DATE_TASK_APPROVED
   DATE_TASK_RETURNED
+
+  // Added Oct 2026 for the Notifications preferences feature (My Profile > Notifications) —
+  // unlike the 13 values above, these two are the ones sendPendingNotificationEmails
+  // (src/lib/notification-emails.ts) checks a per-recipient preference for before emailing
+  // (Employee.notifyAnnouncementEmail / notifyMessageEmail) — every row still gets written
+  // in-app either way, same as everything else in this table.
+  ANNOUNCEMENT_POSTED
+  MESSAGE_RECEIVED
 }
 
 model Notification {
