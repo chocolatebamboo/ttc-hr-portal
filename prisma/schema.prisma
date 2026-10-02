@@ -231,6 +231,15 @@ enum TimeAuditAction {
   TIMESHEET_APPROVED
   TIMESHEET_RETURNED
   AUTO_CLOCK_OUT
+
+  // Added Oct 2026, CB: "once we approve that schedule beforehand... it should be marked as
+  // complete" once they clock out, not need a second manual Approve on top of the already-
+  // approved schedule. Recorded by applyClockAction (src/lib/time-actions.ts) in place of
+  // TIMESHEET_APPROVED specifically when nothing needed a human look — distinct from
+  // TIMESHEET_APPROVED (always has a real actorId: the supervisor/HR who reviewed it) so the
+  // audit trail can tell "the system approved this because it was clean" apart from an actual
+  // reviewer's decision.
+  TIMESHEET_AUTO_APPROVED
 }
 
 // Append-only: prisma/rls.sql grants no UPDATE/DELETE policy on this table to anyone, so an
