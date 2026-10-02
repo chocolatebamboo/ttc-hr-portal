@@ -290,9 +290,18 @@ function Card({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3 min-w-0 flex-1">
-          <span className="h-10 w-10 rounded-full bg-white/25 border border-white/40 flex items-center justify-center text-sm font-semibold text-white shrink-0">
-            {initialsOf(r.employeeName)}
-          </span>
+          {r.employeeAvatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- public storage URL
+            <img
+              src={r.employeeAvatarUrl}
+              alt=""
+              className="h-10 w-10 rounded-full object-cover border border-white/40 shrink-0"
+            />
+          ) : (
+            <span className="h-10 w-10 rounded-full bg-white/25 border border-white/40 flex items-center justify-center text-sm font-semibold text-white shrink-0">
+              {initialsOf(r.employeeName)}
+            </span>
+          )}
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
               <p className="text-base font-semibold text-white truncate">{r.employeeName}</p>
