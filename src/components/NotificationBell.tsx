@@ -31,15 +31,17 @@ import type { NotificationDTO, NotificationType } from "@/types";
  */
 const POLL_MS = 45_000;
 
-// Where clicking a notification should take you — keyed by targetType, with one override for
-// SHIFT_REQUEST_RECEIVED (the one Shift-targeted type whose recipient is the admin/supervisor who
-// created the shift, reviewing someone else's request, not the shift's own employee looking at
-// their schedule).
+// Where clicking a notification should take you — keyed by targetType, with overrides for the
+// two types whose recipient is the admin/supervisor reviewing someone ELSE's submission, not the
+// submission's own employee looking at their own schedule/availability: SHIFT_REQUEST_RECEIVED
+// (added Phase 2) and AVAILABILITY_SUBMITTED (added Oct 2026, same reasoning).
 function targetHref(n: NotificationDTO): string {
   if (n.targetType === "Shift") {
     return n.type === "SHIFT_REQUEST_RECEIVED" ? "/team/schedule" : "/schedule";
   }
-  if (n.targetType === "AvailabilitySubmission") return "/availability";
+  if (n.targetType === "AvailabilitySubmission") {
+    return n.type === "AVAILABILITY_SUBMITTED" ? "/admin/availability" : "/availability";
+  }
   if (n.targetType === "PtoRequest") return "/time-off";
   if (n.targetType === "DateTask") return "/dashboard";
   return "/dashboard";
@@ -74,6 +76,7 @@ const TYPE_TONE: Record<NotificationType, "positive" | "negative" | "neutral"> =
   DATE_TASK_RETURNED: "negative",
   ANNOUNCEMENT_POSTED: "neutral",
   MESSAGE_RECEIVED: "neutral",
+  AVAILABILITY_SUBMITTED: "neutral",
 };
 
 function Dot({ tone }: { tone: "positive" | "negative" | "neutral" }) {
