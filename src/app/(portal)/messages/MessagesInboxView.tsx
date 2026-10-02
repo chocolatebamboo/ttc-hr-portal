@@ -335,12 +335,17 @@ export default function MessagesInboxView({
           <button type="button" onClick={() => setOpenKey(null)} className="text-sm font-medium text-muted hover:text-accent-ink shrink-0">
             ← Back
           </button>
-          <span
-            className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0"
-            style={{ background: "var(--ttc-blue)" }}
-          >
-            {row.kind === "general" ? <UserCircleIcon className="h-4 w-4" /> : initialsOf(row.name)}
-          </span>
+          {row.kind !== "general" && entry?.avatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- public storage URL
+            <img src={entry.avatarUrl} alt="" className="h-8 w-8 rounded-full object-cover border border-border shrink-0" />
+          ) : (
+            <span
+              className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0"
+              style={{ background: "var(--ttc-blue)" }}
+            >
+              {row.kind === "general" ? <UserCircleIcon className="h-4 w-4" /> : initialsOf(row.name)}
+            </span>
+          )}
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold truncate">{row.name}</p>
             <p className="text-xs text-muted truncate">{subtitle}</p>
@@ -401,12 +406,17 @@ export default function MessagesInboxView({
         }`}
         style={active ? { boxShadow: "inset 3px 0 0 var(--ttc-blue)" } : undefined}
       >
-        <span
-          className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0"
-          style={{ background: "var(--ttc-blue)" }}
-        >
-          {row.kind === "general" ? <UserCircleIcon className="h-4 w-4" /> : initialsOf(row.name)}
-        </span>
+        {row.kind !== "general" && entry?.avatarUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element -- public storage URL
+          <img src={entry.avatarUrl} alt="" className="h-8 w-8 rounded-full object-cover border border-border shrink-0" />
+        ) : (
+          <span
+            className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0"
+            style={{ background: "var(--ttc-blue)" }}
+          >
+            {row.kind === "general" ? <UserCircleIcon className="h-4 w-4" /> : initialsOf(row.name)}
+          </span>
+        )}
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold truncate">{row.name}</p>
           <p className="text-xs text-muted truncate mt-0.5">{subtitle}</p>
@@ -433,12 +443,17 @@ export default function MessagesInboxView({
     return (
       <>
         <div className="flex items-center gap-3 px-5 py-3.5 border-b border-border shrink-0">
-          <span
-            className="h-9 w-9 rounded-full flex items-center justify-center text-sm font-semibold text-white shrink-0"
-            style={{ background: "var(--ttc-blue)" }}
-          >
-            {row.kind === "general" ? <UserCircleIcon className="h-5 w-5" /> : initialsOf(row.name)}
-          </span>
+          {row.kind !== "general" && entry?.avatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- public storage URL
+            <img src={entry.avatarUrl} alt="" className="h-9 w-9 rounded-full object-cover border border-border shrink-0" />
+          ) : (
+            <span
+              className="h-9 w-9 rounded-full flex items-center justify-center text-sm font-semibold text-white shrink-0"
+              style={{ background: "var(--ttc-blue)" }}
+            >
+              {row.kind === "general" ? <UserCircleIcon className="h-5 w-5" /> : initialsOf(row.name)}
+            </span>
+          )}
           <div className="min-w-0">
             <p className="text-sm font-semibold truncate">{row.name}</p>
             <p className="text-xs text-muted truncate">
