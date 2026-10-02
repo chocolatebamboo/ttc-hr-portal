@@ -32,8 +32,17 @@ function useLiveClock() {
  * today's date — this component has no fetch of its own for those, only for the "Schedule
  * someone" sheet's team-member list (ScheduleSomeoneSheet's own fetch). After a shift is
  * created, `router.refresh()` re-runs the server page (fresh stats, fresh "Who's working right
- * now" list below) rather than this component trying to patch either in place from a client
- * response shaped for a different DTO.
+ * now" list below).
+ *
+ * Both stat tiles (Oct 2026, CB, circling them on a screenshot: "is it possible for us to...
+ * click in these areas... and we see who's clocked in currently and... who's scheduled today"):
+ * plain same-page `<a href="#...">` anchors, not a route change — "Scheduled today" jumps to
+ * `#today-schedule` and "In progress" to `#working-now`, both ids TeamScheduleGlance renders
+ * right below this hero on the same dashboard page (see that component's own doc comment on
+ * exactly why those two ids cover exactly what these two numbers count, no more no less). No
+ * new fetch, no new page — just scrolling to data that's already on screen. (Unrelated to the
+ * `router.refresh()` just above, which is only about the "Schedule someone" sheet's own create
+ * flow — that still patches neither stat in place, it just re-runs the server page.)
  *
  * `clocksIn` is Employee.clocksIn (see its own doc comment in prisma/schema.prisma) — CB:
  * "Shawn the founder will never clock in... Randall [won't either]... but Daijour we also need
@@ -90,14 +99,20 @@ export default function AdminHomeHero({
           </div>
 
           <div className="flex gap-2.5 mb-5">
-            <div className="flex-1 rounded-2xl bg-white/15 px-3.5 py-2.5">
+            <a
+              href="#today-schedule"
+              className="flex-1 rounded-2xl bg-white/15 px-3.5 py-2.5 block active:bg-white/25 transition-colors"
+            >
               <p className="text-2xl font-bold tabular-nums leading-none">{scheduledToday}</p>
               <p className="text-[11px] font-medium text-white/80 mt-1">Scheduled today</p>
-            </div>
-            <div className="flex-1 rounded-2xl bg-white/15 px-3.5 py-2.5">
+            </a>
+            <a
+              href="#working-now"
+              className="flex-1 rounded-2xl bg-white/15 px-3.5 py-2.5 block active:bg-white/25 transition-colors"
+            >
               <p className="text-2xl font-bold tabular-nums leading-none">{inProgress}</p>
               <p className="text-[11px] font-medium text-white/80 mt-1">In progress</p>
-            </div>
+            </a>
           </div>
 
           <button
@@ -132,14 +147,14 @@ export default function AdminHomeHero({
             <p className="text-xs uppercase tracking-wide text-muted/60">{liveDate}</p>
           </div>
           <div className="flex gap-5">
-            <div className="text-right">
+            <a href="#today-schedule" className="text-right block hover:opacity-70 transition-opacity">
               <p className="text-lg font-semibold tabular-nums">{scheduledToday}</p>
               <p className="text-xs text-muted">Scheduled today</p>
-            </div>
-            <div className="text-right">
+            </a>
+            <a href="#working-now" className="text-right block hover:opacity-70 transition-opacity">
               <p className="text-lg font-semibold tabular-nums">{inProgress}</p>
               <p className="text-xs text-muted">In progress</p>
-            </div>
+            </a>
           </div>
         </div>
 
