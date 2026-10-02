@@ -53,6 +53,36 @@ export function assertCanAccessReports(actor: CurrentEmployee): void {
 }
 
 /**
+ * Oct 2026 (CB, asked directly after flagging that Daijour's sidebar was missing Attendance and
+ * PTO Management: "Yes — give him Attendance + PTO Management for his own team"): same three-
+ * role "staff" cut canAccessReports already draws, given its own name per this file's existing
+ * convention (see canAccessReports's own doc comment on why a logically-identical check still
+ * gets its own name per capability). Safe for the same reason canAccessReports is: the two admin
+ * pages this gates (listAdminAttendance, listAdminPto) both narrow what a non-admin actually
+ * sees down to their own direct reports — isAdmin(actor) ? {} : { supervisorId: actor.id }, the
+ * same shape listAdminShifts/listCurrentlyClockedIn/getPayrollHoursReport already use — not a
+ * blanket grant of company-wide data to a Supervisor.
+ */
+export function canAccessAttendance(actor: CurrentEmployee): boolean {
+  return isAdmin(actor) || actor.role === "SUPERVISOR";
+}
+
+export function assertCanAccessAttendance(actor: CurrentEmployee): void {
+  if (!canAccessAttendance(actor)) throw new ForbiddenError();
+}
+
+/** Same rule and reasoning as canAccessAttendance just above, for the standalone PTO Management
+ *  admin page (src/app/(portal)/admin/pto) — kept as its own named function rather than reusing
+ *  canAccessAttendance so call sites read as what they're actually gating. */
+export function canAccessPtoManagement(actor: CurrentEmployee): boolean {
+  return isAdmin(actor) || actor.role === "SUPERVISOR";
+}
+
+export function assertCanAccessPtoManagement(actor: CurrentEmployee): void {
+  if (!canAccessPtoManagement(actor)) throw new ForbiddenError();
+}
+
+/**
  * Phase 5c (CB, Sept 2026): "an option to add an internal comment" on a direct message,
  * confirmed scope "hidden from the team member." Same three-role "staff" cut canAccessReports
  * already draws (isAdmin() plus SUPERVISOR) — given its own name here since internal DM notes
