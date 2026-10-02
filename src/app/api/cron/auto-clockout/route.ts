@@ -3,7 +3,7 @@ import { autoCloseStaleClockIns } from "@/lib/auto-clockout";
 
 /**
  * POST /api/cron/auto-clockout — hit on a schedule by the same GitHub Actions workflow as
- * clockout-reminders/shift-reminders (see README's "Auto clock-out" section), not by any
+ * clockout-reminders/clockin-reminders (see README's "Auto clock-out" section), not by any
  * user-facing UI. There's no signed-in employee behind this call, so it's protected by a shared
  * secret (CRON_SECRET) instead of requireEmployee()/assertIsAdmin() — same shape as the other
  * two cron routes.
