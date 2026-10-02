@@ -547,7 +547,8 @@ model DirectMessageReaction {
  *  the database-level backstop. Deliberately flat (no reply-to-a-comment, no reactions-on-a-
  *  comment) and delete-less, same shape DateTaskComment already uses for a task's own comment
  *  thread — this is a note, not a second chat. Cascades with its message like every other DM
- *  child row (reactions, above). */
+ *  child row (reactions, above).
+ */
 model DirectMessageComment {
   id        String        @id @default(uuid())
   messageId String
@@ -1032,6 +1033,15 @@ enum NotificationType {
   // in-app either way, same as everything else in this table.
   ANNOUNCEMENT_POSTED
   MESSAGE_RECEIVED
+
+  // Added Oct 2026, CB: "admin should get a notification... when someone makes their schedule" —
+  // this app's closest equivalent is an employee submitting their Availability for review (the
+  // step that later becomes a confirmed Shift once approved — see Shift's own doc comment).
+  // Emailed unconditionally, same as the 13 original values above (not added to
+  // PREFERENCE_BY_TYPE in notification-emails.ts) — this is an admin/supervisor operational
+  // notification, not one of the two employee-facing self-service toggles on My Profile >
+  // Notifications.
+  AVAILABILITY_SUBMITTED
 }
 
 model Notification {
