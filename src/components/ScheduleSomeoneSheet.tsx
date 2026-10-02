@@ -139,12 +139,21 @@ export default function ScheduleSomeoneSheet({
                     checked={employeeId === e.id}
                     onChange={() => setEmployeeId(e.id)}
                   />
-                  <span
-                    className="h-7 w-7 rounded-full flex items-center justify-center text-[11px] font-semibold text-white shrink-0"
-                    style={{ background: colorFor(e.id) }}
-                  >
-                    {initialsOf(e.name)}
-                  </span>
+                  {e.avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- public storage URL
+                    <img
+                      src={e.avatarUrl}
+                      alt=""
+                      className="h-7 w-7 rounded-full object-cover border border-border shrink-0"
+                    />
+                  ) : (
+                    <span
+                      className="h-7 w-7 rounded-full flex items-center justify-center text-[11px] font-semibold text-white shrink-0"
+                      style={{ background: colorFor(e.id) }}
+                    >
+                      {initialsOf(e.name)}
+                    </span>
+                  )}
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-medium truncate">{e.name}</span>
                     {e.departmentName && (
