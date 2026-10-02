@@ -72,6 +72,8 @@ const TYPE_TONE: Record<NotificationType, "positive" | "negative" | "neutral"> =
   DATE_TASK_ASSIGNED: "neutral",
   DATE_TASK_APPROVED: "positive",
   DATE_TASK_RETURNED: "negative",
+  ANNOUNCEMENT_POSTED: "neutral",
+  MESSAGE_RECEIVED: "neutral",
 };
 
 function Dot({ tone }: { tone: "positive" | "negative" | "neutral" }) {
