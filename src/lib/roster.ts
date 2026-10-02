@@ -1,5 +1,6 @@
 import { withRlsContext } from "@/lib/db";
 import { isAdmin, ForbiddenError } from "@/lib/authorization";
+import { getAvatarPublicUrl } from "@/lib/storage";
 import type { CurrentEmployee, AssignmentOptionsDTO } from "@/types";
 
 /**
@@ -24,6 +25,7 @@ export async function listAssignmentOptions(
           lastName: true,
           preferredName: true,
           department: { select: { name: true } },
+          avatarStorageKey: true,
         },
         orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
       }),
@@ -35,6 +37,7 @@ export async function listAssignmentOptions(
         id: e.id,
         name: `${e.preferredName || e.firstName} ${e.lastName}`,
         departmentName: e.department?.name ?? null,
+        avatarUrl: e.avatarStorageKey ? getAvatarPublicUrl(e.avatarStorageKey) : null,
       })),
     };
   });
