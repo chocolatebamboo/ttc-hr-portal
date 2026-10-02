@@ -1,9 +1,9 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
 import { requireEmployeeOrRedirect } from "@/lib/auth";
 import { canAccessEmployeeRecords } from "@/lib/authorization";
 import { withRlsContext } from "@/lib/db";
 import { getAvatarPublicUrl } from "@/lib/storage";
+import BackLink from "@/components/BackLink";
 import ReviewEmployeeView from "./ReviewEmployeeView";
 
 /** Hand-declared rather than relying on inference through withRlsContext's callback — same
@@ -54,9 +54,10 @@ export default async function ReviewEmployeePage(
 
   return (
     <div className="max-w-3xl">
-      <Link href="/team" className="text-sm text-muted hover:text-accent-ink mb-3 inline-block">
-        ← My Team
-      </Link>
+      {/* Oct 2026 (CB: "it needs to say like back or something... it should function like it
+          going back to the original place that we clicked"): see BackLink's own doc comment —
+          this no longer assumes every visit started at /team. */}
+      <BackLink fallbackHref="/team" />
       {/* Oct 2026 (CB, on this page: "it's too wordy... I want it to be widgetized and I want
           it to be clean"): Timesheet/Time Off/Availability/Notes used to stack here as four
           always-open sections, one after another under a plain text label — a long scroll of
