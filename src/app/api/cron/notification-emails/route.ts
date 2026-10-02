@@ -3,8 +3,8 @@ import { sendPendingNotificationEmails } from "@/lib/notification-emails";
 
 /**
  * POST /api/cron/notification-emails — hit on a schedule by the same GitHub Actions workflow
- * that already pings the other three reminder-style endpoints (.github/workflows/
- * reminder-emails.yml), not by any user-facing UI. Same shape as /api/cron/shift-reminders and
+ * that already pings the other reminder-style endpoints (.github/workflows/
+ * reminder-emails.yml), not by any user-facing UI. Same shape as /api/cron/clockin-reminders and
  * /api/cron/clockout-reminders: no signed-in employee behind this call, so it's protected by the
  * same shared secret (CRON_SECRET) instead of requireEmployee()/assertIsAdmin() — see README's
  * "Notification emails" section.
