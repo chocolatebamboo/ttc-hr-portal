@@ -11,18 +11,31 @@ const SYSTEM_ACTOR = { employeeId: "system:notification-email", role: "SUPER_ADM
 export interface NotificationEmailResult {
   checked: number;
   sent: number;
+  skipped: number;
   failed: { notificationId: string; error: string }[];
 }
+
+/** My Profile > Notifications (CB, Oct 2026) added two new NotificationType values
+ *  (ANNOUNCEMENT_POSTED, MESSAGE_RECEIVED) that — unlike the 12 existing ones, which this job
+ *  still emails unconditionally exactly as it always has — are gated on a per-recipient
+ *  preference. Keyed by type rather than adding a 13th/14th special case inline, so a future
+ *  preference-gated type is one more entry here, not another branch in the loop below. */
+const PREFERENCE_BY_TYPE: Partial<Record<string, "notifyAnnouncementEmail" | "notifyMessageEmail">> = {
+  ANNOUNCEMENT_POSTED: "notifyAnnouncementEmail",
+  MESSAGE_RECEIVED: "notifyMessageEmail",
+};
 
 /**
  * CB, Sept 2026: "we need to make sure that any notification goes to their email as well so
  * they know." Every notification in this app already goes through writeNotification
- * (src/lib/notifications.ts) at one shared call site, so rather than teaching each of its 13
- * NotificationType call sites (src/lib/shifts.ts, availability.ts, pto-actions.ts, date-tasks.ts)
- * to also send its own email, this job emails whatever writeNotification already wrote —
- * same title/body text a person sees in the in-app bell feed, reused as-is for the email subject/
- * body (every one of those 13 call sites already writes title/body as a complete, standalone
- * sentence, not a UI fragment, so nothing needs rewording for email).
+ * (src/lib/notifications.ts) at one shared call site, so rather than teaching each of its
+ * NotificationType call sites (src/lib/shifts.ts, availability.ts, pto-actions.ts, date-tasks.ts,
+ * and — as of Oct 2026 — direct-messages.ts and announcement-notifications.ts) to also send its
+ * own email, this job emails whatever writeNotification already wrote — same title/body text a
+ * person sees in the in-app bell feed, reused as-is for the email subject/body (every call site
+ * already writes title/body as a complete, standalone sentence, not a UI fragment, so nothing
+ * needs rewording for email). The two Oct 2026 types are the only ones this job doesn't always
+ * email — see PREFERENCE_BY_TYPE above.
  *
  * Deliberately async/batched here rather than sent inline from inside writeNotification's own
  * transaction: writeNotification runs INSIDE the same transaction as the real mutation it's a
@@ -48,14 +61,32 @@ export async function sendPendingNotificationEmails(): Promise<NotificationEmail
       where: { emailedAt: null },
       orderBy: { createdAt: "asc" },
       include: {
-        recipient: { select: { firstName: true, preferredName: true, ttcEmail: true } },
+        recipient: {
+          select: {
+            firstName: true,
+            preferredName: true,
+            ttcEmail: true,
+            notifyAnnouncementEmail: true,
+            notifyMessageEmail: true,
+          },
+        },
       },
     });
 
     const failed: NotificationEmailResult["failed"] = [];
     let sent = 0;
+    let skipped = 0;
 
     for (const notification of notifications) {
+      const preferenceField = PREFERENCE_BY_TYPE[notification.type];
+      if (preferenceField && !notification.recipient[preferenceField]) {
+        // Still in-app either way (writeNotification already wrote it) — just stamp emailedAt
+        // so a later run doesn't keep re-checking a row this recipient opted out of emailing.
+        await tx.notification.update({ where: { id: notification.id }, data: { emailedAt: new Date() } });
+        skipped++;
+        continue;
+      }
+
       const name = notification.recipient.preferredName || notification.recipient.firstName;
       try {
         await sendEmail({
@@ -77,7 +108,7 @@ export async function sendPendingNotificationEmails(): Promise<NotificationEmail
       }
     }
 
-    return { checked: notifications.length, sent, failed };
+    return { checked: notifications.length, sent, skipped, failed };
   });
 }
 
