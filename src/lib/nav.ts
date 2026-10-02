@@ -23,8 +23,9 @@ export interface NavItem {
   // Oct 2026 (CB, on the Team Availability admin nav item: "team availability need to be the
   // main page and the remaining pages under it... need to be like subpages... so it reads
   // cleanly"): optional nested items a NavItem can carry, rendered indented beneath their
-  // parent by RoleNav. Only ADMIN_NAV's Team Availability entry uses this today — everything
-  // else stays a flat, childless item, same as before.
+  // parent by RoleNav. ADMIN_NAV's Team Availability entry uses this, and (Oct 2026, same
+  // comparison extended to Daijour's own sidebar) so does SUPERVISOR_NAV's — everything else
+  // stays a flat, childless item, same as before.
   children?: NavItem[];
 }
 
@@ -58,24 +59,36 @@ export const EMPLOYEE_NAV: NavItem[] = [
 
 export const SUPERVISOR_NAV: NavItem[] = [
   { label: "My Team", href: "/team", icon: UsersIcon },
-  // Phase 1 of the scheduling workflow rebuild — confirmed shifts across a supervisor's own
-  // reports. At /team/schedule rather than /admin/schedule: this page is for supervisors too
-  // (client spec: "Supervisor: Manage... shifts... for Team Members under their supervision"),
-  // not admin-only the way the rest of ADMIN_NAV below is, so it sits alongside /team instead
-  // of under the admin-only URL space. Same href in ADMIN_NAV below — one page, gated to
-  // whichever of the two roles is actually viewing it, not two competing pages.
-  { label: "Team Schedule", href: "/team/schedule", icon: CalendarIcon },
-  // Added Oct 2026 (CB, after flagging that Daijour's sidebar was missing Attendance and PTO
-  // Management: "give him Attendance + PTO Management for his own team"): same hrefs ADMIN_NAV
-  // nests under "Team Availability" below, flat here instead — SUPERVISOR_NAV has never had a
-  // nested group, and there's no supervisor-facing "Team Availability" landing page the way
-  // ADMIN_NAV's parent links to /admin/availability. Each page itself narrows to the caller's
-  // own direct reports (see canAccessAttendance/canAccessPtoManagement in
-  // src/lib/authorization.ts and the scoping in listAdminAttendance/listAdminPto) — this is a
-  // path to data Daijour already has real authority over elsewhere (his own reports' timesheets
-  // and PTO via /team/[employeeId]), not new access.
-  { label: "Attendance", href: "/admin/attendance", icon: ClockIcon },
-  { label: "PTO Management", href: "/admin/pto", icon: CalendarIcon },
+  // Restructured (CB, Oct 2026, comparing Daijour's sidebar screenshot to her own admin one:
+  // "I'm not seeing daijour... it's not looking exactly kind of like mine where the team
+  // availability is the main and then the breakdown"): same nested shape ADMIN_NAV's own Team
+  // Availability group uses below — Attendance, PTO Management and Team Schedule as this
+  // parent's children, not three flat, same-weight items the way this list briefly had them
+  // (Oct 2026, "give him Attendance + PTO Management for his own team" — added flat at first
+  // because there was no supervisor-facing /admin/availability landing page for a parent link to
+  // point at; canAccessTeamAvailability in src/lib/authorization.ts opened that page to a
+  // Supervisor specifically so this restructure could match ADMIN_NAV for real, not just visually).
+  // Each child page independently narrows to the caller's own direct reports (see
+  // canAccessAttendance/canAccessPtoManagement/canAccessTeamAvailability and the scoping in
+  // listAdminAttendance/listAdminPto/listAdminAvailability) — this is a path to data Daijour
+  // already has real authority over elsewhere (his own reports' timesheets, PTO and availability
+  // via /team/[employeeId]), not new access.
+  {
+    label: "Team Availability",
+    href: "/admin/availability",
+    icon: CalendarIcon,
+    children: [
+      { label: "Attendance", href: "/admin/attendance", icon: ClockIcon },
+      { label: "PTO Management", href: "/admin/pto", icon: CalendarIcon },
+      // Phase 1 of the scheduling workflow rebuild — confirmed shifts across a supervisor's own
+      // reports. At /team/schedule rather than /admin/schedule: this page is for supervisors too
+      // (client spec: "Supervisor: Manage... shifts... for Team Members under their
+      // supervision"), not admin-only the way the rest of this nav is. Same href ADMIN_NAV uses
+      // below — one page, gated to whichever of the two roles is actually viewing it, not two
+      // competing pages.
+      { label: "Team Schedule", href: "/team/schedule", icon: CalendarIcon },
+    ],
+  },
   // Found missing Oct 2026 (CB: "did you make sure that Daijour's role... is looking like the
   // admin"): /admin/reports/page.tsx has granted a Supervisor this page, scoped to their own team
   // (canAccessReports), ever since Correction brief #8 — but this sidebar list was never updated
