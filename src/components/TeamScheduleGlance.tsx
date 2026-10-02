@@ -143,12 +143,21 @@ const UPCOMING_COLLAPSED_COUNT = 4;
 function ShiftGlanceRow({ s }: { s: AdminShiftDTO }) {
   return (
     <Link href={`/team/${s.employeeId}`} className="flex items-center gap-2.5 px-4 py-3 hover:bg-black/[0.02]">
-      <span
-        className="h-9 w-9 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0"
-        style={{ background: colorFor(s.employeeId) }}
-      >
-        {initialsOf(s.employeeName)}
-      </span>
+      {s.employeeAvatarUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element -- public storage URL
+        <img
+          src={s.employeeAvatarUrl}
+          alt=""
+          className="h-9 w-9 rounded-full object-cover border border-border shrink-0"
+        />
+      ) : (
+        <span
+          className="h-9 w-9 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0"
+          style={{ background: colorFor(s.employeeId) }}
+        >
+          {initialsOf(s.employeeName)}
+        </span>
+      )}
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold truncate">{s.employeeName}</p>
         <p className="text-xs text-muted truncate">{s.employeeJobTitle}</p>
@@ -229,12 +238,21 @@ export default function TeamScheduleGlance({
                 href={`/team/schedule?employeeId=${g.employeeId}`}
                 className="flex items-center gap-2.5 px-4 py-3 hover:bg-black/[0.02]"
               >
-                <span
-                  className="h-9 w-9 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0"
-                  style={{ background: colorFor(g.employeeId) }}
-                >
-                  {initialsOf(g.employeeName)}
-                </span>
+                {g.nextShift.employeeAvatarUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- public storage URL
+                  <img
+                    src={g.nextShift.employeeAvatarUrl}
+                    alt=""
+                    className="h-9 w-9 rounded-full object-cover border border-border shrink-0"
+                  />
+                ) : (
+                  <span
+                    className="h-9 w-9 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0"
+                    style={{ background: colorFor(g.employeeId) }}
+                  >
+                    {initialsOf(g.employeeName)}
+                  </span>
+                )}
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold truncate">{g.employeeName}</p>
                   <p className="text-xs text-muted truncate">
