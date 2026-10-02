@@ -1,0 +1,12 @@
+-- CB, Oct 2026: "once we approve that schedule beforehand... they should be able to clock in and
+-- clock out... it should be marked as complete" around clock-out time, not require a second
+-- manual Approve on top of the schedule already being approved. Today applyClockAction
+-- (src/lib/time-actions.ts) puts EVERY clock-out into AWAITING_APPROVAL, exception or not — this
+-- adds the one new TimeAuditAction value the fix needs to record a day that got approved by the
+-- system rather than a human reviewer, so the audit trail (and anyone reading it later) can tell
+-- the difference from a real TIMESHEET_APPROVED decision a supervisor/HR actually made.
+--
+-- Informational only — already applied directly to the live Supabase database via
+-- mcp__Supabase__apply_migration (this project's Render build never runs `prisma migrate
+-- deploy`, only `prisma generate`).
+ALTER TYPE "TimeAuditAction" ADD VALUE IF NOT EXISTS 'TIMESHEET_AUTO_APPROVED';
