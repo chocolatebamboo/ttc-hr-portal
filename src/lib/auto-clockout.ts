@@ -38,6 +38,16 @@ export interface AutoClockoutResult {
  * themselves, so it's visibly different from a normal clock-out in the audit trail HR already
  * has (ReviewTimesheetView, etc.) rather than looking like an ordinary self-reported day.
  *
+ * Oct 2026: also flips this session's own isException/exceptionReason (same two columns an
+ * ordinary out-of-window clock-in already uses — see resolveClockInShift in
+ * src/lib/time-actions.ts), for two reasons: TimesheetTable already renders any isException
+ * session with a visible "Flagged: ..." chip, so this is now visible right on the timesheet
+ * itself instead of only in an audit table nothing in the UI reads; and applyClockAction's new
+ * auto-approve check (CB: "it should be marked as complete" once a clean clock-out happens)
+ * reads isException across every session in the entry to decide whether a later clock-out this
+ * same day can skip manual review — a capped, possibly-wrong auto-clockout session must never
+ * let a same-day reopen slip through as "clean."
+ *
  * Called by POST /api/cron/auto-clockout, on the same 15-minute GitHub Actions schedule as the
  * clock-out reminder and shift reminder jobs (see README's "Auto clock-out" section) — a session
  * is checked here well before 4 hours has genuinely passed, since it also needs to catch the
@@ -61,7 +71,11 @@ export async function autoCloseStaleClockIns(): Promise<AutoClockoutResult> {
 
         await tx.timeSession.update({
           where: { id: session.id },
-          data: { clockOut: cappedClockOut },
+          data: {
+            clockOut: cappedClockOut,
+            isException: true,
+            exceptionReason: `Automatically clocked out after being open ${AUTO_CLOCKOUT_CAP_MS / 3_600_000} hours.`,
+          },
         });
 
         const siblingSessions = await tx.timeSession.findMany({
