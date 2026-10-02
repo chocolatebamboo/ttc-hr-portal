@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { MegaphoneIcon, TrashIcon } from "@/components/icons";
+import { MegaphoneIcon, TrashIcon, ClockIcon } from "@/components/icons";
 import type {
   AnnouncementDTO,
   AnnouncementAdminDTO,
@@ -363,32 +363,17 @@ function ComposeAnnouncementForm({ onCreated }: { onCreated: () => void }) {
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="block text-sm font-medium mb-1.5">Visible to</label>
-          <select
-            value={audienceType}
-            onChange={(e) => setAudienceType(e.target.value as AnnouncementAudienceType)}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-accent"
-          >
-            <option value="EVERYONE">Everyone</option>
-            <option value="DEPARTMENTS">Specific department(s)</option>
-            <option value="EMPLOYEES">Specific team member(s)</option>
-          </select>
-        </div>
-        <div>
-          {/* Oct 2026 (CB: "should not be there forever"): leaving this blank no longer means
-              "never expires" — createAnnouncement (src/lib/announcements.ts) now defaults a
-              blank Expires to 7 days after the publish date, so the label says so rather than
-              leaving "optional" implying indefinite. */}
-          <label className="block text-sm font-medium mb-1.5">Expires (defaults to 7 days if left blank)</label>
-          <input
-            type="date"
-            value={expirationDate}
-            onChange={(e) => setExpirationDate(e.target.value)}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-accent"
-          />
-        </div>
+      <div>
+        <label className="block text-sm font-medium mb-1.5">Visible to</label>
+        <select
+          value={audienceType}
+          onChange={(e) => setAudienceType(e.target.value as AnnouncementAudienceType)}
+          className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-accent"
+        >
+          <option value="EVERYONE">Everyone</option>
+          <option value="DEPARTMENTS">Specific department(s)</option>
+          <option value="EMPLOYEES">Specific team member(s)</option>
+        </select>
       </div>
 
       {audienceType === "DEPARTMENTS" && (
@@ -441,6 +426,31 @@ function ComposeAnnouncementForm({ onCreated }: { onCreated: () => void }) {
           </div>
         </div>
       )}
+
+      {/* Oct 2026 (CB, after the "should not be there forever" default shipped: she still
+          wasn't noticing the field itself — "I don't see where it is... should be a feature
+          when creating an announcement"): the expiration date WAS already here, just reading
+          as one more plain field beside Visible to, easy to tab past. Pulled out of that row
+          into its own highlighted block — same border-accent/30 bg-accent/5 callout treatment
+          DocumentsView/AttendanceAdminView already use for something an admin shouldn't skim
+          past — with the default spelled out as a sentence rather than a parenthetical in a
+          label, and placed as the last decision before posting instead of a mid-form field. */}
+      <div className="rounded-xl border border-accent/30 bg-accent/5 p-4">
+        <div className="flex items-center gap-2 mb-1">
+          <ClockIcon className="h-4 w-4 text-accent-ink shrink-0" />
+          <span className="text-sm font-semibold text-accent-ink">How long should this run?</span>
+        </div>
+        <p className="text-xs text-muted mb-2.5">
+          Leave this blank and the post expires automatically 7 days after it goes up. Pick a
+          date to run it longer, or end it sooner.
+        </p>
+        <input
+          type="date"
+          value={expirationDate}
+          onChange={(e) => setExpirationDate(e.target.value)}
+          className="w-full sm:w-auto rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-accent"
+        />
+      </div>
 
       {status === "error" && (
         <p role="alert" className="text-sm text-accent">
