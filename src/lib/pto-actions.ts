@@ -2,6 +2,7 @@ import { withRlsContext } from "@/lib/db";
 import { isAdmin, canAccessPtoManagement, ForbiddenError } from "@/lib/authorization";
 import { writeAuditLog } from "@/lib/audit-log";
 import { writeNotification } from "@/lib/notifications";
+import { getAvatarPublicUrl } from "@/lib/storage";
 import type { AdminPtoRequestDTO, AdminPtoSummaryDTO, CurrentEmployee } from "@/types";
 
 export class InvalidPtoRequestError extends Error {
@@ -193,12 +194,18 @@ export async function listAdminPto(actor: CurrentEmployee): Promise<AdminPtoSumm
     // resolveReviewerNames pass), so a direct include is all this needs, pending rows included
     // even though theirs is always null — simpler than branching the include per query.
     const reviewerSelect = { select: { firstName: true, lastName: true, preferredName: true } } as const;
+    // Oct 2026 (CB: "also make sure the profile pictures are consistant if they changed it
+    // throughout") — shared by both queries below rather than repeated inline, now that it also
+    // carries avatarStorageKey for employeeAvatarUrl.
+    const employeeSelect = {
+      select: { firstName: true, lastName: true, preferredName: true, avatarStorageKey: true },
+    } as const;
     const employeeScope = isAdmin(actor) ? {} : { employee: { supervisorId: actor.id } };
     const [pending, decided] = await Promise.all([
       tx.ptoRequest.findMany({
         where: { status: "PENDING", ...employeeScope },
         include: {
-          employee: { select: { firstName: true, lastName: true, preferredName: true } },
+          employee: employeeSelect,
           reviewedBy: reviewerSelect,
         },
         orderBy: { createdAt: "asc" },
@@ -206,7 +213,7 @@ export async function listAdminPto(actor: CurrentEmployee): Promise<AdminPtoSumm
       tx.ptoRequest.findMany({
         where: { status: { in: ["APPROVED", "DENIED"] }, ...employeeScope },
         include: {
-          employee: { select: { firstName: true, lastName: true, preferredName: true } },
+          employee: employeeSelect,
           reviewedBy: reviewerSelect,
         },
         orderBy: { reviewedAt: "desc" },
@@ -218,6 +225,7 @@ export async function listAdminPto(actor: CurrentEmployee): Promise<AdminPtoSumm
       id: r.id,
       employeeId: r.employeeId,
       employeeName: `${r.employee.preferredName || r.employee.firstName} ${r.employee.lastName}`,
+      employeeAvatarUrl: r.employee.avatarStorageKey ? getAvatarPublicUrl(r.employee.avatarStorageKey) : null,
       type: r.type,
       startDate: r.startDate.toISOString(),
       endDate: r.endDate.toISOString(),
