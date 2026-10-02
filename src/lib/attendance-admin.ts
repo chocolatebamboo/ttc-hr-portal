@@ -1,15 +1,20 @@
 import { withRlsContext } from "@/lib/db";
-import { isAdmin, ForbiddenError } from "@/lib/authorization";
+import { isAdmin, canAccessAttendance, ForbiddenError } from "@/lib/authorization";
 import { todayDateKey } from "@/lib/time";
 import type { AdminAttendanceRowDTO, CurrentEmployee, CurrentlyClockedInRowDTO } from "@/types";
 
 /**
- * HR-wide attendance dashboard (src/app/(portal)/admin/attendance) — one row per active
- * employee for the selected week, admin-only. Unlike the supervisor "My Team" list
- * (src/lib/roster.ts / /api/team/reports), this deliberately covers every active employee
- * regardless of who supervises them, which is exactly what is_admin() in prisma/rls.sql's
- * time_entry_select policy already grants: an admin identity can read every TimeEntry row,
- * so this needs no new RLS policy — just no employeeId filter in the query below.
+ * Attendance dashboard (src/app/(portal)/admin/attendance) — one row per active employee for
+ * the selected week. HR/Super Admin: every active employee, regardless of who supervises them,
+ * which is exactly what is_admin() in prisma/rls.sql's time_entry_select policy already grants.
+ *
+ * Opened to Supervisor too (Oct 2026, CB: "give him Attendance... for his own team" — see
+ * canAccessAttendance's own doc comment): narrowed to the caller's own direct reports via the
+ * explicit `supervisorId` filter below, same belt-and-suspenders shape as listCurrentlyClockedIn
+ * just below in this file (time_entry_select's RLS policy already independently grants a
+ * supervisor this same read for their own reports, but Employee rows themselves are visible
+ * company-wide via employee_select for directory purposes — see that policy's own comment in
+ * prisma/rls.sql — so this query can't just lean on RLS alone to narrow who shows up here).
  */
 export async function listAdminAttendance(
   actor: CurrentEmployee,
@@ -17,12 +22,13 @@ export async function listAdminAttendance(
   weekEnd: string,
   departmentId?: string
 ): Promise<AdminAttendanceRowDTO[]> {
-  if (!isAdmin(actor)) throw new ForbiddenError();
+  if (!canAccessAttendance(actor)) throw new ForbiddenError();
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const employees = await tx.employee.findMany({
       where: {
         deactivatedAt: null,
+        ...(isAdmin(actor) ? {} : { supervisorId: actor.id }),
         ...(departmentId ? { departmentId } : {}),
       },
       select: {
