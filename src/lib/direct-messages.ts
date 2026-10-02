@@ -3,6 +3,7 @@ import { withRlsContext } from "@/lib/db";
 import { getSignedDownloadUrl } from "@/lib/storage";
 import { isStaff, ForbiddenError } from "@/lib/authorization";
 import { formatTime12h } from "@/lib/availability-format";
+import { writeNotification } from "@/lib/notifications";
 import {
   threadKeyForDirectMessage,
   markThreadRead,
@@ -51,6 +52,23 @@ type NameFields = { firstName: string; lastName: string; preferredName: string |
 
 function nameOf(p: NameFields): string {
   return `${p.preferredName || p.firstName} ${p.lastName}`;
+}
+
+/** My Profile > Notifications (CB, Oct 2026): "if we get an announcement or if we get a
+ *  message, those are notifications too." The in-app Notification's body doubles as its email
+ *  body (src/lib/notification-emails.ts reuses title/body as-is), so this needs to read as a
+ *  complete, standalone line rather than a raw dump of a possibly-long message — same reasoning
+ *  every other writeNotification call site's title/body already follows. An attachment-only
+ *  message (no body text — postMessage allows that) falls back to naming the attachment rather
+ *  than showing nothing. */
+const MESSAGE_PREVIEW_MAX = 140;
+
+function messagePreview(body: string, attachmentName: string | null): string {
+  const trimmed = body.trim();
+  if (trimmed) {
+    return trimmed.length > MESSAGE_PREVIEW_MAX ? `${trimmed.slice(0, MESSAGE_PREVIEW_MAX)}…` : trimmed;
+  }
+  return attachmentName ? `Sent an attachment: ${attachmentName}` : "Sent you a message.";
 }
 
 /** The columns a reply preview needs from its target message — deliberately thin, matching
@@ -475,6 +493,20 @@ export async function postMessage(
       },
       include: MESSAGE_INCLUDE,
     });
+
+    // A scheduled message isn't "received" yet — sendDueScheduledMessages below writes this
+    // same notification once it actually goes out, not here at create time.
+    if (!scheduledFor) {
+      await writeNotification(tx, {
+        recipientId,
+        type: "MESSAGE_RECEIVED",
+        title: `New message from ${nameOf(row.sender)}`,
+        body: messagePreview(row.body, row.attachmentName),
+        targetType: "DirectMessage",
+        targetId: row.id,
+      });
+    }
+
     const labels = await resolveRefLabels(tx, [row]);
     return toDTO(row, labels, actor.id, isStaff(actor));
   });
@@ -504,29 +536,51 @@ export interface ScheduledMessageDispatchResult {
 }
 
 /**
- * Finds every DirectMessage whose `scheduledFor` has passed and hasn't gone out yet, and marks
- * it sent — "Schedule message" (Sept 2026, confirmed for deployment). Called by
+ * Finds every DirectMessage whose `scheduledFor` has passed and hasn't gone out yet, marks it
+ * sent, and writes the MESSAGE_RECEIVED notification postMessage would have written immediately
+ * had this not been scheduled — "Schedule message" (Sept 2026, confirmed for deployment); the
+ * notification side is new as of My Profile > Notifications (Oct 2026). Called by
  * POST /api/cron/scheduled-messages, meant to be hit every 10-15 minutes the same way the other
- * three /api/cron/* jobs already are (see README's "What actually calls those... cron endpoints
+ * /api/cron/* jobs already are (see README's "What actually calls those... cron endpoints
  * on a schedule") — a message scheduled for, say, 3:00 PM goes out sometime within that same
- * window, not necessarily on the exact minute. A plain updateMany rather than one row at a time:
- * there's nothing per-row to do besides the timestamp flip (no email, no side effect), so one
- * bulk write is both simpler and avoids any per-row failure needing its own retry bookkeeping.
+ * window, not necessarily on the exact minute.
+ *
+ * A per-row loop now rather than the single bulk updateMany this used before writeNotification
+ * had anything to do per row: each message's own sender/body is needed for its notification
+ * text, and writeNotification (src/lib/notifications.ts) is only ever called per-recipient
+ * anyway, so there's no bulk equivalent to fall back to even if a single query still finds every
+ * due row up front the same way.
  */
 export async function sendDueScheduledMessages(): Promise<ScheduledMessageDispatchResult> {
   return withRlsContext(SCHEDULED_MESSAGE_SYSTEM_ACTOR, async (tx) => {
-    const due: { id: string }[] = await tx.directMessage.findMany({
+    const due = await tx.directMessage.findMany({
       where: { sentAt: null, scheduledFor: { lte: new Date() } },
-      select: { id: true },
+      select: {
+        id: true,
+        recipientId: true,
+        body: true,
+        attachmentName: true,
+        sender: { select: { firstName: true, lastName: true, preferredName: true } },
+      },
     });
     if (due.length === 0) {
       return { checked: 0, sent: 0 };
     }
-    const result = await tx.directMessage.updateMany({
-      where: { id: { in: due.map((d) => d.id) } },
-      data: { sentAt: new Date() },
-    });
-    return { checked: due.length, sent: result.count };
+
+    let sent = 0;
+    for (const message of due) {
+      await tx.directMessage.update({ where: { id: message.id }, data: { sentAt: new Date() } });
+      await writeNotification(tx, {
+        recipientId: message.recipientId,
+        type: "MESSAGE_RECEIVED",
+        title: `New message from ${nameOf(message.sender)}`,
+        body: messagePreview(message.body, message.attachmentName),
+        targetType: "DirectMessage",
+        targetId: message.id,
+      });
+      sent++;
+    }
+    return { checked: due.length, sent };
   });
 }
 
