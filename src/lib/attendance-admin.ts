@@ -1,6 +1,7 @@
 import { withRlsContext } from "@/lib/db";
 import { isAdmin, canAccessAttendance, ForbiddenError } from "@/lib/authorization";
 import { todayDateKey } from "@/lib/time";
+import { getAvatarPublicUrl } from "@/lib/storage";
 import type { AdminAttendanceRowDTO, CurrentEmployee, CurrentlyClockedInRowDTO } from "@/types";
 
 /**
@@ -38,6 +39,7 @@ export async function listAdminAttendance(
         preferredName: true,
         jobTitle: true,
         department: { select: { name: true } },
+        avatarStorageKey: true,
       },
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
     });
@@ -83,6 +85,7 @@ export async function listAdminAttendance(
       department: e.department?.name ?? null,
       awaitingApprovalCount: awaitingByEmployee.get(e.id) ?? 0,
       missingClockOutCount: missingByEmployee.get(e.id) ?? 0,
+      avatarUrl: e.avatarStorageKey ? getAvatarPublicUrl(e.avatarStorageKey) : null,
     }));
   });
 }
