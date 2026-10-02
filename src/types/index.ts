@@ -185,6 +185,14 @@ export interface MyProfileDTO {
    *  doesn't supervise others. Sidebar-only, read-only; My Profile has no path to reassign a
    *  report's supervisor (that's the Employees admin page). */
   directReports: { id: string; name: string; jobTitle: string }[];
+  /** My Profile > Notifications (CB, Oct 2026) — email toggles for the four notification kinds.
+   *  Always routes to the fields already above (ttcEmail / workPhone / personalPhone), never a
+   *  separate contact field — confirmed: "whichever number attached to their profile or email."
+   *  Phase A (email only); a text-message toggle isn't here yet (Phase B, no provider set up). */
+  notifyClockInEmail: boolean;
+  notifyClockOutEmail: boolean;
+  notifyAnnouncementEmail: boolean;
+  notifyMessageEmail: boolean;
 }
 
 /** The fields My Profile actually lets you change — see enforce_employee_self_update() in
@@ -197,6 +205,10 @@ export interface UpdateMyProfileInput {
   emergencyContactName?: string;
   emergencyContactPhone?: string;
   emergencyContactRelation?: string;
+  notifyClockInEmail?: boolean;
+  notifyClockOutEmail?: boolean;
+  notifyAnnouncementEmail?: boolean;
+  notifyMessageEmail?: boolean;
 }
 
 export interface DirectReportDTO {
@@ -1115,7 +1127,9 @@ export type NotificationType =
   | "PTO_DENIED"
   | "DATE_TASK_ASSIGNED"
   | "DATE_TASK_APPROVED"
-  | "DATE_TASK_RETURNED";
+  | "DATE_TASK_RETURNED"
+  | "ANNOUNCEMENT_POSTED"
+  | "MESSAGE_RECEIVED";
 
 export interface NotificationDTO {
   id: string;
