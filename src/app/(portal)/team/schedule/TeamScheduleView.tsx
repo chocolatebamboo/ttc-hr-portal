@@ -186,7 +186,7 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
   // ordinary empty state below rather than showing a banner for nobody.
   const isSingleEmployeeView = employeeFilter !== "" && filtered.length > 0;
   const singleEmployeeInfo = isSingleEmployeeView
-    ? { name: filtered[0].employeeName, jobTitle: filtered[0].employeeJobTitle }
+    ? { name: filtered[0].employeeName, jobTitle: filtered[0].employeeJobTitle, avatarUrl: filtered[0].employeeAvatarUrl }
     : null;
   const singleEmployeeMissedCount = isSingleEmployeeView
     ? filtered.filter((s) => s.displayStatus === "MISSED").length
@@ -215,6 +215,7 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
         employeeId: id,
         name: group[0].employeeName,
         jobTitle: group[0].employeeJobTitle,
+        avatarUrl: group[0].employeeAvatarUrl,
         shifts: group,
         missedCount: group.filter((s) => s.displayStatus === "MISSED").length,
       };
@@ -726,9 +727,18 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
               style={{ background: "linear-gradient(135deg, var(--ttc-pink-ink), var(--ttc-pink))" }}
             >
               <div className="flex items-center gap-3.5">
-                <span className="h-12 w-12 rounded-xl bg-white shrink-0 flex items-center justify-center">
-                  <span className="font-serif font-bold text-base text-accent-ink">{initialsOf(singleEmployeeInfo.name) || "?"}</span>
-                </span>
+                {singleEmployeeInfo.avatarUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- public storage URL
+                  <img
+                    src={singleEmployeeInfo.avatarUrl}
+                    alt=""
+                    className="h-12 w-12 rounded-xl object-cover border border-white/40 shrink-0"
+                  />
+                ) : (
+                  <span className="h-12 w-12 rounded-xl bg-white shrink-0 flex items-center justify-center">
+                    <span className="font-serif font-bold text-base text-accent-ink">{initialsOf(singleEmployeeInfo.name) || "?"}</span>
+                  </span>
+                )}
                 <div className="min-w-0">
                   <p className="font-serif text-lg font-bold text-white truncate">{singleEmployeeInfo.name}</p>
                   <p className="text-sm text-white/85 truncate">{singleEmployeeInfo.jobTitle}</p>
@@ -758,12 +768,17 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
             {groupedByPerson.map((group) => (
               <div key={group.employeeId} className="bg-surface border border-border rounded-xl overflow-hidden">
                 <div className="flex items-center gap-3 px-5 py-3.5 bg-black/[0.02] border-b border-border">
-                  <span
-                    className="h-9 w-9 rounded-full shrink-0 flex items-center justify-center text-white text-xs font-semibold"
-                    style={{ background: "linear-gradient(135deg, var(--ttc-pink-ink), var(--ttc-pink))" }}
-                  >
-                    {initialsOf(group.name) || "?"}
-                  </span>
+                  {group.avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- public storage URL
+                    <img src={group.avatarUrl} alt="" className="h-9 w-9 rounded-full object-cover border border-border shrink-0" />
+                  ) : (
+                    <span
+                      className="h-9 w-9 rounded-full shrink-0 flex items-center justify-center text-white text-xs font-semibold"
+                      style={{ background: "linear-gradient(135deg, var(--ttc-pink-ink), var(--ttc-pink))" }}
+                    >
+                      {initialsOf(group.name) || "?"}
+                    </span>
+                  )}
                   <div className="min-w-0 flex-1">
                     <p className="font-serif font-bold text-[15px] truncate">{group.name}</p>
                     <p className="text-xs text-muted truncate">{group.jobTitle}</p>
