@@ -1,0 +1,15 @@
+-- CB, Oct 2026: "admin should get a notification... when someone makes their schedule" — the
+-- app's closest equivalent to an employee "making their schedule" is submitting their weekly
+-- Availability for review (the step that later becomes a confirmed Shift once an admin/
+-- supervisor approves it — see Shift's own doc comment). Today submitAvailability() in
+-- src/lib/availability.ts created the row and nothing else; nobody who can review it ever found
+-- out it existed except by checking the Admin > Availability page themselves.
+--
+-- Informational only — already applied directly to the live Supabase database via
+-- mcp__Supabase__apply_migration (same reasoning as every prior phase's migration files: this
+-- project's Render build never runs `prisma migrate deploy`, only `prisma generate`).
+--
+-- Emailed unconditionally once added (not listed in notification-emails.ts's
+-- PREFERENCE_BY_TYPE) — an admin/supervisor operational notification, not one of the two
+-- employee-facing self-service toggles on My Profile > Notifications.
+ALTER TYPE "NotificationType" ADD VALUE IF NOT EXISTS 'AVAILABILITY_SUBMITTED';
