@@ -15,14 +15,17 @@ const SYSTEM_ACTOR = { employeeId: "system:clockout-reminder", role: "SUPER_ADMI
 export interface ClockoutReminderResult {
   checked: number;
   sent: number;
+  skipped: number;
   failed: { sessionId: string; error: string }[];
 }
 
 /**
  * Finds every open (no clockOut) TimeSession that's been running at least REMINDER_THRESHOLD_MS
- * and hasn't already gotten a reminder, emails the employee, and marks the session so a later
- * run doesn't send a second one for it. Called by POST /api/cron/clockout-reminders, which a
- * Render Cron Job hits on a schedule — see README's "Clock-out reminders" section.
+ * and hasn't already gotten a reminder, emails the employee (unless they've turned this off from
+ * My Profile > Notifications — Employee.notifyClockOutEmail, Oct 2026), and marks the session so
+ * a later run doesn't send a second one for it either way. Called by
+ * POST /api/cron/clockout-reminders, which a Render Cron Job hits on a schedule — see README's
+ * "Clock-out reminders" section.
  */
 export async function sendPendingClockoutReminders(): Promise<ClockoutReminderResult> {
   const cutoff = new Date(Date.now() - REMINDER_THRESHOLD_MS);
@@ -40,7 +43,7 @@ export async function sendPendingClockoutReminders(): Promise<ClockoutReminderRe
         timeEntry: {
           select: {
             employee: {
-              select: { firstName: true, preferredName: true, ttcEmail: true },
+              select: { firstName: true, preferredName: true, ttcEmail: true, notifyClockOutEmail: true },
             },
           },
         },
@@ -49,9 +52,18 @@ export async function sendPendingClockoutReminders(): Promise<ClockoutReminderRe
 
     const failed: ClockoutReminderResult["failed"] = [];
     let sent = 0;
+    let skipped = 0;
 
     for (const session of sessions) {
       const employee = session.timeEntry.employee;
+      // My Profile > Notifications (CB, Oct 2026) — stamp reminderSentAt either way so a later
+      // run doesn't keep re-checking a session whose employee has this turned off; just skip
+      // the actual email.
+      if (!employee.notifyClockOutEmail) {
+        await tx.timeSession.update({ where: { id: session.id }, data: { reminderSentAt: new Date() } });
+        skipped++;
+        continue;
+      }
       const name = employee.preferredName || employee.firstName;
       try {
         await sendEmail({
@@ -70,7 +82,7 @@ export async function sendPendingClockoutReminders(): Promise<ClockoutReminderRe
       }
     }
 
-    return { checked: sessions.length, sent, failed };
+    return { checked: sessions.length, sent, skipped, failed };
   });
 }
 
