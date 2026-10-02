@@ -5,19 +5,26 @@ name: Reminder emails
 # already has instead of adding a new paid resource or a new third-party service). Pings the
 # cron endpoints a Render Cron Job would've hit on a schedule:
 #   - POST /api/cron/clockout-reminders  (src/lib/clockout-reminders.ts — "you're still clocked in")
-#   - POST /api/cron/shift-reminders     (src/lib/shift-reminders.ts    — "your shift starts soon")
+#   - POST /api/cron/clockin-reminders   (src/lib/clockin-reminders.ts  — "your shift starts soon."
+#     Oct 2026: replaces the retired /api/cron/shift-reminders, same lead-time reminder but keyed
+#     on the Shift model instead of the older AvailabilitySubmission one — see that file's own
+#     doc comment for why.)
 #   - POST /api/cron/auto-clockout       (src/lib/auto-clockout.ts      — force-closes a session
 #     left open past 4 hours, per CB Sept 2026: "it went over twelve hours, and then it
 #     documented it to be twelve hours. I don't necessarily want that")
 #   - POST /api/cron/scheduled-messages  (src/lib/direct-messages.ts's sendDueScheduledMessages —
 #     "Schedule message," Sept 2026: dispatches any DM whose scheduledFor has passed. Not an
-#     email despite this workflow's name — same shared-secret shape as the other three, just a
+#     email despite this workflow's name — same shared-secret shape as the other jobs, just a
 #     different kind of "thing that happens on a timer" reusing the same free schedule.)
+#   - POST /api/cron/announcement-notifications (src/lib/announcement-notifications.ts — Oct 2026,
+#     My Profile > Notifications: notifies/emails the right recipients once a (possibly
+#     future-dated) announcement's publishDate actually arrives.)
 #   - POST /api/cron/notification-emails (src/lib/notification-emails.ts — CB, Sept 2026: "we
 #     need to make sure that any notification goes to their email as well so they know." Emails
 #     every in-app Notification (src/lib/notifications.ts's writeNotification — shift/availability/
-#     PTO/task events) that hasn't been emailed yet.)
-# All five are idempotent/self-limiting server-side (dedup tracking for the reminder and
+#     PTO/task/announcement/message events) that hasn't been emailed yet, per that recipient's own
+#     My Profile > Notifications preferences for the two Oct 2026 types.)
+# All six are idempotent/self-limiting server-side (dedup tracking for the reminder and
 # notification-email jobs, auto-clockout only ever touches a session that's already past its cap
 # so a late or doubled-up run can't force-close something early, and scheduled-messages only ever
 # flips a row that's still unsent past its own due time) and tolerate a few minutes of scheduling
@@ -48,9 +55,9 @@ jobs:
         run: |
           curl -sS -X POST https://ttc-hr-portal.onrender.com/api/cron/clockout-reminders \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
-      - name: Shift reminders
+      - name: Clock-in reminders
         run: |
-          curl -sS -X POST https://ttc-hr-portal.onrender.com/api/cron/shift-reminders \
+          curl -sS -X POST https://ttc-hr-portal.onrender.com/api/cron/clockin-reminders \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
       - name: Auto clock-out
         run: |
@@ -59,6 +66,10 @@ jobs:
       - name: Scheduled messages
         run: |
           curl -sS -X POST https://ttc-hr-portal.onrender.com/api/cron/scheduled-messages \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+      - name: Announcement notifications
+        run: |
+          curl -sS -X POST https://ttc-hr-portal.onrender.com/api/cron/announcement-notifications \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
       - name: Notification emails
         run: |
