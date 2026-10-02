@@ -60,9 +60,18 @@ export default function TeamAvailabilityRequestsSection({
                 style={{ background: `linear-gradient(150deg, ${tone.from} 0%, ${tone.to} 100%)` }}
               >
                 <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                  <span className="h-8 w-8 rounded-full bg-white/25 border border-white/40 flex items-center justify-center text-xs font-semibold text-white shrink-0">
-                    {initialsOf(group.employeeName)}
-                  </span>
+                  {group.submissions[0]?.employeeAvatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- public storage URL
+                    <img
+                      src={group.submissions[0].employeeAvatarUrl}
+                      alt=""
+                      className="h-8 w-8 rounded-full object-cover border border-white/40 shrink-0"
+                    />
+                  ) : (
+                    <span className="h-8 w-8 rounded-full bg-white/25 border border-white/40 flex items-center justify-center text-xs font-semibold text-white shrink-0">
+                      {initialsOf(group.employeeName)}
+                    </span>
+                  )}
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-white truncate">{group.employeeName}</p>
                     <p className="text-xs text-white/80 truncate">
