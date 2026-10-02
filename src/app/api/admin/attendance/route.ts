@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireEmployee } from "@/lib/auth";
-import { assertIsAdmin } from "@/lib/authorization";
+import { assertCanAccessAttendance } from "@/lib/authorization";
 import { listAdminAttendance } from "@/lib/attendance-admin";
 import { toErrorResponse } from "@/lib/api-errors";
 
-/** GET /api/admin/attendance?start=&end=&departmentId= — HR/Super Admin only. */
+/** GET /api/admin/attendance?start=&end=&departmentId= — HR/Super Admin, org-wide, or (Oct 2026)
+ *  a Supervisor, narrowed to their own direct reports — see listAdminAttendance's own doc
+ *  comment for the scoping. */
 export async function GET(request: NextRequest) {
   try {
     const employee = await requireEmployee();
-    assertIsAdmin(employee);
+    assertCanAccessAttendance(employee);
 
     const { searchParams } = new URL(request.url);
     const start = searchParams.get("start");
