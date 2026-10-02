@@ -262,6 +262,33 @@ export async function listAvailabilityForEmployee(actor: CurrentEmployee, employ
  * a changed schedule is a new submission that goes through review again rather than quietly
  * rewriting what a supervisor already signed off on.
  */
+/** Who should hear about a freshly-submitted Availability — every admin (SUPER_ADMIN/HR_ADMIN)
+ *  plus the submitter's own supervisor, if they have one. Deliberately the same set of people
+ *  assertCanReviewAvailability (src/lib/authorization.ts) already lets review this particular
+ *  employee's submission, just resolved the other direction: given the submitter, who can act on
+ *  it, rather than given a reviewer, can they act on this submitter. A supervisor who isn't this
+ *  employee's own supervisor never hears about it just because they supervise someone else. */
+async function resolveAvailabilityReviewerIds(tx: PrismaClient, employeeId: string): Promise<string[]> {
+  const submitter = await tx.employee.findUnique({ where: { id: employeeId }, select: { supervisorId: true } });
+  const admins = await tx.employee.findMany({
+    where: { role: { in: ["SUPER_ADMIN", "HR_ADMIN"] }, deactivatedAt: null },
+    select: { id: true },
+  });
+  const ids = new Set(admins.map((a) => a.id));
+  if (submitter?.supervisorId) ids.add(submitter.supervisorId);
+  return Array.from(ids);
+}
+
+/**
+ * CB, Oct 2026: "admin should get a notification... when someone makes their schedule." Writes
+ * one Notification (type AVAILABILITY_SUBMITTED) to every admin plus the submitter's own
+ * supervisor — see resolveAvailabilityReviewerIds just above — the same way every other
+ * create-a-thing-someone-else-needs-to-act-on call site in this app already notifies its
+ * reviewer (requestShiftChange/requestAvailabilityAdjustment/submitPtoRequest and friends), this
+ * one just had nobody listening on the admin side until now. Picked up by
+ * sendPendingNotificationEmails the same as everything else — see this type's own comment in
+ * prisma/schema.prisma for why it's emailed unconditionally rather than gated by a preference.
+ */
 export async function submitAvailability(
   actor: CurrentEmployee,
   input: { slots: AvailabilitySlot[]; note?: string }
@@ -278,6 +305,17 @@ export async function submitAvailability(
         dateDecisions: defaultDateDecisions(input.slots) as unknown as Prisma.InputJsonValue,
       },
     });
+    const reviewerIds = await resolveAvailabilityReviewerIds(tx, actor.id);
+    for (const recipientId of reviewerIds) {
+      await writeNotification(tx, {
+        recipientId,
+        type: "AVAILABILITY_SUBMITTED",
+        title: `${nameOf(actor)} submitted their availability`,
+        body: input.note?.trim() || undefined,
+        targetType: "AvailabilitySubmission",
+        targetId: row.id,
+      });
+    }
     return toDTO(row);
   });
 }
