@@ -32,6 +32,11 @@ export async function PATCH(request: Request) {
       emergencyContactPhone: typeof body.emergencyContactPhone === "string" ? body.emergencyContactPhone : undefined,
       emergencyContactRelation:
         typeof body.emergencyContactRelation === "string" ? body.emergencyContactRelation : undefined,
+      notifyClockInEmail: typeof body.notifyClockInEmail === "boolean" ? body.notifyClockInEmail : undefined,
+      notifyClockOutEmail: typeof body.notifyClockOutEmail === "boolean" ? body.notifyClockOutEmail : undefined,
+      notifyAnnouncementEmail:
+        typeof body.notifyAnnouncementEmail === "boolean" ? body.notifyAnnouncementEmail : undefined,
+      notifyMessageEmail: typeof body.notifyMessageEmail === "boolean" ? body.notifyMessageEmail : undefined,
     };
 
     const profile = await updateMyProfile(employee, input);
