@@ -29,6 +29,10 @@ const SELECT = {
   emergencyContactName: true,
   emergencyContactPhone: true,
   emergencyContactRelation: true,
+  notifyClockInEmail: true,
+  notifyClockOutEmail: true,
+  notifyAnnouncementEmail: true,
+  notifyMessageEmail: true,
   jobTitle: true,
   role: true,
   employmentStatus: true,
@@ -55,6 +59,10 @@ type SelectedEmployee = {
   emergencyContactName: string | null;
   emergencyContactPhone: string | null;
   emergencyContactRelation: string | null;
+  notifyClockInEmail: boolean;
+  notifyClockOutEmail: boolean;
+  notifyAnnouncementEmail: boolean;
+  notifyMessageEmail: boolean;
   jobTitle: string;
   role: string;
   employmentStatus: string;
@@ -80,6 +88,10 @@ function toDTO(e: SelectedEmployee): MyProfileDTO {
     emergencyContactName: e.emergencyContactName,
     emergencyContactPhone: e.emergencyContactPhone,
     emergencyContactRelation: e.emergencyContactRelation,
+    notifyClockInEmail: e.notifyClockInEmail,
+    notifyClockOutEmail: e.notifyClockOutEmail,
+    notifyAnnouncementEmail: e.notifyAnnouncementEmail,
+    notifyMessageEmail: e.notifyMessageEmail,
     jobTitle: e.jobTitle,
     role: e.role as MyProfileDTO["role"],
     employmentStatus: e.employmentStatus as MyProfileDTO["employmentStatus"],
@@ -124,6 +136,13 @@ export async function updateMyProfile(
         emergencyContactName: input.emergencyContactName?.trim() || null,
         emergencyContactPhone: input.emergencyContactPhone?.trim() || null,
         emergencyContactRelation: input.emergencyContactRelation?.trim() || null,
+        // Booleans, not strings — Prisma skips a field entirely when it's `undefined` in the
+        // update data, so leaving one of these out of the request (rather than sending it as
+        // false) leaves that preference exactly as it was, same as every other PATCH here.
+        notifyClockInEmail: input.notifyClockInEmail,
+        notifyClockOutEmail: input.notifyClockOutEmail,
+        notifyAnnouncementEmail: input.notifyAnnouncementEmail,
+        notifyMessageEmail: input.notifyMessageEmail,
       },
       select: SELECT,
     });
