@@ -198,10 +198,20 @@ export default function TeamScheduleGlance({
 
   if (shifts.length === 0 && upcomingGroups.length === 0) return null;
 
+  // Oct 2026 (CB, circling "Scheduled today"/"In progress" on AdminHomeHero's own stat tiles:
+  // "is it possible for us to... click in these areas... and we see who's clocked in currently
+  // and... who's scheduled today"): these two anchor ids are what those tiles scroll to (see
+  // AdminHomeHero's own doc comment — each tile is now a plain `<a href="#...">`) — same-page
+  // jump, no navigation, no extra fetch. "today-schedule" wraps BOTH sections
+  // below since "Scheduled today"'s own count (dashboard/page.tsx's scheduledTodayCount) is
+  // `shifts.length` as a whole, i.e. rightNowShifts + restOfToday combined, not just one of
+  // them. "working-now" is scoped to just the rightNowShifts section, since "In progress"'s own
+  // count is exactly `rightNowShifts.length` — same displayStatus === "IN_PROGRESS" filter, same
+  // number, so the tile and the section it jumps to never disagree.
   return (
-    <div className={className}>
+    <div id="today-schedule" className={className}>
       {rightNowShifts.length > 0 && (
-        <>
+        <div id="working-now">
           <div className="flex items-baseline justify-between mb-2">
             <h2 className="text-sm font-medium text-muted">Who&apos;s working right now</h2>
             {fullScheduleLink}
@@ -211,7 +221,7 @@ export default function TeamScheduleGlance({
               <ShiftGlanceRow key={s.id} s={s} />
             ))}
           </div>
-        </>
+        </div>
       )}
 
       {restOfToday.length > 0 && (
