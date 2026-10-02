@@ -3,16 +3,18 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import AvatarEditor from "@/components/AvatarEditor";
+import { ClockIcon, MegaphoneIcon, ChatIcon } from "@/components/icons";
 import type { EmploymentStatus, MyProfileDTO, Role, UpdateMyProfileInput } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
 type SaveState = "idle" | "saving" | "saved";
-type TabKey = "personal" | "job" | "emergency";
+type TabKey = "personal" | "job" | "emergency" | "notifications";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "personal", label: "Personal" },
   { key: "job", label: "Job" },
   { key: "emergency", label: "Emergency" },
+  { key: "notifications", label: "Notifications" },
 ];
 
 const ROLE_LABEL: Record<Role, string> = {
@@ -50,6 +52,10 @@ type FormValues = {
   emergencyContactName: string;
   emergencyContactPhone: string;
   emergencyContactRelation: string;
+  notifyClockInEmail: boolean;
+  notifyClockOutEmail: boolean;
+  notifyAnnouncementEmail: boolean;
+  notifyMessageEmail: boolean;
 };
 
 function toFormValues(p: MyProfileDTO): FormValues {
@@ -61,6 +67,10 @@ function toFormValues(p: MyProfileDTO): FormValues {
     emergencyContactName: p.emergencyContactName ?? "",
     emergencyContactPhone: p.emergencyContactPhone ?? "",
     emergencyContactRelation: p.emergencyContactRelation ?? "",
+    notifyClockInEmail: p.notifyClockInEmail,
+    notifyClockOutEmail: p.notifyClockOutEmail,
+    notifyAnnouncementEmail: p.notifyAnnouncementEmail,
+    notifyMessageEmail: p.notifyMessageEmail,
   };
 }
 
@@ -330,6 +340,60 @@ export default function ProfileView() {
               <SaveFooter saveState={saveState} error={error} />
             </form>
           )}
+
+          {tab === "notifications" && (
+            <form onSubmit={handleSave} className="rounded-2xl border border-border bg-surface p-6 shadow-sm space-y-6">
+              <div>
+                <h2 className="text-sm font-semibold mb-1">Notifications</h2>
+                <p className="text-xs text-muted mb-4">
+                  Choose what you hear about by email. These settings are per person, so everyone sets their own.
+                </p>
+
+                <div className="divide-y divide-border">
+                  <NotificationRow
+                    icon={<ClockIcon className="h-[17px] w-[17px] text-brand-ink" />}
+                    iconBg="bg-brand/10"
+                    label="Clock-in reminder"
+                    description="A heads up shortly before your shift starts, if you haven't clocked in yet."
+                    checked={form.notifyClockInEmail}
+                    onChange={(v) => set("notifyClockInEmail", v)}
+                  />
+                  <NotificationRow
+                    icon={<ClockIcon className="h-[17px] w-[17px] text-brand-ink" />}
+                    iconBg="bg-brand/10"
+                    label="Clock-out reminder"
+                    description="A nudge if you're still clocked in a few hours after your shift started."
+                    checked={form.notifyClockOutEmail}
+                    onChange={(v) => set("notifyClockOutEmail", v)}
+                  />
+                  <NotificationRow
+                    icon={<MegaphoneIcon className="h-[17px] w-[17px] text-accent-ink" />}
+                    iconBg="bg-accent/10"
+                    label="Announcements"
+                    description="When HR posts a new announcement to the team."
+                    checked={form.notifyAnnouncementEmail}
+                    onChange={(v) => set("notifyAnnouncementEmail", v)}
+                  />
+                  <NotificationRow
+                    icon={<ChatIcon className="h-[17px] w-[17px] text-accent-ink" />}
+                    iconBg="bg-accent/10"
+                    label="Messages"
+                    description="When someone sends you a message in the Portal."
+                    checked={form.notifyMessageEmail}
+                    onChange={(v) => set("notifyMessageEmail", v)}
+                  />
+                </div>
+
+                <p className="mt-5 text-xs text-muted bg-black/[0.03] border border-border rounded-lg px-3 py-2.5 leading-relaxed">
+                  Email reminders are live today, sent to your work email above. Text messages are on the
+                  way — once that&rsquo;s turned on, it&rsquo;ll go to whichever phone number is saved on
+                  your Personal tab, not a separate number.
+                </p>
+              </div>
+
+              <SaveFooter saveState={saveState} error={error} />
+            </form>
+          )}
         </div>
       </div>
     </div>
@@ -353,6 +417,71 @@ function ReadOnlyField({ label, value }: { label: string; value: string }) {
         {value}
       </p>
     </div>
+  );
+}
+
+/** One row on the Notifications tab — an icon, a label/description, and an on/off switch for
+ *  that notification's email (the only live channel in Phase A; see the note under the list in
+ *  ProfileView above). Mirrors the mockup CB approved (stat-tile-combined-style icon chip +
+ *  switch), just without the Email/Text-message chip pair since there's only one real channel
+ *  right now — the switch itself IS "email on/off" rather than a separate sub-toggle under it. */
+function NotificationRow({
+  icon,
+  iconBg,
+  label,
+  description,
+  checked,
+  onChange,
+}: {
+  icon: React.ReactNode;
+  iconBg: string;
+  label: string;
+  description: string;
+  checked: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <div className="py-4 flex items-start justify-between gap-3">
+      <div className="flex gap-2.5 min-w-0">
+        <span className={`h-[34px] w-[34px] rounded-[10px] flex items-center justify-center shrink-0 ${iconBg}`}>
+          {icon}
+        </span>
+        <div className="min-w-0 pt-0.5">
+          <p className="text-sm font-semibold leading-tight">{label}</p>
+          <p className="text-xs text-muted mt-0.5 leading-relaxed max-w-[420px]">{description}</p>
+        </div>
+      </div>
+      <ToggleSwitch checked={checked} onChange={onChange} label={`${label} email notifications`} />
+    </div>
+  );
+}
+
+function ToggleSwitch({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  onChange: (value: boolean) => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={() => onChange(!checked)}
+      className={`relative mt-0.5 h-6 w-[42px] shrink-0 rounded-full transition-colors ${
+        checked ? "bg-accent" : "bg-black/15"
+      }`}
+    >
+      <span
+        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+          checked ? "translate-x-[20px]" : "translate-x-0.5"
+        }`}
+      />
+    </button>
   );
 }
 
