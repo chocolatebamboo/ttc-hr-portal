@@ -82,12 +82,22 @@ function groupUpcomingByEmployee(upcomingShifts: AdminShiftDTO[]): UpcomingEmplo
  * pretty much all the different people that have the schedule right now in a clean way... just
  * so I could get like a glance of who is supposed to be working right now." `shifts` is every
  * shift for TODAY only (the dashboard page's own listAdminShifts call with dateFrom/dateTo both
- * set to today) — deliberately every status for the day, not just the ones in progress this
- * exact minute, so a completed morning shift or an upcoming evening one both still show; the
- * status pill is what actually tells the admin who's on right now versus later versus already
- * done. "Full schedule" links to the existing Team Schedule page for anything past a same-day
- * glance (filtering by person/department, cancel/reassign, requests) — this list doesn't
- * duplicate any of that.
+ * set to today).
+ *
+ * Split into two groups (Oct 2026, CB, screenshotting this exact header sitting above two
+ * "Upcoming"-pilled rows: "when you say who's working right now... I would interpret it to be
+ * like they're literally working right now, but that's not the case here"): "Who's working
+ * right now" now only ever holds shifts whose displayStatus is actually IN_PROGRESS — their
+ * scheduled window has started and hasn't ended yet, so the header is true at a glance instead
+ * of needing the status pill to contradict it. Everything else from today (UPCOMING, already
+ * COMPLETED, MISSED/no-clock-in, or mid-request) renders underneath as a separate "Today"
+ * group instead — deliberately not "Later today," since a completed or missed shift from this
+ * morning isn't "later" either; the status pill on each row still carries that nuance, same as
+ * before. Nothing from `shifts` is dropped, just regrouped — see rightNowShifts/restOfToday
+ * below. "Full schedule" still links to the existing Team Schedule page for anything past a
+ * same-day glance (filtering by person/department, cancel/reassign, requests) — this list
+ * doesn't duplicate any of that; it now lives on whichever of the two sections renders first so
+ * it never appears twice.
  *
  * `upcomingShifts` (CB, Sept 2026 follow-up, screenshotted the exact scenario): "just because
  * somebody isn't working today, I should be able to see the upcoming schedules, cleanly." Every
@@ -128,6 +138,31 @@ function groupUpcomingByEmployee(upcomingShifts: AdminShiftDTO[]): UpcomingEmplo
  */
 const UPCOMING_COLLAPSED_COUNT = 4;
 
+/** One row of either the "Who's working right now" or "Today" list — same visual shape either
+ *  way, just a different source array, so this is shared instead of copy-pasted twice. */
+function ShiftGlanceRow({ s }: { s: AdminShiftDTO }) {
+  return (
+    <Link href={`/team/${s.employeeId}`} className="flex items-center gap-2.5 px-4 py-3 hover:bg-black/[0.02]">
+      <span
+        className="h-9 w-9 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0"
+        style={{ background: colorFor(s.employeeId) }}
+      >
+        {initialsOf(s.employeeName)}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold truncate">{s.employeeName}</p>
+        <p className="text-xs text-muted truncate">{s.employeeJobTitle}</p>
+      </div>
+      <div className="text-right shrink-0">
+        <p className="text-xs text-muted tabular-nums mb-1">
+          {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
+        </p>
+        <ShiftStatusPill status={s.displayStatus} />
+      </div>
+    </Link>
+  );
+}
+
 export default function TeamScheduleGlance({
   shifts,
   upcomingShifts,
@@ -142,45 +177,46 @@ export default function TeamScheduleGlance({
   const visibleUpcomingGroups = upcomingGroups.slice(0, UPCOMING_COLLAPSED_COUNT);
   const hiddenUpcomingEmployeeCount = upcomingGroups.length - visibleUpcomingGroups.length;
 
+  const rightNowShifts = shifts.filter((s) => s.displayStatus === "IN_PROGRESS");
+  const restOfToday = shifts.filter((s) => s.displayStatus !== "IN_PROGRESS");
+  // The Full schedule link only ever appears once — on whichever of the two today-sections
+  // renders first — rather than once per section.
+  const fullScheduleLink = (
+    <Link href="/team/schedule" className="text-xs font-medium text-accent-ink hover:underline shrink-0">
+      Full schedule →
+    </Link>
+  );
+
   if (shifts.length === 0 && upcomingGroups.length === 0) return null;
 
   return (
     <div className={className}>
-      {shifts.length > 0 && (
+      {rightNowShifts.length > 0 && (
         <>
           <div className="flex items-baseline justify-between mb-2">
             <h2 className="text-sm font-medium text-muted">Who&apos;s working right now</h2>
-            <Link href="/team/schedule" className="text-xs font-medium text-accent-ink hover:underline shrink-0">
-              Full schedule →
-            </Link>
+            {fullScheduleLink}
           </div>
           <div className="bg-surface border border-border rounded-2xl divide-y divide-border overflow-hidden">
-            {shifts.map((s) => (
-              <Link
-                key={s.id}
-                href={`/team/${s.employeeId}`}
-                className="flex items-center gap-2.5 px-4 py-3 hover:bg-black/[0.02]"
-              >
-                <span
-                  className="h-9 w-9 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0"
-                  style={{ background: colorFor(s.employeeId) }}
-                >
-                  {initialsOf(s.employeeName)}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold truncate">{s.employeeName}</p>
-                  <p className="text-xs text-muted truncate">{s.employeeJobTitle}</p>
-                </div>
-                <div className="text-right shrink-0">
-                  <p className="text-xs text-muted tabular-nums mb-1">
-                    {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
-                  </p>
-                  <ShiftStatusPill status={s.displayStatus} />
-                </div>
-              </Link>
+            {rightNowShifts.map((s) => (
+              <ShiftGlanceRow key={s.id} s={s} />
             ))}
           </div>
         </>
+      )}
+
+      {restOfToday.length > 0 && (
+        <div className={rightNowShifts.length > 0 ? "mt-4" : ""}>
+          <div className="flex items-baseline justify-between mb-2">
+            <h2 className="text-sm font-medium text-muted">Today</h2>
+            {rightNowShifts.length === 0 && fullScheduleLink}
+          </div>
+          <div className="bg-surface border border-border rounded-2xl divide-y divide-border overflow-hidden">
+            {restOfToday.map((s) => (
+              <ShiftGlanceRow key={s.id} s={s} />
+            ))}
+          </div>
+        </div>
       )}
 
       {upcomingGroups.length > 0 && (
