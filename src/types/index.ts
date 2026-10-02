@@ -84,6 +84,12 @@ export interface AdminAttendanceRowDTO {
   /** Entries with a clockIn but no clockOut yet, within the selected week — the "missing
    *  clock-outs" the admin attendance dashboard is meant to surface. */
   missingClockOutCount: number;
+  /** Oct 2026 (CB: "also make sure the profile pictures are consistant if they changed it
+   *  throughout" — an app-wide avatar-consistency pass found this row still initials-only while
+   *  every other admin person-row already showed the real uploaded photo): resolved server-side
+   *  from avatarStorageKey via getAvatarPublicUrl, same convention as every other admin DTO's
+   *  avatarUrl/employeeAvatarUrl field. */
+  avatarUrl: string | null;
 }
 
 /** One row of "Clocked in now" (CB, Oct 2026: "were supposed to see the clock running when the
@@ -231,6 +237,10 @@ export interface AdminPtoRequestDTO extends PtoRequestDTO {
    *  PtoRequest's own `reviewedBy` relation. Null exactly when reviewedAt is null (still
    *  PENDING, or reopened via Undo) — same convention AvailabilityDTO.reviewedByName uses. */
   reviewedByName: string | null;
+  /** Oct 2026 (CB: "also make sure the profile pictures are consistant if they changed it
+   *  throughout"): resolved server-side from avatarStorageKey via getAvatarPublicUrl, same
+   *  convention as AdminAvailabilityDTO/AdminShiftDTO's own employeeAvatarUrl. */
+  employeeAvatarUrl: string | null;
 }
 
 /** GET /api/admin/pto's response — a pending queue for HR to act on, and everything already
@@ -323,6 +333,10 @@ export interface AvailabilityDTO {
 export interface AdminAvailabilityDTO extends AvailabilityDTO {
   employeeId: string;
   employeeName: string;
+  /** Oct 2026 (CB: "also make sure the profile pictures are consistant if they changed it
+   *  throughout"): resolved server-side from avatarStorageKey via getAvatarPublicUrl — the
+   *  convention every admin DTO carrying a person's photo now follows. */
+  employeeAvatarUrl: string | null;
 }
 
 /** Phase 1 of the scheduling workflow rebuild (client spec, Sept 2026): a CONFIRMED shift,
@@ -399,6 +413,10 @@ export interface AdminShiftDTO extends ShiftDTO {
   /** Who resolved the most recent request (or acted on the shift directly) — null to match
    *  reviewedAt. */
   reviewedByName: string | null;
+  /** Oct 2026 (CB: "also make sure the profile pictures are consistant if they changed it
+   *  throughout"): resolved server-side from avatarStorageKey via getAvatarPublicUrl, same
+   *  convention as AdminAvailabilityDTO/AdminPtoRequestDTO's own employeeAvatarUrl. */
+  employeeAvatarUrl: string | null;
 }
 
 /** One message in a team member's notes/messaging thread (src/lib/team-notes.ts) — see
@@ -771,8 +789,10 @@ export interface AssignmentOptionsDTO {
   departments: DepartmentDTO[];
   /** departmentName added Sept 2026 for ScheduleSomeoneSheet's team-member picker (admin Home
    *  redesign) — purely additive, existing callers (document/announcement assignee pickers)
-   *  that only read id/name are unaffected. */
-  employees: { id: string; name: string; departmentName: string | null }[];
+   *  that only read id/name are unaffected. avatarUrl added Oct 2026, same reason (CB: "also
+   *  make sure the profile pictures are consistant if they changed it throughout") — also
+   *  purely additive, resolved server-side from avatarStorageKey via getAvatarPublicUrl. */
+  employees: { id: string; name: string; departmentName: string | null; avatarUrl: string | null }[];
 }
 
 // NOT_STARTED covers both "locked" and "available" — see OnboardingItemDTO.locked, computed
@@ -1016,6 +1036,13 @@ export interface DirectoryEntryDTO {
   role: Role;
   email: string;
   workPhone: string | null;
+  /** Oct 2026 (CB: "also make sure the profile pictures are consistant if they changed it
+   *  throughout"): a deliberate addition despite this interface's own "deliberately narrow"
+   *  doc comment above — a profile photo isn't PII the way the fields that comment is actually
+   *  guarding against are (personalPhone, personalEmail, emergencyContact*, employeeCode,
+   *  hireDate never appear here); it's already shown company-wide everywhere else in this app.
+   *  Resolved server-side from avatarStorageKey via getAvatarPublicUrl. */
+  avatarUrl: string | null;
 }
 
 export type AnnouncementAudienceType = "EVERYONE" | "DEPARTMENTS" | "EMPLOYEES";
