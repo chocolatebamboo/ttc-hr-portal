@@ -164,20 +164,49 @@ export async function applyClockAction(actor: CurrentEmployee, action: ClockActi
     });
     const totalMinutes = computeTotalMinutes(sessions);
 
-    return tx.timeEntry.update({
+    // CB, Oct 2026: "once we approve that schedule beforehand... they should be able to clock in
+    // and clock out... it should be marked as complete" around clock-out, not need a second
+    // manual Approve stacked on top of the schedule already being approved. Approving a SHIFT
+    // and approving a TIMESHEET stay two separate checks (see this function's own doc comment
+    // above) — this just means the timesheet check no longer needs a human when there's nothing
+    // for a human to actually look at: every session this day matched an already-approved shift,
+    // on time, with nothing flagged. `isException` already carries that signal for an ordinary
+    // clock-in (no shift / outside the window), and autoCloseStaleClockIns (src/lib/
+    // auto-clockout.ts) now sets it too for a forgotten clock-out it had to force-close — so one
+    // check here covers every reason this day might still need a look. A correction submitted
+    // afterward (submitEmployeeCorrection) is a separate path that sets AWAITING_APPROVAL
+    // directly and never goes through this function, so it's unaffected and still always
+    // reviewed by hand.
+    const hasException = sessions.some((s) => s.isException);
+    const clockOutStatus = hasException ? "AWAITING_APPROVAL" : "APPROVED";
+
+    const updated = await tx.timeEntry.update({
       where: { id: entry.id },
       data: {
         totalMinutes,
         // Any clock-in — even reopening a day that was already Awaiting Approval, Approved, or
-        // Returned — puts the day back "in progress" until it's clocked out again; any clock-out
-        // makes it ready for review. This is what lets someone clock in a second (or third...)
-        // time the same day with no separate "reopen" step, and it also means adding time to an
-        // already-Approved day correctly asks the supervisor to look again rather than silently
-        // leaving a stale approval on now-changed hours.
-        status: action === "CLOCK_IN" ? "IN_PROGRESS" : "AWAITING_APPROVAL",
+        // Returned — puts the day back "in progress" until it's clocked out again. A clock-out
+        // either auto-approves (see clockOutStatus above) or makes it ready for a supervisor's
+        // review, same as before. This is what lets someone clock in a second (or third...) time
+        // the same day with no separate "reopen" step, and it also means adding time to an
+        // already-Approved day correctly re-evaluates it — on a clean reopen it simply
+        // auto-approves again, rather than silently leaving a stale approval on now-changed hours.
+        status: action === "CLOCK_IN" ? "IN_PROGRESS" : clockOutStatus,
       },
       include: { sessions: { orderBy: { clockIn: "asc" } } },
     });
+
+    if (action === "CLOCK_OUT" && clockOutStatus === "APPROVED") {
+      await tx.timeEntryAuditEvent.create({
+        data: {
+          timeEntryId: entry.id,
+          action: "TIMESHEET_AUTO_APPROVED",
+          comment: "Automatically approved — every punch matched an already-approved shift, on time, with nothing flagged.",
+        },
+      });
+    }
+
+    return updated;
   });
 }
 
@@ -392,6 +421,15 @@ export class InvalidTimeEntryDeleteError extends Error {
  * it still isn't deletable here — it already has a path back (Edit & resubmit), and that path is
  * what keeps the supervisor's return comment attached to something.
  *
+ * Oct 2026: that lock's whole reason is "someone has signed off on them" — since applyClockAction
+ * can now also reach APPROVED on its own (see its own doc comment) with nobody having looked at
+ * it yet, a day that reached APPROVED that way is NOT locked here; only a day a human actually
+ * reviewed (reviewTimeEntry/bulkApproveTimeEntries, a real TIMESHEET_APPROVED audit row) is.
+ * Determined by the most recent approval-type audit event for this entry — whichever of
+ * TIMESHEET_APPROVED/TIMESHEET_AUTO_APPROVED happened last is what actually produced the status
+ * sitting on the entry right now (a clock-in always resets to IN_PROGRESS first, so there's never
+ * a stale one of these sitting underneath a newer clock-out's own outcome).
+ *
  * Deletes the entry's own audit rows first since there's nothing worth preserving for a day
  * that's being fully withdrawn, then the entry itself (its sessions cascade per the schema).
  */
@@ -401,13 +439,24 @@ export async function deleteEmployeeTimeEntry(actor: CurrentEmployee, entryId: s
     if (!entry || entry.employeeId !== actor.id) {
       throw new InvalidTimeEntryDeleteError("Time entry not found.");
     }
+    let wasAutoApproved = false;
     if (entry.status === "APPROVED") {
-      throw new InvalidTimeEntryDeleteError(
-        "An approved day can't be deleted — contact your supervisor or HR about a correction."
-      );
+      const lastApproval = await tx.timeEntryAuditEvent.findFirst({
+        where: { timeEntryId: entryId, action: { in: ["TIMESHEET_APPROVED", "TIMESHEET_AUTO_APPROVED"] } },
+        orderBy: { createdAt: "desc" },
+      });
+      if (lastApproval?.action !== "TIMESHEET_AUTO_APPROVED") {
+        throw new InvalidTimeEntryDeleteError(
+          "An approved day can't be deleted — contact your supervisor or HR about a correction."
+        );
+      }
+      // Nobody has actually reviewed this one (see this function's own doc comment) — treated
+      // the same as an Awaiting Approval day just below, not gated on totalMinutes being zero
+      // the way a genuinely Returned day still is.
+      wasAutoApproved = true;
     }
     const isEmptyMistake = (entry.totalMinutes ?? 0) === 0;
-    if (entry.status !== "AWAITING_APPROVAL" && !isEmptyMistake) {
+    if (entry.status !== "AWAITING_APPROVAL" && !wasAutoApproved && !isEmptyMistake) {
       throw new InvalidTimeEntryDeleteError(
         "Only a day that's Awaiting Approval (or has no recorded time) can be deleted — use Edit & resubmit to fix a Returned day instead."
       );
