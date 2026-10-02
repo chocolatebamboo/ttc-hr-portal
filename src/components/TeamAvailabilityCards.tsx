@@ -1185,16 +1185,46 @@ export function Card({
     setCreateShiftError("");
   }
 
+  // Oct 2026 (CB, pointing at a live Team Availability screenshot: "I don't necessarily like
+  // this view... I need it to be a little bit more different from the cards so it could kind of
+  // separate and look a little bit different, yet still aesthetic" — approved via mockup first,
+  // her standing requirement for this kind of visual change, before landing here): replaces the
+  // solid same-hue gradient card (still used by TeamPtoCards and the dashboard's own compact
+  // availability widget, neither of which were part of this ask) with a plain white card, the
+  // same `bg-surface border border-border` language AttendanceAdminView's person rows already
+  // use — color now lives only on the status pill and each date chip's decision dot, not the
+  // whole card. `tone` is kept (still drives the avatar ring below, Approve's button fill, and
+  // the "active" chip highlight) rather than removed outright — it's "this person/decision's own
+  // accent," just no longer painted across the entire surface.
+  const avatarUrl = isSelf ? null : (solo?.employeeAvatarUrl ?? submissions[0]?.employeeAvatarUrl ?? null);
   return (
+    // Oct 2026 (CB, on the first all-white version of this mockup: "it looks too similar to
+    // like the cards and I feel like it gets confusing on like the views so I need it to look a
+    // little different" — picked "colored left edge" over a tinted-background or colored-top-bar
+    // alternative, also mocked up and sent for comparison): a plain border on every side except a
+    // thicker, tone-colored left edge, so this card reads as its own thing next to Attendance's
+    // identical-looking neutral rows without going back to painting the whole surface.
     <div
-      className="rounded-3xl shadow-lg overflow-hidden p-4 sm:p-5"
-      style={{ background: `linear-gradient(150deg, ${tone.from} 0%, ${tone.to} 100%)` }}
+      className="rounded-3xl border border-border bg-surface shadow-sm overflow-hidden p-4 sm:p-5"
+      style={{ borderLeftWidth: "5px", borderLeftColor: tone.to }}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3 min-w-0 flex-1">
-          <span className="h-10 w-10 rounded-full bg-white/25 border border-white/40 flex items-center justify-center text-sm font-semibold text-white shrink-0">
-            {initialsOf(employeeName)}
-          </span>
+          {avatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- public storage URL
+            <img
+              src={avatarUrl}
+              alt=""
+              className="h-10 w-10 rounded-full object-cover border border-border shrink-0"
+            />
+          ) : (
+            <span
+              className="h-10 w-10 rounded-full flex items-center justify-center text-sm font-semibold text-white shrink-0"
+              style={{ background: `linear-gradient(135deg, ${tone.from}, ${tone.to})` }}
+            >
+              {initialsOf(employeeName)}
+            </span>
+          )}
           <div className="min-w-0 flex-1">
             {/* CB, Sept 2026: "the name is getting cut off in the mobile view" — the "You" and
                 folder badges used to share this same row as the name, and on a narrow screen the
@@ -1204,11 +1234,11 @@ export function Card({
                 fully to itself — truncate here is just a safety net for a genuinely very long
                 name on a very narrow screen, not the normal case — and the badges wrap onto their
                 own row underneath instead of stealing its width. */}
-            <p className="text-base font-semibold text-white truncate">{employeeName}</p>
+            <p className="text-base font-semibold truncate">{employeeName}</p>
             {(isSelf || !solo) && (
               <div className="flex items-center gap-1.5 flex-wrap mt-1">
                 {isSelf && (
-                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-white bg-white/25 border border-white/40 rounded-full px-1.5 py-0.5">
+                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted bg-black/[0.04] border border-border rounded-full px-1.5 py-0.5">
                     You
                   </span>
                 )}
@@ -1217,7 +1247,7 @@ export function Card({
                     are merged into this card — there's no longer one status or one reviewer to
                     summarize at the card level; each date still shows its own further down. */}
                 {!solo && (
-                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-white bg-white/20 border border-white/35 rounded-full px-2 py-0.5">
+                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted bg-black/[0.04] border border-border rounded-full px-2 py-0.5">
                     {chips.length} dates · {submissions.length} requests
                   </span>
                 )}
@@ -1227,13 +1257,13 @@ export function Card({
               <>
                 <div className="flex items-center gap-2 mt-0.5">
                   {isPending ? (
-                    <span className="text-xs font-medium text-white/80">
+                    <span className="text-xs font-medium text-muted">
                       {perDateMode && !fullyDecided ? "Some dates decided — finish the rest below" : "Awaiting your decision"}
                     </span>
                   ) : (
                     <>
                       <AvailabilityStatusPill status={solo.status} />
-                      <button onClick={() => onUndo(solo.id)} disabled={busy} className="text-xs font-medium text-white/85 hover:text-white underline underline-offset-2">
+                      <button onClick={() => onUndo(solo.id)} disabled={busy} className="text-xs font-medium text-accent-ink hover:underline underline-offset-2">
                         Undo
                       </button>
                     </>
@@ -1247,13 +1277,13 @@ export function Card({
                     naturally stays hidden for CANCELLED/ADJUSTMENT_REQUESTED without a separate
                     status check. */}
                 {solo.reviewedByName && (
-                  <p className="text-xs font-medium text-white mt-0.5">
+                  <p className="text-xs font-medium mt-0.5">
                     {solo.status === "APPROVED" ? "Approved" : "Denied"} by {solo.reviewedByName}
                     {/* CB, Sept 2026: "I need to know the time and the date that it was approved
                         as well" — right under the reviewer's name, deliberately lighter/smaller
                         than the name line above so the name stays the primary read. */}
                     {solo.reviewedAt && (
-                      <span className="block text-[11px] font-normal text-white/75 mt-0.5">
+                      <span className="block text-[11px] font-normal text-muted mt-0.5">
                         {formatReviewedAt(solo.reviewedAt)}
                       </span>
                     )}
@@ -1275,10 +1305,10 @@ export function Card({
             <button
               type="button"
               onClick={() => onOpenChat(employeeId, employeeName, solo?.id)}
-              className="relative h-8 w-8 rounded-full bg-white/20 flex items-center justify-center hover:bg-white/30 transition-colors"
+              className="relative h-8 w-8 rounded-full border border-border flex items-center justify-center hover:bg-black/[0.03] transition-colors"
               title={`Message ${employeeName}`}
             >
-              <ChatIcon className="h-4 w-4 text-white" />
+              <ChatIcon className="h-4 w-4 text-muted" />
               {!!dmCount?.unread && (
                 <span
                   className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full text-white text-[9px] font-bold flex items-center justify-center"
@@ -1289,8 +1319,8 @@ export function Card({
               )}
             </button>
           )}
-          <span className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center" title="Tap a date below to see its tasks">
-            <ChecklistIcon className="h-4 w-4 text-white" />
+          <span className="h-8 w-8 rounded-full border border-border flex items-center justify-center" title="Tap a date below to see its tasks">
+            <ChecklistIcon className="h-4 w-4 text-muted" />
           </span>
           {canEditDates && (
             <button
@@ -1300,9 +1330,9 @@ export function Card({
                 setConfirmRemoveDate(null);
               }}
               className={`h-8 rounded-full px-3 text-xs font-bold transition-colors ${
-                editingDates ? "bg-white" : "bg-white/20 hover:bg-white/30 text-white"
+                editingDates ? "text-white" : "border border-border text-muted hover:bg-black/[0.03]"
               }`}
-              style={editingDates ? { color: tone.to } : undefined}
+              style={editingDates ? { background: tone.to } : undefined}
             >
               {editingDates ? "Done" : "Edit"}
             </button>
@@ -1319,14 +1349,18 @@ export function Card({
                 <button
                   type="button"
                   onClick={() => onToggleDate(c.submissionId, c.date)}
-                  className={`relative flex flex-col items-start rounded-xl px-2.5 py-1.5 leading-tight transition-colors ${
-                    active ? "bg-white" : "bg-white/15 hover:bg-white/25 border border-white/25"
-                  } ${editingDates ? "border-white/55" : ""}`}
-                  style={active ? { color: tone.to } : undefined}
+                  className={`relative flex flex-col items-start rounded-xl px-2.5 py-1.5 leading-tight transition-colors border ${
+                    active ? "" : "bg-black/[0.035] border-border hover:bg-black/[0.06]"
+                  } ${editingDates ? "border-dashed" : ""}`}
+                  style={
+                    active
+                      ? { background: `color-mix(in srgb, ${tone.to} 10%, white)`, borderColor: tone.to, color: tone.to }
+                      : undefined
+                  }
                 >
                   {c.decision && <DateDecisionDot status={c.decision.status} />}
-                  <span className={`text-xs font-semibold ${active ? "" : "text-white"}`}>{c.dateLabel}</span>
-                  <span className={`text-[11px] ${active ? "opacity-70" : "text-white/80"}`}>{c.timeLabel}</span>
+                  <span className={`text-xs font-semibold ${active ? "" : "text-foreground"}`}>{c.dateLabel}</span>
+                  <span className={`text-[11px] ${active ? "opacity-70" : "text-muted"}`}>{c.timeLabel}</span>
                 </button>
                 {editingDates && editableSubmissionIds.has(c.submissionId) && (
                   <button
@@ -1336,8 +1370,7 @@ export function Card({
                       setConfirmRemoveDate({ submissionId: c.submissionId, date: c.date });
                     }}
                     aria-label={`Remove ${c.dateLabel}`}
-                    className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-rose-600 text-white text-xs leading-none flex items-center justify-center border-2 shadow-sm"
-                    style={{ borderColor: tone.to }}
+                    className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-rose-600 text-white text-xs leading-none flex items-center justify-center border-2 border-surface shadow-sm"
                   >
                     &minus;
                   </button>
@@ -1347,7 +1380,7 @@ export function Card({
           })}
         </div>
       ) : (
-        <p className="text-sm text-white/80 mt-2">No dates marked available.</p>
+        <p className="text-sm text-muted mt-2">No dates marked available.</p>
       )}
 
       {/* CB, Sept 2026: "let's say one of the admin wants to create unavailable schedule or
@@ -1357,28 +1390,28 @@ export function Card({
           Always available (not tied to any one submission/date above), so it sits on its own,
           separate from the chip list and its Edit/Remove affordances. */}
       {addingDate ? (
-        <div className="mt-2.5 bg-black/20 rounded-xl p-3 space-y-2.5">
-          <p className="text-sm font-semibold text-white">Add a date for {employeeName}</p>
+        <div className="mt-2.5 bg-black/[0.035] border border-border rounded-xl p-3 space-y-2.5">
+          <p className="text-sm font-semibold">Add a date for {employeeName}</p>
           <div className="flex items-center gap-2 flex-wrap">
             <input
               type="date"
               value={newShiftDate}
               onChange={(e) => setNewShiftDate(e.target.value)}
               autoFocus
-              className="rounded-md border border-white/30 bg-white/90 px-2 py-1 text-sm text-foreground outline-none focus:ring-2 focus:ring-white"
+              className="rounded-md border border-border bg-surface px-2 py-1 text-sm text-foreground outline-none focus:ring-2 focus:ring-accent"
             />
             <input
               type="time"
               value={newShiftStart}
               onChange={(e) => setNewShiftStart(e.target.value)}
-              className="rounded-md border border-white/30 bg-white/90 px-2 py-1 text-sm text-foreground outline-none focus:ring-2 focus:ring-white"
+              className="rounded-md border border-border bg-surface px-2 py-1 text-sm text-foreground outline-none focus:ring-2 focus:ring-accent"
             />
-            <span className="text-xs text-white/80">to</span>
+            <span className="text-xs text-muted">to</span>
             <input
               type="time"
               value={newShiftEnd}
               onChange={(e) => setNewShiftEnd(e.target.value)}
-              className="rounded-md border border-white/30 bg-white/90 px-2 py-1 text-sm text-foreground outline-none focus:ring-2 focus:ring-white"
+              className="rounded-md border border-border bg-surface px-2 py-1 text-sm text-foreground outline-none focus:ring-2 focus:ring-accent"
             />
           </div>
           <textarea
@@ -1386,9 +1419,9 @@ export function Card({
             onChange={(e) => setNewShiftNote(e.target.value)}
             placeholder="Optional note…"
             rows={2}
-            className="w-full rounded-md border border-white/30 bg-white/90 px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-white placeholder:text-muted resize-none"
+            className="w-full rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-accent placeholder:text-muted resize-none"
           />
-          {createShiftError && <p className="text-xs font-medium text-rose-50">{createShiftError}</p>}
+          {createShiftError && <p className="text-xs font-medium text-rose-600">{createShiftError}</p>}
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -1401,7 +1434,7 @@ export function Card({
                 setCreateShiftError("");
               }}
               disabled={creatingShift}
-              className="rounded-full bg-white/15 border border-white/35 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-white/25 disabled:opacity-60"
+              className="rounded-full border border-border px-3.5 py-1.5 text-xs font-semibold text-muted hover:bg-black/[0.03] disabled:opacity-60"
             >
               Cancel
             </button>
@@ -1409,8 +1442,8 @@ export function Card({
               type="button"
               onClick={submitCreateShift}
               disabled={creatingShift || !newShiftDate}
-              className="rounded-full bg-white px-3.5 py-1.5 text-xs font-semibold shadow-sm disabled:opacity-60"
-              style={{ color: tone.to }}
+              className="rounded-full px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm disabled:opacity-60"
+              style={{ background: tone.to }}
             >
               {creatingShift ? "Adding…" : "Add date"}
             </button>
@@ -1420,9 +1453,9 @@ export function Card({
         <button
           type="button"
           onClick={() => setAddingDate(true)}
-          className="mt-2.5 inline-flex items-center gap-1.5 text-sm font-semibold text-white/90 hover:text-white"
+          className="mt-2.5 inline-flex items-center gap-1.5 text-sm font-semibold text-accent-ink hover:underline underline-offset-2"
         >
-          <span className="flex items-center justify-center h-5 w-5 rounded-full bg-white/25 text-white text-sm leading-none">
+          <span className="flex items-center justify-center h-5 w-5 rounded-full bg-black/[0.06] text-foreground text-sm leading-none">
             +
           </span>
           Add a date
@@ -1430,8 +1463,8 @@ export function Card({
       )}
 
       {editingDates && confirmRemoveDate && (
-        <div className="mt-2.5 bg-black/20 rounded-xl p-3">
-          <p className="text-sm font-semibold text-white">
+        <div className="mt-2.5 bg-black/[0.035] border border-border rounded-xl p-3">
+          <p className="text-sm font-semibold">
             Remove{" "}
             {
               chips.find((c) => c.submissionId === confirmRemoveDate.submissionId && c.date === confirmRemoveDate.date)
@@ -1439,7 +1472,7 @@ export function Card({
             }{" "}
             from this request?
           </p>
-          <p className="text-xs text-white/80 mt-1">
+          <p className="text-xs text-muted mt-1">
             Just this date drops off, the rest of the request stays exactly as it is. {employeeName} isn&apos;t notified.
           </p>
           <div className="flex items-center gap-2 mt-2.5">
@@ -1447,7 +1480,7 @@ export function Card({
               type="button"
               onClick={() => setConfirmRemoveDate(null)}
               disabled={busy}
-              className="rounded-full bg-white/15 border border-white/35 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-white/25 disabled:opacity-60"
+              className="rounded-full border border-border px-3.5 py-1.5 text-xs font-semibold text-muted hover:bg-black/[0.03] disabled:opacity-60"
             >
               Cancel
             </button>
@@ -1466,9 +1499,9 @@ export function Card({
         </div>
       )}
 
-      {solo?.note && <p className="text-sm text-white/85 italic mt-2.5">&ldquo;{solo.note}&rdquo;</p>}
+      {solo?.note && <p className="text-sm text-muted italic mt-2.5">&ldquo;{solo.note}&rdquo;</p>}
       {solo && !isPending && solo.reviewComment && (
-        <p className="text-sm text-white/85 italic mt-2">Reviewer note: &ldquo;{solo.reviewComment}&rdquo;</p>
+        <p className="text-sm text-muted italic mt-2">Reviewer note: &ldquo;{solo.reviewComment}&rdquo;</p>
       )}
 
       {/* Bulk actions — "I have the option to approve everything at one time." Hidden the
@@ -1480,22 +1513,22 @@ export function Card({
           <button
             onClick={() => onDecide(solo.id, "APPROVED")}
             disabled={busy}
-            className="rounded-full bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:brightness-95 disabled:opacity-60"
-            style={{ color: tone.to }}
+            className="rounded-full px-4 py-2 text-sm font-semibold text-white shadow-sm hover:brightness-95 disabled:opacity-60"
+            style={{ background: tone.to }}
           >
             {chips.length > 1 ? "Approve all" : "Approve"}
           </button>
           <button
             onClick={() => onDecide(solo.id, "DENIED")}
             disabled={busy}
-            className="rounded-full bg-white/15 border border-white/35 px-4 py-2 text-sm font-semibold text-white hover:bg-white/25 disabled:opacity-60"
+            className="rounded-full border border-border px-4 py-2 text-sm font-semibold text-muted hover:bg-black/[0.03] disabled:opacity-60"
           >
             {chips.length > 1 ? "Deny all" : "Deny"}
           </button>
         </div>
       )}
 
-      {decideError && <p className="text-xs font-medium text-rose-50 mt-2">{decideError}</p>}
+      {decideError && <p className="text-xs font-medium text-rose-600 mt-2">{decideError}</p>}
 
       {/* CB, Sept 2026: "I shouldn't have to explain myself" — Deny above now fires immediately,
           same as Approve. This is the optional note, offered afterward instead of gating the
@@ -1504,21 +1537,21 @@ export function Card({
           get this affordance). */}
       {solo && solo.status === "DENIED" && !solo.reviewComment && (
         addingNote ? (
-          <div className="mt-3 space-y-2.5 bg-white/15 rounded-xl p-3">
+          <div className="mt-3 space-y-2.5 bg-black/[0.035] border border-border rounded-xl p-3">
             <textarea
               value={noteText}
               onChange={(e) => onNoteTextChange(e.target.value)}
               placeholder="Optional note for the team member…"
               rows={2}
               autoFocus
-              className="w-full rounded-md border border-white/30 bg-white/90 px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-white placeholder:text-muted"
+              className="w-full rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-accent placeholder:text-muted"
             />
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={onAddNoteToggle}
                 disabled={busy}
-                className="rounded-full bg-white/15 border border-white/35 px-4 py-2 text-sm font-semibold text-white hover:bg-white/25 disabled:opacity-60"
+                className="rounded-full border border-border px-4 py-2 text-sm font-semibold text-muted hover:bg-black/[0.03] disabled:opacity-60"
               >
                 Cancel
               </button>
@@ -1526,8 +1559,8 @@ export function Card({
                 type="button"
                 onClick={() => noteText.trim() && onAddNote(solo.id, noteText)}
                 disabled={busy || !noteText.trim()}
-                className="rounded-full bg-white px-4 py-2 text-sm font-semibold shadow-sm disabled:opacity-60"
-                style={{ color: tone.to }}
+                className="rounded-full px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-60"
+                style={{ background: tone.to }}
               >
                 Save note
               </button>
@@ -1537,9 +1570,9 @@ export function Card({
           <button
             type="button"
             onClick={onAddNoteToggle}
-            className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-white/90 hover:text-white"
+            className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-accent-ink hover:underline underline-offset-2"
           >
-            <span className="flex items-center justify-center h-4 w-4 rounded-full bg-white/25 text-[11px] leading-none">+</span>
+            <span className="flex items-center justify-center h-4 w-4 rounded-full bg-black/[0.06] text-foreground text-[11px] leading-none">+</span>
             Add a note for {employeeName}
           </button>
         )
@@ -1554,22 +1587,22 @@ export function Card({
           ever reachable on an unmerged card (see this component's own doc comment), so `solo` is
           always set here in practice — the guard just keeps this branch type-safe. */}
       {removing && solo && (
-        <div className="mt-3.5 flex flex-col gap-2.5 bg-white/15 rounded-xl p-3">
-          <p className="text-sm font-semibold text-white">Remove this availability request?</p>
-          <p className="text-xs text-white/80">
+        <div className="mt-3.5 flex flex-col gap-2.5 bg-black/[0.035] border border-border rounded-xl p-3">
+          <p className="text-sm font-semibold">Remove this availability request?</p>
+          <p className="text-xs text-muted">
             This is administrative cleanup, not a decision — it won&rsquo;t notify{" "}
             {isSelf ? "you" : employeeName}, and HR keeps an internal record even after it&rsquo;s
             removed.
             {hasLinkedShift &&
               " A shift already scheduled from this request stays exactly as it is — removing the request will not cancel or change it."}
           </p>
-          {removeError && <p className="text-xs font-medium text-rose-50">{removeError}</p>}
+          {removeError && <p className="text-xs font-medium text-rose-600">{removeError}</p>}
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={onRemoveCancel}
               disabled={busy}
-              className="rounded-full bg-white/15 border border-white/35 px-4 py-2 text-sm font-semibold text-white hover:bg-white/25 disabled:opacity-60"
+              className="rounded-full border border-border px-4 py-2 text-sm font-semibold text-muted hover:bg-black/[0.03] disabled:opacity-60"
             >
               Cancel
             </button>
@@ -1600,7 +1633,7 @@ export function Card({
               Approve/Deny buttons on an already-fully-Decided card), and restores the Undo button
               needed to reopen and re-approve a date like this one. */}
           {openDecision && (
-            <div className="bg-white/15 rounded-xl p-3 space-y-2.5">
+            <div className="bg-black/[0.035] border border-border rounded-xl p-3 space-y-2.5">
               {openDecision.status === "PENDING" ? (
                 adjustingDate === openChip.date ? (
                   <div className="space-y-2.5">
@@ -1612,20 +1645,20 @@ export function Card({
                         type="date"
                         value={adjustDate}
                         onChange={(e) => setAdjustDate(e.target.value)}
-                        className="rounded-md border border-white/30 bg-white/90 px-2 py-1 text-sm text-foreground outline-none focus:ring-2 focus:ring-white"
+                        className="rounded-md border border-border bg-surface px-2 py-1 text-sm text-foreground outline-none focus:ring-2 focus:ring-accent"
                       />
                       <input
                         type="time"
                         value={adjustStart}
                         onChange={(e) => setAdjustStart(e.target.value)}
-                        className="rounded-md border border-white/30 bg-white/90 px-2 py-1 text-sm text-foreground outline-none focus:ring-2 focus:ring-white"
+                        className="rounded-md border border-border bg-surface px-2 py-1 text-sm text-foreground outline-none focus:ring-2 focus:ring-accent"
                       />
-                      <span className="text-xs text-white/80">to</span>
+                      <span className="text-xs text-muted">to</span>
                       <input
                         type="time"
                         value={adjustEnd}
                         onChange={(e) => setAdjustEnd(e.target.value)}
-                        className="rounded-md border border-white/30 bg-white/90 px-2 py-1 text-sm text-foreground outline-none focus:ring-2 focus:ring-white"
+                        className="rounded-md border border-border bg-surface px-2 py-1 text-sm text-foreground outline-none focus:ring-2 focus:ring-accent"
                       />
                     </div>
                     <textarea
@@ -1633,14 +1666,14 @@ export function Card({
                       onChange={(e) => setAdjustDateComment(e.target.value)}
                       placeholder="Optional note explaining the change…"
                       rows={2}
-                      className="w-full rounded-md border border-white/30 bg-white/90 px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-white placeholder:text-muted"
+                      className="w-full rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-accent placeholder:text-muted"
                     />
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
                         onClick={() => setAdjustingDate(null)}
                         disabled={busy}
-                        className="rounded-full bg-white/15 border border-white/35 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-white/25 disabled:opacity-60"
+                        className="rounded-full border border-border px-3.5 py-1.5 text-xs font-semibold text-muted hover:bg-black/[0.03] disabled:opacity-60"
                       >
                         Cancel
                       </button>
@@ -1648,8 +1681,8 @@ export function Card({
                         type="button"
                         onClick={submitAdjustDate}
                         disabled={busy}
-                        className="rounded-full bg-white px-3.5 py-1.5 text-xs font-semibold shadow-sm"
-                        style={{ color: tone.to }}
+                        className="rounded-full px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm"
+                        style={{ background: tone.to }}
                       >
                         Save change
                       </button>
@@ -1661,8 +1694,8 @@ export function Card({
                       type="button"
                       onClick={() => onDecideDate(openSubmission.id, openChip.date, "APPROVED")}
                       disabled={busy}
-                      className="rounded-full bg-white px-3.5 py-1.5 text-xs font-semibold shadow-sm hover:brightness-95 disabled:opacity-60"
-                      style={{ color: tone.to }}
+                      className="rounded-full px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:brightness-95 disabled:opacity-60"
+                      style={{ background: tone.to }}
                     >
                       Approve this date
                     </button>
@@ -1674,7 +1707,7 @@ export function Card({
                       type="button"
                       onClick={() => onDecideDate(openSubmission.id, openChip.date, "DENIED")}
                       disabled={busy}
-                      className="rounded-full bg-white/15 border border-white/35 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-white/25 disabled:opacity-60"
+                      className="rounded-full border border-border px-3.5 py-1.5 text-xs font-semibold text-muted hover:bg-black/[0.03] disabled:opacity-60"
                     >
                       Deny this date
                     </button>
@@ -1685,7 +1718,7 @@ export function Card({
                         startAdjustDate(openChip.date, original?.startTime ?? "09:00", original?.endTime ?? "17:00");
                       }}
                       disabled={busy}
-                      className="rounded-full bg-white/15 border border-white/35 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-white/25 disabled:opacity-60"
+                      className="rounded-full border border-border px-3.5 py-1.5 text-xs font-semibold text-muted hover:bg-black/[0.03] disabled:opacity-60"
                     >
                       Change date/time
                     </button>
@@ -1698,7 +1731,7 @@ export function Card({
                       <button
                         type="button"
                         onClick={() => onMessageAboutDate(employeeId, employeeName, openSubmission.id, openChip.date)}
-                        className="flex items-center gap-1.5 rounded-full bg-white/15 border border-white/35 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-white/25"
+                        className="flex items-center gap-1.5 rounded-full border border-border px-3.5 py-1.5 text-xs font-semibold text-muted hover:bg-black/[0.03]"
                       >
                         <ChatIcon className="h-3.5 w-3.5" />
                         Message about this date
@@ -1709,24 +1742,24 @@ export function Card({
               ) : (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <p className="text-xs font-medium text-white/90">
+                    <p className="text-xs font-medium text-muted">
                       {openDecision.status === "APPROVED" ? "This date is approved." : "This date is denied."}
                       {/* CB, Sept 2026: "I need to see that directly on the card itself once it's
                           approved" — same reviewer-name surfacing as the card-level status above,
                           just the per-date counterpart (decidedByName, src/types/index.ts). */}
                       {openDecision.decidedByName && (
-                        <span className="block text-white mt-0.5">
+                        <span className="block text-foreground mt-0.5">
                           {openDecision.status === "APPROVED" ? "Approved" : "Denied"} by {openDecision.decidedByName}
                           {/* Same date/time line as the submission-level "Approved/Denied by" above
                               — CB, Sept 2026: "I need to know the time and the date." */}
                           {openDecision.decidedAt && (
-                            <span className="block text-[11px] font-normal text-white/75 mt-0.5">
+                            <span className="block text-[11px] font-normal text-muted mt-0.5">
                               {formatReviewedAt(openDecision.decidedAt)}
                             </span>
                           )}
                         </span>
                       )}
-                      {openDecision.comment && <span className="block italic text-white/80 mt-1">&ldquo;{openDecision.comment}&rdquo;</span>}
+                      {openDecision.comment && <span className="block italic text-muted mt-1">&ldquo;{openDecision.comment}&rdquo;</span>}
                     </p>
                     {/* CB, Sept 2026: "even if it's approved, I should still be able to make
                         adjustments... it's not just final." This date's own decision was already
@@ -1741,7 +1774,7 @@ export function Card({
                         type="button"
                         onClick={() => onUndoDate(openSubmission.id, openChip.date)}
                         disabled={busy}
-                        className="text-xs font-medium text-white/85 hover:text-white underline underline-offset-2 disabled:opacity-50"
+                        className="text-xs font-medium text-accent-ink hover:underline underline-offset-2 disabled:opacity-50"
                       >
                         Undo
                       </button>
@@ -1760,7 +1793,7 @@ export function Card({
                           placeholder="Optional note for the team member…"
                           rows={2}
                           autoFocus
-                          className="w-full rounded-md border border-white/30 bg-white/90 px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-white placeholder:text-muted"
+                          className="w-full rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-accent placeholder:text-muted"
                         />
                         <div className="flex items-center gap-2">
                           <button
@@ -1770,7 +1803,7 @@ export function Card({
                               setDateNoteText("");
                             }}
                             disabled={busy}
-                            className="rounded-full bg-white/15 border border-white/35 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-white/25 disabled:opacity-60"
+                            className="rounded-full border border-border px-3.5 py-1.5 text-xs font-semibold text-muted hover:bg-black/[0.03] disabled:opacity-60"
                           >
                             Cancel
                           </button>
@@ -1783,8 +1816,8 @@ export function Card({
                               setDateNoteText("");
                             }}
                             disabled={busy || !dateNoteText.trim()}
-                            className="rounded-full bg-white px-3.5 py-1.5 text-xs font-semibold shadow-sm disabled:opacity-60"
-                            style={{ color: tone.to }}
+                            className="rounded-full px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm disabled:opacity-60"
+                            style={{ background: tone.to }}
                           >
                             Save note
                           </button>
@@ -1794,9 +1827,9 @@ export function Card({
                       <button
                         type="button"
                         onClick={() => setAddingNoteForDate(openChip.date)}
-                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-white/90 hover:text-white"
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-accent-ink hover:underline underline-offset-2"
                       >
-                        <span className="flex items-center justify-center h-4 w-4 rounded-full bg-white/25 text-[11px] leading-none">+</span>
+                        <span className="flex items-center justify-center h-4 w-4 rounded-full bg-black/[0.06] text-foreground text-[11px] leading-none">+</span>
                         Add a note
                       </button>
                     )
@@ -1818,7 +1851,7 @@ export function Card({
             <button
               type="button"
               onClick={() => setAdminPickerOpen(true)}
-              className="flex items-center gap-1.5 rounded-full bg-white/15 border border-white/35 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-white/25"
+              className="flex items-center gap-1.5 rounded-full border border-border px-3.5 py-1.5 text-xs font-semibold text-muted hover:bg-black/[0.03]"
             >
               <ChatIcon className="h-3.5 w-3.5" />
               Loop in an admin about this date
@@ -1862,15 +1895,15 @@ export function Card({
           {openDecision?.status === "APPROVED" && (() => {
             const existingShift = shiftsByDate.get(`${openSubmission.id}:${openChip.date}`);
             return (
-              <div className="flex items-center gap-2 bg-white/15 rounded-xl px-3 py-2">
-                <CalendarIcon className="h-3.5 w-3.5 text-white/80 shrink-0" />
+              <div className="flex items-center gap-2 bg-black/[0.035] border border-border rounded-xl px-3 py-2">
+                <CalendarIcon className="h-3.5 w-3.5 text-muted shrink-0" />
                 {existingShift ? (
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-white/85">Scheduled as a shift</span>
+                    <span className="text-xs font-semibold text-muted">Scheduled as a shift</span>
                     <ShiftStatusPill status={existingShift.displayStatus} />
                   </div>
                 ) : (
-                  <span className="text-xs font-semibold text-white/85">
+                  <span className="text-xs font-semibold text-muted">
                     Approved. This date doesn&rsquo;t have a shift yet. Push a task below, or Undo and re-approve, to add one.
                   </span>
                 )}
@@ -1888,11 +1921,11 @@ export function Card({
               is a fully optional add-on — it no longer has anything to do with confirming the
               shift (see the block above). */}
           <div>
-            <p className="text-xs font-semibold text-white/80 mb-1.5 flex items-center gap-1.5">
-              <ChecklistIcon className="h-3.5 w-3.5 text-white/80" />
+            <p className="text-xs font-semibold text-muted mb-1.5 flex items-center gap-1.5">
+              <ChecklistIcon className="h-3.5 w-3.5 text-muted" />
               {openChip.dateLabel} — tasks
             </p>
-            <DateTasksPanel employeeId={employeeId} taskDate={openChip.date} viewerId={viewerId} onColor />
+            <DateTasksPanel employeeId={employeeId} taskDate={openChip.date} viewerId={viewerId} />
           </div>
         </div>
       )}
