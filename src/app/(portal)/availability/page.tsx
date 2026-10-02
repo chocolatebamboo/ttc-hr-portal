@@ -1,5 +1,5 @@
 import { requireEmployeeOrRedirect } from "@/lib/auth";
-import { isAdmin } from "@/lib/authorization";
+import { isAdmin, canAccessTeamAvailability } from "@/lib/authorization";
 import TeamAvailabilityWeekPanel from "@/components/TeamAvailabilityWeekPanel";
 import TeamPtoCards from "@/components/TeamPtoCards";
 import AvailabilityView from "./AvailabilityView";
@@ -31,14 +31,29 @@ import AvailabilityView from "./AvailabilityView";
  * TeamAvailabilityWeekPanel (week nav + the same TeamAvailabilityCards queue underneath, just
  * bounded to one week at a time — see that component's own doc comment) instead of an unbounded
  * list with its own header row here.
+ *
+ * Bugfix (Oct 2026, CB: "where I'm able to... schedule someone else on the availability page" —
+ * not showing for Daijour): this branch used to gate on a bare `isAdmin(employee)`, same bug
+ * canAccessTeamAvailability's own doc comment (src/lib/authorization.ts) describes already
+ * having been fixed on the sibling /admin/availability page — Daijour (SUPERVISOR) has real
+ * team-management authority everywhere else in this app (Team Schedule, Attendance, PTO
+ * Management, the dashboard's own team widgets) but was silently dropped to the plain employee
+ * view here. Now gated on canAccessTeamAvailability (isAdmin() OR SUPERVISOR) instead, so he
+ * gets "Schedule someone" and the team review queue below too. `isAdminViewer` itself stays
+ * `isAdmin(employee)` — true HR_ADMIN/SUPER_ADMIN only — so Daijour does NOT lose his own
+ * Logged hours/Time off tiles the way an admin does; he keeps those, same as he keeps his
+ * personal "This week"/"Availability" numbers on the Home dashboard (see
+ * canSeeAdminHomeDashboard's own doc comment for that same principle). AvailabilityView's new
+ * `canManageTeam` prop is the one that actually shows ScheduleSomeoneButton — see its own doc
+ * comment there.
  */
 export default async function AvailabilityPage() {
   const employee = await requireEmployeeOrRedirect();
 
-  if (isAdmin(employee)) {
+  if (canAccessTeamAvailability(employee)) {
     return (
       <div className="max-w-3xl">
-        <AvailabilityView employeeId={employee.id} isAdminViewer />
+        <AvailabilityView employeeId={employee.id} isAdminViewer={isAdmin(employee)} canManageTeam />
         <div className="mt-6">
           <TeamAvailabilityWeekPanel viewerId={employee.id} />
         </div>
