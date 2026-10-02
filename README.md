@@ -230,34 +230,60 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   different from a time entry the team member actually submitted themselves. Runs from
   `POST /api/cron/auto-clockout`, same `CRON_SECRET`-protected shape and same schedule as the
   two reminder endpoints above.
-- **Shift reminders** — once an Availability submission is `APPROVED`, each of its dates gets a
-  one-time "your shift starts soon" email 30 minutes before that date's start time
-  (`src/lib/shift-reminders.ts`), same Resend setup as the clock-out reminder email above.
-  Email only, by CB's choice — there's no in-app notification system in this app yet, and
-  building one just for this was a bigger lift than the value of doing so right now. Runs from
-  `POST /api/cron/shift-reminders`, hit every 15 minutes the same way `/api/cron/
-  clockout-reminders` and `/api/cron/auto-clockout` are (same shared `CRON_SECRET`) — all three
-  are independent jobs, not one combined schedule, so any one can be paused without affecting
-  the others. Comparing "is it within 30 minutes of this shift's start time" needs an actual
-  timezone (unlike the clock-out jobs, which only measure elapsed duration and never need to
-  know what time of day it is) — nothing else in the app has needed one before this, so it's
-  hardcoded to `America/New_York` (`ORG_TIMEZONE` in `src/lib/shift-reminders.ts`) rather than
-  configurable, per CB confirming that's where TTC's shifts are.
+- **Notification preferences** — My Profile > Notifications (CB, Oct 2026: "I kind of want a
+  notifications tab... they could toggle on which notifications that they could have... by
+  default... email sent to them... whichever number attached to their profile or email"). Four
+  self-service toggles (`Employee.notifyClockInEmail/notifyClockOutEmail/
+  notifyAnnouncementEmail/notifyMessageEmail`, all default on) covering clock-in reminders,
+  clock-out reminders, announcements, and messages — each routes to the employee's own existing
+  `ttcEmail`, never a separate contact field. Phase A (email only, confirmed via
+  `AskUserQuestion`: "Email now, text later") — the Text-message option shown on that tab stays
+  visible but inactive until Phase B wires up a real SMS provider (none set up yet), at which
+  point it'll route to whichever phone number (`workPhone`/`personalPhone`) the employee already
+  has saved on the Personal tab, same "their existing profile field, not a new one" rule the
+  email side already follows.
+- **Clock-in reminders** — once a `Shift` is `UPCOMING` for today, it gets a one-time "your shift
+  starts soon" email 30 minutes before its start time (`src/lib/clockin-reminders.ts`), same
+  Resend setup as the clock-out reminder email above, skipped (but still marked so it's not
+  re-checked) for anyone who's turned `notifyClockInEmail` off. Replaces the older
+  `shift-reminders.ts`/`/api/cron/shift-reminders` (Oct 2026) — that version was keyed on
+  `AvailabilitySubmission` instead of `Shift`, and since converting a submission to a shift never
+  changed the submission's own `APPROVED` status, a converted shift could get double-reminded by
+  both systems at once. Runs from `POST /api/cron/clockin-reminders`, hit every 15 minutes the
+  same way `/api/cron/clockout-reminders` and `/api/cron/auto-clockout` are (same shared
+  `CRON_SECRET`) — independent jobs, not one combined schedule, so any one can be paused without
+  affecting the others. Comparing "is it within 30 minutes of this shift's start time" needs an
+  actual timezone (unlike the clock-out jobs, which only measure elapsed duration), hardcoded to
+  `America/New_York` (`ORG_TIMEZONE` in `src/lib/time.ts`) per CB confirming that's where TTC's
+  shifts are.
+- **Announcement notifications** — My Profile > Notifications (Oct 2026): posting an
+  announcement notifies (and, per that recipient's preference, emails) everyone it's actually
+  targeted at, once it's actually visible to them. `Announcement.publishDate` can be future-dated
+  (an admin can schedule a post ahead), so `src/lib/announcement-notifications.ts` runs as its
+  own cron rather than notifying at creation time — it finds every announcement whose
+  `publishDate` has passed and hasn't been notified yet, resolves Everyone/Departments/Employees
+  the same way the employee-facing feed already does, and writes one `Notification`
+  (`ANNOUNCEMENT_POSTED`) per recipient, stamping `Announcement.notifiedAt` so a later run never
+  double-notifies the same post. Runs from `POST /api/cron/announcement-notifications`, same
+  15-minute schedule and shared `CRON_SECRET` as the other reminder-style jobs.
 - **Notification emails** — CB, Sept 2026: "we need to make sure that any notification goes to
   their email as well so they know." Rather than teaching every one of the in-app notification
-  system's 13 `NotificationType` call sites (`src/lib/shifts.ts`, `availability.ts`,
-  `pto-actions.ts`, `date-tasks.ts` — see `writeNotification` in `src/lib/notifications.ts`) to
+  system's `NotificationType` call sites (`src/lib/shifts.ts`, `availability.ts`,
+  `pto-actions.ts`, `date-tasks.ts`, and — as of Oct 2026 — `direct-messages.ts` and
+  `announcement-notifications.ts`; see `writeNotification` in `src/lib/notifications.ts`) to
   also send its own email, `src/lib/notification-emails.ts` emails whatever `writeNotification`
   already wrote: the same title/body text a person sees in the header bell's feed, reused as-is
-  for the email subject/body. Runs async from the real action, same shared Resend setup as the
-  other reminder emails above — deliberately NOT sent inline from inside `writeNotification`'s
-  own transaction, since that already runs inside the same transaction as the real mutation it's
-  a side effect of, and blocking that open on an external HTTP call would reopen the connection-
-  pool-exhaustion problem `withConnectionLimit()` (`src/lib/db.ts`) was hotfixed for. Tracked by
-  `Notification.emailedAt` (null until sent, stamped once, never touched again) so a later run
-  never double-sends — same shape the shift-reminder/clock-out-reminder jobs already use their
-  own dedicated tracking column/row for. Runs from `POST /api/cron/notification-emails`, same
-  15-minute schedule and shared `CRON_SECRET` as the other reminder-style jobs.
+  for the email subject/body. The two Oct 2026 types (`ANNOUNCEMENT_POSTED`, `MESSAGE_RECEIVED`)
+  are the only ones this job checks a preference for first (`notifyAnnouncementEmail`/
+  `notifyMessageEmail` above) — every other type is still emailed unconditionally, exactly as
+  before. Runs async from the real action, same shared Resend setup as the other reminder emails
+  above — deliberately NOT sent inline from inside `writeNotification`'s own transaction, since
+  that already runs inside the same transaction as the real mutation it's a side effect of, and
+  blocking that open on an external HTTP call would reopen the connection-pool-exhaustion problem
+  `withConnectionLimit()` (`src/lib/db.ts`) was hotfixed for. Tracked by `Notification.emailedAt`
+  (null until sent — or skipped by preference — stamped once, never touched again) so a later
+  run never double-sends. Runs from `POST /api/cron/notification-emails`, same 15-minute schedule
+  and shared `CRON_SECRET` as the other reminder-style jobs.
 - **Scheduled messages** — "Schedule message" (Sept 2026, part of the reply-chain redesign):
   composing a DM lets you pick a future date/time instead of sending right away
   (`src/lib/direct-messages.ts`'s `postMessage`/`sendDueScheduledMessages`). A scheduled message
@@ -270,7 +296,7 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   schedule and `CRON_SECRET`-protected shape as the three jobs above — a message scheduled for,
   say, 3:00 PM goes out sometime within that run's 15-minute window, not necessarily on the exact
   minute.
-- **What actually calls those five cron endpoints on a schedule** — a GitHub Actions workflow
+- **What actually calls those six cron endpoints on a schedule** — a GitHub Actions workflow
   (`.github/workflows/reminder-emails.yml`), not a Render Cron Job: Render's Cron Jobs have no
   free tier, and this repo already lives on GitHub, so a scheduled Action reuses an account
   that already exists rather than adding a new paid resource. It needs a repository secret
