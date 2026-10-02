@@ -1,5 +1,5 @@
 import { withRlsContext } from "@/lib/db";
-import { isAdmin, ForbiddenError } from "@/lib/authorization";
+import { isAdmin, canAccessPtoManagement, ForbiddenError } from "@/lib/authorization";
 import { writeAuditLog } from "@/lib/audit-log";
 import { writeNotification } from "@/lib/notifications";
 import type { AdminPtoRequestDTO, AdminPtoSummaryDTO, CurrentEmployee } from "@/types";
@@ -171,11 +171,20 @@ export async function undecidePtoRequest(reviewer: CurrentEmployee, requestId: s
   });
 }
 
-/** GET /api/admin/pto — a Pending queue HR needs to act on, and everything already Decided
- *  (Approved or Denied), most recent 200 by reviewedAt. Same pending/decided shape
- *  listAdminAvailability uses. */
+/**
+ * GET /api/admin/pto — a Pending queue HR needs to act on, and everything already Decided
+ * (Approved or Denied), most recent 200 by reviewedAt. Same pending/decided shape
+ * listAdminAvailability uses.
+ *
+ * Opened to Supervisor too (Oct 2026, CB: "give him Attendance + PTO Management for his own
+ * team" — see canAccessPtoManagement's own doc comment): `employeeScope` narrows both queries
+ * below to the caller's own direct reports, the same explicit belt-and-suspenders filter
+ * listAdminAttendance/listCurrentlyClockedIn/getPayrollHoursReport already use rather than
+ * leaning on pto_select's RLS policy alone (prisma/rls.sql's pto_select already independently
+ * grants a supervisor this same read for their own reports' requests).
+ */
 export async function listAdminPto(actor: CurrentEmployee): Promise<AdminPtoSummaryDTO> {
-  if (!isAdmin(actor)) throw new ForbiddenError();
+  if (!canAccessPtoManagement(actor)) throw new ForbiddenError();
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     // reviewedBy included alongside employee (Sept 2026, CB: "I like the fact that it has a
@@ -184,9 +193,10 @@ export async function listAdminPto(actor: CurrentEmployee): Promise<AdminPtoSumm
     // resolveReviewerNames pass), so a direct include is all this needs, pending rows included
     // even though theirs is always null — simpler than branching the include per query.
     const reviewerSelect = { select: { firstName: true, lastName: true, preferredName: true } } as const;
+    const employeeScope = isAdmin(actor) ? {} : { employee: { supervisorId: actor.id } };
     const [pending, decided] = await Promise.all([
       tx.ptoRequest.findMany({
-        where: { status: "PENDING" },
+        where: { status: "PENDING", ...employeeScope },
         include: {
           employee: { select: { firstName: true, lastName: true, preferredName: true } },
           reviewedBy: reviewerSelect,
@@ -194,7 +204,7 @@ export async function listAdminPto(actor: CurrentEmployee): Promise<AdminPtoSumm
         orderBy: { createdAt: "asc" },
       }),
       tx.ptoRequest.findMany({
-        where: { status: { in: ["APPROVED", "DENIED"] } },
+        where: { status: { in: ["APPROVED", "DENIED"] }, ...employeeScope },
         include: {
           employee: { select: { firstName: true, lastName: true, preferredName: true } },
           reviewedBy: reviewerSelect,
