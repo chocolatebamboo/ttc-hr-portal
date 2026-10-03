@@ -723,16 +723,27 @@ export default function AvailabilityView({
               swipe-to-delete, per-request messaging all still exactly what they were, just reached
               from a real number instead of a blind label). */}
           <div className="mb-4 md:shrink-0 grid grid-cols-2 gap-3">
+            {/* CB, Oct 2026, pointing at this tile's "4.0" next to the 90-day total inside it
+                reading "8h 00m": both numbers were already correct (this tile is always the
+                current Sun–Sat week, same window weeklyMinutes is fetched for above — see
+                weekStart; the expanded LoggedHoursSection totals a separate, wider 90-day
+                window) but neither one said so, so reconciling them took doing the date math
+                yourself. "this pay period" was also misleading — there's no real payroll-period
+                boundary anywhere in this app, it's just this calendar week. Now solid blue
+                (var(--ttc-blue), same hue LoggedHoursSection's own hero pill already uses) so
+                the tile reads as "this is a running total" before it's even tapped open, and the
+                caption names its actual window with weekRangeLabel instead of a vague label. */}
             <button
               type="button"
               onClick={() => setLoggedHoursOpen((v) => !v)}
-              className="text-left rounded-2xl border border-border bg-surface p-4"
+              className="text-left rounded-2xl p-4 text-white"
+              style={{ background: "var(--ttc-blue)" }}
             >
-              <p className="text-sm font-medium text-muted">Logged hours</p>
+              <p className="text-sm font-medium text-white/80">Logged hours</p>
               <p className="text-2xl font-bold mt-1 tabular-nums">
                 {weeklyMinutes === null ? "—" : (weeklyMinutes / 60).toFixed(1)}
               </p>
-              <p className="text-xs text-muted mt-0.5">this pay period</p>
+              <p className="text-xs text-white/75 mt-0.5">This week · {weekRangeLabel(weekStart)}</p>
             </button>
             <div className="rounded-2xl border border-border bg-surface p-4">
               <button type="button" onClick={() => setTimeOffOpen((v) => !v)} className="text-left w-full">
