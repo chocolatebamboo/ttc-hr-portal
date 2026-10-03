@@ -1319,9 +1319,28 @@ export function Card({
               )}
             </button>
           )}
-          <span className="h-8 w-8 rounded-full border border-border flex items-center justify-center" title="Tap a date below to see its tasks">
-            <ChecklistIcon className="h-4 w-4 text-muted" />
-          </span>
+          {/* CB, Oct 2026, pointing at this icon right after the new My Tasks page shipped: "I
+              want you to make sure that that icon that I put there is reflective of the my tasks
+              icon... and it goes directly to that page so we can see the tasks also." Two
+              changes from the plain, non-interactive span this used to be: CheckCircleIcon
+              instead of ChecklistIcon, matching the icon EMPLOYEE_NAV's own "My Tasks" link uses
+              (src/lib/nav.ts) rather than a different glyph for the same concept; and it's now a
+              real button. Confirmed via AskUserQuestion which of two directions "goes directly to
+              that page" meant — a brand-new admin-facing page listing one employee's tasks across
+              every date (nothing like that exists yet), or jumping straight to that info right on
+              this card — "expand tasks inline" won, so this opens the nearest chip (chips is
+              already date-sorted) exactly the way tapping that date chip itself does, no new page
+              needed. Hidden entirely when there's nothing to open (no chips yet). */}
+          {chips.length > 0 && (
+            <button
+              type="button"
+              onClick={() => onToggleDate(chips[0].submissionId, chips[0].date)}
+              className="h-8 w-8 rounded-full border border-border flex items-center justify-center hover:bg-black/[0.03] transition-colors"
+              title={`${employeeName}'s tasks`}
+            >
+              <CheckCircleIcon className="h-4 w-4 text-muted" />
+            </button>
+          )}
           {canEditDates && (
             <button
               type="button"
