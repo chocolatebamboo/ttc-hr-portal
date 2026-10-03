@@ -5,6 +5,7 @@ import {
   CalendarIcon,
   FolderIcon,
   ChecklistIcon,
+  CheckCircleIcon,
   UsersIcon,
   MegaphoneIcon,
   UserCircleIcon,
@@ -46,6 +47,12 @@ export const EMPLOYEE_NAV: NavItem[] = [
   { label: "My Schedule", href: "/schedule", icon: CalendarIcon },
   { label: "Documents", href: "/documents", icon: FolderIcon },
   { label: "Onboarding", href: "/onboarding", icon: ChecklistIcon },
+  // CB, Oct 2026: "there should be like a task page so you can see all your tasks... I want to
+  // see it cleanly." Every task assigned to you, across every date (not just one date's card),
+  // gathered in one place — see src/app/(portal)/tasks/MyTasksView.tsx. CheckCircleIcon rather
+  // than reusing ChecklistIcon (already Onboarding's icon just above) so the two links stay
+  // visually distinct in the sidebar.
+  { label: "My Tasks", href: "/tasks", icon: CheckCircleIcon },
   // CB, Sept 2026: "instead of notes, I want it to be messages... so its no longer notes its
   // 'My Messages.'" /messages is the unified inbox — the old general employee/supervisor
   // thread, per-date/PTO conversations, and real peer-to-peer DMs, all in one place (see
