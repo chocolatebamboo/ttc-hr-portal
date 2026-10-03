@@ -111,6 +111,17 @@ export async function listAdminAttendance(
  * midnight is still genuinely running, and catching exactly that (not just "today's" sessions)
  * is the point of a "right now" view. Ordered oldest-clocked-in-first so whoever's been in
  * longest — the one most likely to need a nudge — sorts to the top.
+ *
+ * `scheduledStartTime`/`scheduledEndTime` (CB, Oct 2026, circling this exact card on Home:
+ * "make sure we see the schedule of the person that's scheduled here on the clock while the
+ * clock is running"): a second query below, batched for every employee in `sessions` at once
+ * rather than one Shift lookup per row, against today's own date key (same todayDateKey()
+ * dashboard/page.tsx already uses for its own "today's shifts" fetch, for consistency with what
+ * else renders as "today" on that same page). CANCELLED/REASSIGNED shifts are excluded — neither
+ * one is a real schedule for the day anymore, same exclusion listAdminShifts's own callers apply
+ * for "what's actually on the books." On the rare day an employee has more than one shift
+ * scheduled, the earliest by startTime wins — this is a glance view, not the full schedule (that
+ * is still Team Schedule, one click away via each row's own employee link upstream).
  */
 export async function listCurrentlyClockedIn(actor: CurrentEmployee): Promise<CurrentlyClockedInRowDTO[]> {
   if (actor.role !== "SUPERVISOR" && !isAdmin(actor)) throw new ForbiddenError();
@@ -149,15 +160,37 @@ export async function listCurrentlyClockedIn(actor: CurrentEmployee): Promise<Cu
       orderBy: { clockIn: "asc" },
     });
 
-    return sessions.map((s) => ({
-      sessionId: s.id,
-      employeeId: s.timeEntry.employee.id,
-      name: `${s.timeEntry.employee.preferredName || s.timeEntry.employee.firstName} ${s.timeEntry.employee.lastName}`,
-      jobTitle: s.timeEntry.employee.jobTitle,
-      department: s.timeEntry.employee.department?.name ?? null,
-      clockIn: s.clockIn.toISOString(),
-      isException: s.isException,
-      exceptionReason: s.exceptionReason,
-    }));
+    const employeeIds = [...new Set(sessions.map((s) => s.timeEntry.employee.id))];
+    const todaysShifts = employeeIds.length
+      ? await tx.shift.findMany({
+          where: {
+            employeeId: { in: employeeIds },
+            date: todayDateKey(),
+            status: { notIn: ["CANCELLED", "REASSIGNED"] },
+          },
+          select: { employeeId: true, startTime: true, endTime: true },
+          orderBy: { startTime: "asc" },
+        })
+      : [];
+    const shiftByEmployee = new Map<string, { startTime: string; endTime: string }>();
+    for (const sh of todaysShifts) {
+      if (!shiftByEmployee.has(sh.employeeId)) shiftByEmployee.set(sh.employeeId, sh);
+    }
+
+    return sessions.map((s) => {
+      const shift = shiftByEmployee.get(s.timeEntry.employee.id);
+      return {
+        sessionId: s.id,
+        employeeId: s.timeEntry.employee.id,
+        name: `${s.timeEntry.employee.preferredName || s.timeEntry.employee.firstName} ${s.timeEntry.employee.lastName}`,
+        jobTitle: s.timeEntry.employee.jobTitle,
+        department: s.timeEntry.employee.department?.name ?? null,
+        clockIn: s.clockIn.toISOString(),
+        isException: s.isException,
+        exceptionReason: s.exceptionReason,
+        scheduledStartTime: shift?.startTime ?? null,
+        scheduledEndTime: shift?.endTime ?? null,
+      };
+    });
   });
 }
