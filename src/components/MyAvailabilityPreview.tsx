@@ -5,7 +5,7 @@ import Link from "next/link";
 import AvailabilityStatusPill from "@/components/AvailabilityStatusPill";
 import SwipeReveal from "@/components/SwipeReveal";
 import { TrashIcon } from "@/components/icons";
-import { slotChips } from "@/lib/availability-format";
+import { slotChips, submissionTitle } from "@/lib/availability-format";
 import { toneForStatus, STATUS_TONE } from "@/lib/status-tone";
 import type { AvailabilityDTO } from "@/types";
 
@@ -198,18 +198,24 @@ export default function MyAvailabilityPreview({
                     : undefined
                 }
               >
+                {/* CB, Oct 2026: "it doesn't have like their name or anything that's pertaining
+                    to what it actually is" — a card with no note used to open on an empty span,
+                    just chips under a status pill. Title now always names the date span this
+                    submission covers (submissionTitle, in src/lib/availability-format.ts); the
+                    note (if any) moves to its own line below instead of sharing this row. */}
                 <div className="flex items-center justify-between gap-3 mb-2">
-                  {s.note ? (
-                    <p className={`text-sm italic truncate ${plain ? "text-muted" : "text-white/85"}`}>
-                      &ldquo;{s.note}&rdquo;
-                    </p>
-                  ) : (
-                    <span />
-                  )}
+                  <p className={`text-sm font-bold truncate ${plain ? "text-foreground" : "text-white"}`}>
+                    {submissionTitle(s.slots)}
+                  </p>
                   <div className="flex items-center gap-2 shrink-0">
                     <AvailabilityStatusPill status={s.status} awaitingTask={s.awaitingTask} onColor={!plain} />
                   </div>
                 </div>
+                {s.note && (
+                  <p className={`text-sm italic truncate mb-2 ${plain ? "text-muted" : "text-white/85"}`}>
+                    &ldquo;{s.note}&rdquo;
+                  </p>
+                )}
                 <div className="flex flex-wrap gap-1.5">
                   {slotChips(s.slots).map((c) => (
                     <div
