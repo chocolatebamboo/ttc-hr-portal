@@ -39,6 +39,31 @@ export function describeSlots(slots: AvailabilitySlot[]): string[] {
     .map((s) => `${formatSlotDate(s.date)}: ${formatTime12h(s.startTime)} – ${formatTime12h(s.endTime)}`);
 }
 
+/** "2026-09-17" -> "Sep 17" — same date as formatSlotDate but without the weekday, for when it
+ *  sits right next to another date in a range (see submissionTitle below) and repeating the
+ *  weekday on both ends would just be noise. */
+export function formatSlotDateShort(dateKey: string): string {
+  return new Date(`${dateKey}T00:00:00`).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+/** A short header naming the span of dates one submission covers — CB, Oct 2026, pointing at her
+ *  own "Your submissions" list: "it doesn't have like their name or anything that's pertaining
+ *  to what it actually is." The card's top row previously held nothing unless there happened to
+ *  be a note, so a submission with no note read as a bare pair of date chips under a status
+ *  pill. One slot -> its full label ("Wed, Sep 30"); more than one -> a short range from the
+ *  earliest to the latest date ("Sep 30 – Oct 2") — the weekday's already repeated per-chip
+ *  below, so the header stays terse. Used by MyAvailabilityPreview's card title. */
+export function submissionTitle(slots: AvailabilitySlot[]): string {
+  if (slots.length === 0) return "";
+  const sorted = [...slots].sort((a, b) => a.date.localeCompare(b.date));
+  const first = sorted[0].date;
+  const last = sorted[sorted.length - 1].date;
+  return first === last ? formatSlotDate(first) : `${formatSlotDateShort(first)} – ${formatSlotDateShort(last)}`;
+}
+
 export interface SlotChip {
   /** Raw "YYYY-MM-DD" — the stable key used to scope a conversation to this specific date
    *  (see TeamNote.topicDate in prisma/schema.prisma), never shown to the user directly. */
