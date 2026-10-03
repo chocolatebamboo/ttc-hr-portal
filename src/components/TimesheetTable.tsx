@@ -3,7 +3,7 @@
 import { useState } from "react";
 import StatusPill from "@/components/StatusPill";
 import { WarningIcon } from "@/components/icons";
-import { combineDateAndTime, formatClockTime, formatMinutes, toTimeInputValue } from "@/lib/time";
+import { combineDateAndTime, formatClockTime, formatMinutes, todayDateKey, toTimeInputValue } from "@/lib/time";
 import type { TimeEntryDTO } from "@/types";
 
 export interface ReviewControls {
@@ -33,8 +33,11 @@ interface SessionRow {
   clockOut: string;
 }
 
-/** Every calendar day in the week, filled in from `entries` where an entry exists — a day
- *  with no row is a real "Missing Entry" the employee/HR should notice, not a blank.
+/** Every calendar day in the week, filled in from `entries` where an entry exists. A past or
+ *  today day with no entry is real and worth noticing (StatusPill's "Not Logged"); a day later
+ *  this week that hasn't happened yet never gets that pill at all — see TimesheetRow's own
+ *  `isFuture` check below (CB, Oct 2026, pointing at a week showing "Missing Entry" on dates
+ *  still days away: "missing entry almost seems like you're saying there's something wrong").
  *  Pass `review` for a supervisor/HR review table with Approve/Return actions on rows
  *  Awaiting Approval. Pass `correction` for the employee's own view, which additionally
  *  lets them edit and resubmit a Returned day. Omit both for a plain read-only table. */
@@ -114,6 +117,12 @@ function TimesheetRow({
   const isCorrectionBusy = correction?.busyEntryId === entry?.id;
   const isActionable = review && entry?.status === "AWAITING_APPROVAL";
   const isCorrectable = correction && entry?.status === "RETURNED";
+  // CB, Oct 2026: a week view always renders all 7 days up front, including days later this
+  // same week that haven't happened yet — those showed "Missing Entry" right alongside genuinely
+  // overdue past days, which read as a problem on a day nobody could have logged time for yet.
+  // Only a day with no entry AND no future date gets the pill below; a future day with no entry
+  // instead shows a plain "Upcoming" (see the Status cell).
+  const isFuture = !entry && day > todayDateKey();
 
   function startEditing() {
     setRows(
@@ -167,7 +176,11 @@ function TimesheetRow({
         </td>
         <td className="px-4 py-2.5 tabular-nums align-top">{formatMinutes(entry?.totalMinutes ?? null)}</td>
         <td className="px-4 py-2.5 align-top">
-          <StatusPill status={entry?.status ?? "MISSING_ENTRY"} />
+          {isFuture ? (
+            <span className="text-muted">Upcoming</span>
+          ) : (
+            <StatusPill status={entry?.status ?? "MISSING_ENTRY"} />
+          )}
         </td>
         {review && (
           <td className="px-4 py-2.5 align-top">
