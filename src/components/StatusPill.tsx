@@ -11,12 +11,19 @@ const STYLE: Record<TimeEntryStatus, string> = {
   MISSING_ENTRY: "bg-black/5 text-muted",
 };
 
+// CB, Oct 2026, looking at a review table full of these on a team member's Timesheet tab:
+// "missing entry almost seems like you're saying there's something wrong." The only live
+// caller that ever synthesizes MISSING_ENTRY (TimesheetTable.tsx, for a calendar day with no
+// real TimeEntry) now skips this pill entirely for a day that hasn't happened yet — see that
+// file's own doc comment — so by the time this label shows at all, the day is genuinely in the
+// past with nothing logged for it. "Not Logged" says exactly that without reading as an
+// accusation the way "Missing" did.
 const LABEL: Record<TimeEntryStatus, string> = {
   IN_PROGRESS: "In Progress",
   AWAITING_APPROVAL: "Awaiting Approval",
   APPROVED: "Approved",
   RETURNED: "Returned",
-  MISSING_ENTRY: "Missing Entry",
+  MISSING_ENTRY: "Not Logged",
 };
 
 export default function StatusPill({ status }: { status: TimeEntryStatus }) {
