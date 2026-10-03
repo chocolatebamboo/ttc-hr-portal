@@ -110,6 +110,16 @@ export interface CurrentlyClockedInRowDTO {
    *  flagged here too, not just on the employee's own card or the Attendance review screen. */
   isException: boolean;
   exceptionReason: string | null;
+  /** Today's scheduled shift for this employee, if there is one — CB, Oct 2026, circling this
+   *  card: "make sure we see the schedule of the person that's scheduled here on the clock while
+   *  the clock is running." Both null together for an unscheduled/ad-hoc clock-in (nothing on the
+   *  books for them today); otherwise always set together. "HH:MM", same raw shape as
+   *  ShiftDTO.startTime/endTime — formatted for display with formatTime12h, same helper
+   *  TeamScheduleGlance already uses for a shift's own time range. See listCurrentlyClockedIn in
+   *  src/lib/attendance-admin.ts for how this is resolved (today's earliest non-cancelled shift
+   *  for the employee, if more than one is on the books). */
+  scheduledStartTime: string | null;
+  scheduledEndTime: string | null;
 }
 
 /** One row in the Employees admin page (src/app/(portal)/admin/employees) — every employee,
