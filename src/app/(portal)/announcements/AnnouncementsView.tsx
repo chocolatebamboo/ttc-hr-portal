@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { MegaphoneIcon, TrashIcon, ClockIcon } from "@/components/icons";
+import { MegaphoneIcon, TrashIcon, ClockIcon, ChevronDownIcon } from "@/components/icons";
 import type {
   AnnouncementDTO,
   AnnouncementAdminDTO,
@@ -153,6 +153,12 @@ function AdminAnnouncementsList() {
   const [announcements, setAnnouncements] = useState<AnnouncementAdminDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [busyId, setBusyId] = useState<string | null>(null);
+  // CB, Oct 2026, on this very list: "I'm not able to click into them to see the full message."
+  // The row only ever showed title/badge/dates/audience — the actual message text had nowhere to
+  // go. One row open at a time (same "accordion" feel DateTaskRow's own comment-thread toggle
+  // already uses elsewhere in this app), rather than every row expanded by default and the list
+  // turning into a wall of text.
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   async function load() {
     setLoadState("loading");
@@ -213,32 +219,55 @@ function AdminAnnouncementsList() {
     <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
       {announcements.map((a) => {
         const badge = announcementBadge(a);
+        const open = expandedId === a.id;
         return (
-          <div key={a.id} className="px-4 py-3.5 flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <p className="text-sm font-medium truncate">{a.title}</p>
-                <span
-                  className={`text-[10px] uppercase tracking-wide font-semibold rounded-full px-2 py-0.5 shrink-0 ${badge.className}`}
-                >
-                  {badge.label}
-                </span>
-              </div>
-              <p className="text-xs text-muted truncate mt-0.5">
-                {formatAnnouncementDateTime(a.publishDate)} – {a.expirationDate ? formatAnnouncementDateTime(a.expirationDate) : "no end date"}
-              </p>
-              <p className="text-xs text-muted truncate">
-                {a.audienceType === "EVERYONE" ? "Everyone" : a.audienceLabel} · {a.authorName}
-              </p>
+          <div key={a.id}>
+            <div className="px-4 py-3.5 flex items-center justify-between gap-3">
+              {/* CB, Oct 2026: "I'm not able to click into them to see the full message." The
+                  title/badge/dates/audience block is now a real button that expands this row in
+                  place to show the full message below — tap again (or tap another row) to
+                  collapse. A sibling of the Delete button, not a parent of it, so the two stay
+                  two separate tap targets instead of a button nested inside a button. */}
+              <button
+                type="button"
+                onClick={() => setExpandedId(open ? null : a.id)}
+                className="min-w-0 flex-1 text-left"
+                aria-expanded={open}
+              >
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-medium truncate">{a.title}</p>
+                  <span
+                    className={`text-[10px] uppercase tracking-wide font-semibold rounded-full px-2 py-0.5 shrink-0 ${badge.className}`}
+                  >
+                    {badge.label}
+                  </span>
+                  <ChevronDownIcon
+                    className={`h-3.5 w-3.5 text-muted shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
+                  />
+                </div>
+                <p className="text-xs text-muted truncate mt-0.5">
+                  {formatAnnouncementDateTime(a.publishDate)} – {a.expirationDate ? formatAnnouncementDateTime(a.expirationDate) : "no end date"}
+                </p>
+                <p className="text-xs text-muted truncate">
+                  {a.audienceType === "EVERYONE" ? "Everyone" : a.audienceLabel} · {a.authorName}
+                </p>
+              </button>
+              <button
+                onClick={() => removeAnnouncement(a.id)}
+                disabled={busyId === a.id}
+                aria-label={`Delete "${a.title}"`}
+                className="h-8 w-8 flex items-center justify-center rounded-full text-muted hover:text-rose-600 hover:bg-rose-600/10 transition-colors disabled:opacity-50 shrink-0"
+              >
+                <TrashIcon className="h-4 w-4" />
+              </button>
             </div>
-            <button
-              onClick={() => removeAnnouncement(a.id)}
-              disabled={busyId === a.id}
-              aria-label={`Delete "${a.title}"`}
-              className="h-8 w-8 flex items-center justify-center rounded-full text-muted hover:text-rose-600 hover:bg-rose-600/10 transition-colors disabled:opacity-50 shrink-0"
-            >
-              <TrashIcon className="h-4 w-4" />
-            </button>
+            {open && (
+              <div className="px-4 pb-4 -mt-1">
+                <p className="text-sm text-foreground whitespace-pre-wrap break-words bg-black/[0.02] rounded-lg p-3">
+                  {a.message}
+                </p>
+              </div>
+            )}
           </div>
         );
       })}
