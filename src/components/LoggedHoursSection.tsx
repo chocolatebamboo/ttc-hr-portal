@@ -5,6 +5,7 @@ import type { CorrectionValues } from "@/components/TimesheetTable";
 import StatusPill from "@/components/StatusPill";
 import SwipeReveal from "@/components/SwipeReveal";
 import { TrashIcon } from "@/components/icons";
+import { formatSlotDateShort } from "@/lib/availability-format";
 import { combineDateAndTime, formatClockTime, formatMinutes, toTimeInputValue } from "@/lib/time";
 import type { TimeEntryDTO } from "@/types";
 
@@ -145,6 +146,13 @@ export default function LoggedHoursSection({ showHeading = true }: { showHeading
   }
 
   const totalMinutes = entries.reduce((sum, e) => sum + (e.totalMinutes ?? 0), 0);
+  // CB, Oct 2026: pointing at this hero next to AvailabilityView's own "Logged hours" tile
+  // (which shows the current week's total) — "is the four hours pertaining to... that
+  // particular week? ... we need to specify that." This hero was always a separate, wider
+  // RECENT_DAYS window off the same hours, but never said its own date range either, so the two
+  // numbers looked unreconcilable side by side. dateKeyDaysAgo is the same helper load() already
+  // uses for the actual query, so this always matches what was fetched.
+  const rangeLabel = `${formatSlotDateShort(dateKeyDaysAgo(RECENT_DAYS))}–${formatSlotDateShort(dateKeyDaysAgo(0))}`;
 
   return (
     <div>
@@ -173,7 +181,9 @@ export default function LoggedHoursSection({ showHeading = true }: { showHeading
               component's own doc comment above for why this stays scoped to RECENT_DAYS rather
               than a literal rolling week. */}
           <div className="rounded-3xl p-6 text-white shadow-lg mb-4" style={{ background: "var(--ttc-blue)" }}>
-            <p className="text-xs uppercase tracking-wide text-white/70 mb-1">Total, last {RECENT_DAYS} days</p>
+            <p className="text-xs uppercase tracking-wide text-white/70 mb-1">
+              Total, last {RECENT_DAYS} days &middot; {rangeLabel}
+            </p>
             <p className="text-5xl font-bold tabular-nums leading-none tracking-tight">{formatMinutes(totalMinutes)}</p>
             <p className="text-sm font-medium text-white/75 mt-2">
               {entries.length} {entries.length === 1 ? "entry" : "entries"} logged
