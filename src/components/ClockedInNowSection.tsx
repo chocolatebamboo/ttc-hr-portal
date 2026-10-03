@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { formatClockTime, formatElapsedClock } from "@/lib/time";
+import { formatTime12h } from "@/lib/availability-format";
 import { WarningIcon } from "@/components/icons";
 import type { CurrentlyClockedInRowDTO } from "@/types";
 
@@ -105,6 +106,15 @@ export default function ClockedInNowSection({
               <div className="text-right shrink-0">
                 <p className="tabular-nums font-semibold">{formatElapsedClock(elapsedMs)}</p>
                 <p className="text-xs text-muted mt-0.5">since {formatClockTime(r.clockIn)}</p>
+                {/* CB, Oct 2026, circling this card: "make sure we see the schedule of the
+                    person that's scheduled here on the clock while the clock is running." Null
+                    for an unscheduled/ad-hoc clock-in — nothing on the books for them today — so
+                    this line just doesn't render rather than showing a dash. */}
+                {r.scheduledStartTime && r.scheduledEndTime && (
+                  <p className="text-xs text-muted mt-0.5">
+                    Scheduled {formatTime12h(r.scheduledStartTime)} – {formatTime12h(r.scheduledEndTime)}
+                  </p>
+                )}
               </div>
             </div>
           );
