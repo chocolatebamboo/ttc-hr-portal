@@ -15,19 +15,32 @@ function formatAnnouncementDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
-/** Same tabbed-page pattern as Documents and Onboarding: one page, "Announcements" for
- *  everyone and an admin-only "Manage" tab for composing/removing posts. */
+/** "Oct 3, 9:00 AM" — date + time together, for the admin list's Starts/Ends range (the
+ *  employee-facing feed below still only ever shows the bare date via formatAnnouncementDate
+ *  above; a team member reading a post doesn't need to know it went up at 9:03 vs 9:00). */
+function formatAnnouncementDateTime(iso: string): string {
+  const d = new Date(iso);
+  const datePart = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const timePart = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${datePart}, ${timePart}`;
+}
+
+/** CB, Oct 2026, looking at this page with two tabs both basically showing the same list: "I
+ *  feel like we could combine the manage with the announcements because I'm seeing like two
+ *  announcements and I feel like we could kind of combine it and make it cleaner." There was
+ *  never a real reason for an admin to see the plain read-only feed AND a separate "Manage"
+ *  list of the same posts — the admin list already shows everything the feed did, plus a
+ *  Live/Scheduled/Expired badge and Delete right on the row. So canManage no longer renders a
+ *  tab switcher at all: an admin gets the one list (AdminAnnouncementsList, Delete included), a
+ *  regular employee still gets the plain read-only AnnouncementFeed, same as before. */
 export default function AnnouncementsView({ canManage }: { canManage: boolean }) {
-  const [tab, setTab] = useState<"feed" | "manage">("feed");
   // CB, Sept 2026: "creating an announcement currently requires going through Manage first" —
-  // she wants that extra step gone and the create action itself more visible. This opens the
-  // same ComposeAnnouncementForm the Manage tab already uses, right here on the main page, so
-  // posting one is a single click from wherever an admin already is — Manage still exists
-  // underneath for editing the list/deleting, this is just a faster front door to the same form.
+  // she wanted that extra step gone. This is the one and only "New Announcement" toggle now
+  // (the Manage tab's own separate copy of this same toggle is gone along with the tab itself).
   const [composeOpen, setComposeOpen] = useState(false);
-  // Bumped after a successful post so the feed below (which owns its own fetch-on-mount state)
-  // re-fetches by remounting, rather than this view reaching into AnnouncementFeed's internals.
-  const [feedKey, setFeedKey] = useState(0);
+  // Bumped after a successful post so the list below (which owns its own fetch-on-mount state)
+  // re-fetches by remounting, rather than this view reaching into its internals.
+  const [listKey, setListKey] = useState(0);
 
   return (
     <div className="max-w-3xl">
@@ -47,50 +60,18 @@ export default function AnnouncementsView({ canManage }: { canManage: boolean })
         <ComposeAnnouncementForm
           onCreated={() => {
             setComposeOpen(false);
-            setFeedKey((k) => k + 1);
+            setListKey((k) => k + 1);
           }}
         />
       )}
 
-      {canManage && (
-        <div className="flex gap-1.5 mb-5 border-b border-border">
-          <TabButton active={tab === "feed"} onClick={() => setTab("feed")}>
-            Announcements
-          </TabButton>
-          <TabButton active={tab === "manage"} onClick={() => setTab("manage")}>
-            Manage
-          </TabButton>
-        </div>
-      )}
-
-      {tab === "feed" ? <AnnouncementFeed key={feedKey} /> : <AdminAnnouncementsPanel />}
+      {canManage ? <AdminAnnouncementsList key={listKey} /> : <AnnouncementFeed />}
     </div>
   );
 }
 
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-        active ? "border-accent text-accent-ink" : "border-transparent text-muted hover:text-foreground"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
 // ---------------------------------------------------------------------------
-// Employee-facing feed
+// Employee-facing feed (unchanged — read-only, no manage affordances)
 // ---------------------------------------------------------------------------
 
 function AnnouncementFeed() {
@@ -159,13 +140,18 @@ function AnnouncementFeed() {
 }
 
 // ---------------------------------------------------------------------------
-// Admin: Manage
+// Admin: the one combined list (was "Manage", formerly a second tab alongside a plain feed)
 // ---------------------------------------------------------------------------
 
-function AdminAnnouncementsPanel() {
+function announcementBadge(a: AnnouncementAdminDTO): { label: string; className: string } {
+  if (a.isActive) return { label: "Live", className: "bg-emerald-100 text-emerald-800" };
+  if (new Date(a.publishDate) > new Date()) return { label: "Scheduled", className: "bg-amber-100 text-amber-800" };
+  return { label: "Expired", className: "bg-black/5 text-muted" };
+}
+
+function AdminAnnouncementsList() {
   const [announcements, setAnnouncements] = useState<AnnouncementAdminDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
-  const [formOpen, setFormOpen] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   async function load() {
@@ -196,88 +182,107 @@ function AdminAnnouncementsPanel() {
     }
   }
 
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <p className="text-sm text-muted max-w-md">
-          Post a company-wide, department, or individual announcement.
-        </p>
-        <button
-          onClick={() => setFormOpen((o) => !o)}
-          className={formOpen ? "btn-neutral text-sm px-4 py-2 shrink-0" : "btn-primary text-sm px-4 py-2 shrink-0"}
-        >
-          {formOpen ? "Cancel" : "New Announcement"}
-        </button>
+  if (loadState === "loading") {
+    return (
+      <div className="space-y-2">
+        {[0, 1].map((i) => (
+          <div key={i} className="h-16 rounded-xl border border-border bg-surface animate-pulse" />
+        ))}
       </div>
+    );
+  }
 
-      {formOpen && (
-        <ComposeAnnouncementForm
-          onCreated={() => {
-            setFormOpen(false);
-            load();
-          }}
-        />
-      )}
+  if (loadState === "error") {
+    return (
+      <div className="rounded-xl border border-border bg-surface p-6 text-sm text-accent">
+        Unable to load announcements. Please try again.
+      </div>
+    );
+  }
 
-      {loadState === "loading" && (
-        <div className="space-y-2 mt-4">
-          {[0, 1].map((i) => (
-            <div key={i} className="h-16 rounded-xl border border-border bg-surface animate-pulse" />
-          ))}
-        </div>
-      )}
+  if (loadState === "empty") {
+    return (
+      <div className="rounded-xl border border-border bg-surface p-8 text-center text-sm text-muted flex flex-col items-center gap-2">
+        <MegaphoneIcon className="h-8 w-8 text-muted/60" />
+        No announcements have been posted yet.
+      </div>
+    );
+  }
 
-      {loadState === "error" && (
-        <div className="rounded-xl border border-border bg-surface p-6 text-sm text-accent mt-4">
-          Unable to load announcements. Please try again.
-        </div>
-      )}
-
-      {loadState === "empty" && (
-        <div className="rounded-xl border border-border bg-surface p-6 text-sm text-muted mt-4">
-          No announcements have been posted yet.
-        </div>
-      )}
-
-      {loadState === "ready" && (
-        <div className="mt-4 bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
-          {announcements.map((a) => (
-            <div key={a.id} className="px-4 py-3.5 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm font-medium truncate">{a.title}</p>
-                  {!a.isActive && (
-                    <span className="text-[10px] uppercase tracking-wide font-medium text-muted bg-black/[0.04] rounded-full px-2 py-0.5 shrink-0">
-                      {new Date(a.publishDate) > new Date() ? "Scheduled" : "Expired"}
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-muted truncate">
-                  {a.audienceType === "EVERYONE" ? "Everyone" : a.audienceLabel} · Posted{" "}
-                  {formatAnnouncementDate(a.publishDate)} · {a.authorName}
-                </p>
+  return (
+    <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
+      {announcements.map((a) => {
+        const badge = announcementBadge(a);
+        return (
+          <div key={a.id} className="px-4 py-3.5 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-medium truncate">{a.title}</p>
+                <span
+                  className={`text-[10px] uppercase tracking-wide font-semibold rounded-full px-2 py-0.5 shrink-0 ${badge.className}`}
+                >
+                  {badge.label}
+                </span>
               </div>
-              <button
-                onClick={() => removeAnnouncement(a.id)}
-                disabled={busyId === a.id}
-                aria-label={`Delete "${a.title}"`}
-                className="btn-neutral text-xs px-3 py-1.5 flex items-center gap-1.5 shrink-0"
-              >
-                <TrashIcon className="h-3.5 w-3.5" />
-                {busyId === a.id ? "Deleting…" : "Delete"}
-              </button>
+              <p className="text-xs text-muted truncate mt-0.5">
+                {formatAnnouncementDateTime(a.publishDate)} – {a.expirationDate ? formatAnnouncementDateTime(a.expirationDate) : "no end date"}
+              </p>
+              <p className="text-xs text-muted truncate">
+                {a.audienceType === "EVERYONE" ? "Everyone" : a.audienceLabel} · {a.authorName}
+              </p>
             </div>
-          ))}
-        </div>
-      )}
+            <button
+              onClick={() => removeAnnouncement(a.id)}
+              disabled={busyId === a.id}
+              aria-label={`Delete "${a.title}"`}
+              className="h-8 w-8 flex items-center justify-center rounded-full text-muted hover:text-rose-600 hover:bg-rose-600/10 transition-colors disabled:opacity-50 shrink-0"
+            >
+              <TrashIcon className="h-4 w-4" />
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
+}
+
+/** "YYYY-MM-DDTHH:mm" for an <input type="datetime-local">, in the viewer's own local time —
+ *  deliberately NOT toISOString() (that's UTC, and would silently shift the prefilled time by
+ *  the viewer's own offset). */
+function toDatetimeLocalValue(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** A <input type="datetime-local"> value is parsed by the browser as THIS browser's own local
+ *  time (no "Z", no offset) — exactly the pattern combineDateAndTime (src/lib/time.ts) already
+ *  relies on for clock-in/out correction. Converting to a real ISO string here, client-side,
+ *  before it ever reaches the server means the server (which may run in a different timezone
+ *  than the admin filling out this form — Render runs UTC) parses an unambiguous instant rather
+ *  than re-interpreting a bare "2026-10-03T09:00" as ITS OWN local time, which would silently
+ *  shift the admin's intended time. */
+function datetimeLocalToISOString(value: string): string | undefined {
+  if (!value) return undefined;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
 }
 
 function ComposeAnnouncementForm({ onCreated }: { onCreated: () => void }) {
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
-  const [expirationDate, setExpirationDate] = useState("");
+  // CB, Oct 2026: "I want it to be mandatory to schedule how long it is... from this date and
+  // this time to this date and this time." Both fields are now required `datetime-local`
+  // inputs (date AND time), replacing the old optional date-only "Expires" field. Prefilled to
+  // sensible defaults — Starts now, Ends 7 days from now (the same default window this form
+  // used to apply silently when the field was left blank) — so posting still takes one click
+  // for the common case, but the actual window is always visible and always a deliberate choice
+  // rather than an invisible fallback.
+  const [publishDate, setPublishDate] = useState(() => toDatetimeLocalValue(new Date()));
+  const [expirationDate, setExpirationDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    return toDatetimeLocalValue(d);
+  });
   const [audienceType, setAudienceType] = useState<AnnouncementAudienceType>("EVERYONE");
   const [departmentIds, setDepartmentIds] = useState<string[]>([]);
   const [employeeIds, setEmployeeIds] = useState<string[]>([]);
@@ -308,6 +313,16 @@ function ComposeAnnouncementForm({ onCreated }: { onCreated: () => void }) {
       setErrorMessage("Choose at least one team member.");
       return;
     }
+    if (!publishDate || !expirationDate) {
+      setStatus("error");
+      setErrorMessage("Choose when this announcement starts and ends.");
+      return;
+    }
+    if (new Date(expirationDate).getTime() <= new Date(publishDate).getTime()) {
+      setStatus("error");
+      setErrorMessage("The end must be after the start.");
+      return;
+    }
 
     setStatus("submitting");
     setErrorMessage("");
@@ -319,7 +334,8 @@ function ComposeAnnouncementForm({ onCreated }: { onCreated: () => void }) {
         body: JSON.stringify({
           title,
           message,
-          expirationDate: expirationDate || undefined,
+          publishDate: datetimeLocalToISOString(publishDate),
+          expirationDate: datetimeLocalToISOString(expirationDate),
           audienceType,
           departmentIds: audienceType === "DEPARTMENTS" ? departmentIds : undefined,
           employeeIds: audienceType === "EMPLOYEES" ? employeeIds : undefined,
@@ -427,29 +443,44 @@ function ComposeAnnouncementForm({ onCreated }: { onCreated: () => void }) {
         </div>
       )}
 
-      {/* Oct 2026 (CB, after the "should not be there forever" default shipped: she still
-          wasn't noticing the field itself — "I don't see where it is... should be a feature
-          when creating an announcement"): the expiration date WAS already here, just reading
-          as one more plain field beside Visible to, easy to tab past. Pulled out of that row
-          into its own highlighted block — same border-accent/30 bg-accent/5 callout treatment
+      {/* Oct 2026 (CB: "I want it to be mandatory to schedule how long it is... from this date
+          and this time to this date and this time, to be honest, so it reads well"): replaces
+          the old optional, date-only "Expires" field — Starts and Ends are both required and
+          both carry a time, not just a date, so the full window is spelled out up front instead
+          of relying on a silent default. Kept in the same highlighted callout treatment
           DocumentsView/AttendanceAdminView already use for something an admin shouldn't skim
-          past — with the default spelled out as a sentence rather than a parenthetical in a
-          label, and placed as the last decision before posting instead of a mid-form field. */}
+          past. */}
       <div className="rounded-xl border border-accent/30 bg-accent/5 p-4">
-        <div className="flex items-center gap-2 mb-1">
+        <div className="flex items-center gap-2 mb-2.5">
           <ClockIcon className="h-4 w-4 text-accent-ink shrink-0" />
           <span className="text-sm font-semibold text-accent-ink">How long should this run?</span>
         </div>
-        <p className="text-xs text-muted mb-2.5">
-          Leave this blank and the post expires automatically 7 days after it goes up. Pick a
-          date to run it longer, or end it sooner.
-        </p>
-        <input
-          type="date"
-          value={expirationDate}
-          onChange={(e) => setExpirationDate(e.target.value)}
-          className="w-full sm:w-auto rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-accent"
-        />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1">
+              Starts <span className="text-accent-ink">*</span>
+            </label>
+            <input
+              type="datetime-local"
+              required
+              value={publishDate}
+              onChange={(e) => setPublishDate(e.target.value)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-accent"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1">
+              Ends <span className="text-accent-ink">*</span>
+            </label>
+            <input
+              type="datetime-local"
+              required
+              value={expirationDate}
+              onChange={(e) => setExpirationDate(e.target.value)}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-base outline-none focus:ring-2 focus:ring-accent"
+            />
+          </div>
+        </div>
       </div>
 
       {status === "error" && (
