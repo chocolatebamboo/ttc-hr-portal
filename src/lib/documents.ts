@@ -451,6 +451,41 @@ export async function createDocumentFolder(
   });
 }
 
+/**
+ * Admin moves a document into a different library folder, or back out to the root (folderId
+ * null) — CB, Oct 2026: "click and hold and drag documents into a folder if needed." The actual
+ * press-and-hold gesture lives client-side (DocumentsView.tsx, hand-rolled with Pointer Events
+ * the same way src/components/DragReorderList.tsx already does for this app's other drag
+ * interaction — no new npm dependency CB would have to hand-paste into GitHub's web editor);
+ * this is just the write it ends in. document_write's "for all" RLS policy (prisma/rls.sql) is
+ * already admin-or-nothing with no column-level restriction, so moving a document is no
+ * different from any other admin edit here and needed no new policy.
+ */
+export async function moveDocumentToFolder(
+  actor: CurrentEmployee,
+  documentId: string,
+  folderId: string | null
+) {
+  if (!isAdmin(actor)) throw new ForbiddenError();
+
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const doc = await tx.document.findUnique({ where: { id: documentId } });
+    if (!doc) throw new DocumentNotFoundError();
+
+    if (folderId) {
+      const folder = await tx.documentFolder.findUnique({ where: { id: folderId } });
+      if (!folder) throw new DocumentFolderNotFoundError();
+    }
+
+    // Dropped back onto the folder it's already in (or back onto itself at the root) — the
+    // state the drop asked for is already true, same "treat a redundant action as a success, not
+    // an error" call acknowledgeDocument above already makes for a double-click.
+    if (doc.folderId === folderId) return doc;
+
+    return tx.document.update({ where: { id: documentId }, data: { folderId } });
+  });
+}
+
 function isUniqueConstraintError(err: unknown): boolean {
   return typeof err === "object" && err !== null && "code" in err && err.code === "P2002";
 }
