@@ -1,7 +1,7 @@
 import type { Role } from "@/types";
 import {
   FolderIcon,
-  ChecklistIcon,
+  GraduationCapIcon,
   ChatIcon,
   UsersIcon,
   MegaphoneIcon,
@@ -37,7 +37,12 @@ export interface QuickActionDef {
  */
 const BASE_ACTIONS: QuickActionDef[] = [
   { key: "documents", label: "View Documents", href: "/documents", icon: FolderIcon, tone: "amber" },
-  { key: "onboarding", label: "View Onboarding", href: "/onboarding", icon: ChecklistIcon, tone: "emerald" },
+  // Oct 2026 (CB: "I don't like that onboarding icon because it reads too much like... a
+  // checkbox icon"): this used to be ChecklistIcon too — the exact same icon as the "Tasks"
+  // feature below, just tinted green, which was the actual source of the complaint. Swapped to
+  // the graduation cap already used for Onboarding's own Training items (OnboardingView.tsx's
+  // TYPE_ICON.TRAINING) so the two destinations are never visually interchangeable again.
+  { key: "onboarding", label: "View Onboarding", href: "/onboarding", icon: GraduationCapIcon, tone: "emerald" },
   // key stays "notes" (not renamed to "messages") so nobody's already-saved quick-action picks
   // silently drop this tile — see this file's own doc comment on why the key, not the href/
   // label, is what a saved pick actually points at.
