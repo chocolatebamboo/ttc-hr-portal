@@ -44,6 +44,13 @@ function targetHref(n: NotificationDTO): string {
   }
   if (n.targetType === "PtoRequest") return "/time-off";
   if (n.targetType === "DateTask") return "/dashboard";
+  // CB, Oct 2026, tapping an announcement notification: "when I click on the notification...
+  // it should take you to [it]." Carries the specific announcement's id as a query param —
+  // AnnouncementsView reads it off window.location the same way MessagesInboxView already does
+  // for its own ?dm= deep link (see that file's comment for why: avoids a Suspense boundary),
+  // scrolls to that post and opens it, instead of just landing on the announcements list in
+  // general the way this used to fall through to the /dashboard default below.
+  if (n.targetType === "Announcement") return `/announcements?id=${n.targetId}`;
   return "/dashboard";
 }
 
