@@ -123,12 +123,28 @@ export async function uploadDirectMessageFile(file: File, participantA: string, 
  * row through withRlsContext (src/lib/documents.ts) first and confirm it's visible to the
  * caller — that read is the actual authorization check; this function trusts its input
  * completely and will happily sign a URL for any storage key it's given.
+ *
+ * `download` (CB, Oct 2026: "I should be able to... download that document as well" as a
+ * distinct option from viewing it): when set, Supabase stamps the signed URL's response with
+ * `Content-Disposition: attachment`, so opening it saves the file instead of letting the browser
+ * render it inline — passing the real filename (not left as the default/true) also means the
+ * saved file is named after the original upload rather than its mangled storage key. Omitted
+ * (the default, used by every other caller of this function), the URL renders inline exactly as
+ * it always has — PDFs/images open in the browser's own viewer, everything else downloads
+ * because there's nothing else the browser can do with it.
  */
-export async function getSignedDownloadUrl(storageKey: string): Promise<string> {
+export async function getSignedDownloadUrl(
+  storageKey: string,
+  options?: { download?: string | boolean }
+): Promise<string> {
   const admin = createSupabaseAdminClient();
   const { data, error } = await admin.storage
     .from(BUCKET)
-    .createSignedUrl(storageKey, SIGNED_URL_TTL_SECONDS);
+    .createSignedUrl(
+      storageKey,
+      SIGNED_URL_TTL_SECONDS,
+      options?.download !== undefined ? { download: options.download } : undefined
+    );
 
   if (error || !data) {
     throw new DocumentUploadError(
