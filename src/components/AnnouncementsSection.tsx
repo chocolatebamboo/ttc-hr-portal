@@ -54,6 +54,14 @@ async function dismissAnnouncement(announcementId: string): Promise<void> {
  * now ALSO gets a small always-visible × button (stopping its own click from following the
  * card's Link, same `clear()` the swipe action calls) — the swipe keeps working for anyone used
  * to it, the × is there for everyone else to actually find.
+ *
+ * Oct 2026 (CB, circling the "Quick reminder"/"Your availability..." rows on a team member's
+ * Home screen: clicking one should go "specifically to that particular one, not just generally
+ * in the area"): both cards' Links now carry `?id=<announcementId>`, the same deep-link format
+ * NotificationBell already builds for an announcement notification. /announcements (see
+ * AnnouncementsView.tsx) reads that `id` off the URL on mount and scrolls to + briefly
+ * highlights that exact post — this widget just needed to start passing the id through instead
+ * of linking to the bare feed.
  */
 export default function AnnouncementsSection({
   className,
@@ -86,7 +94,7 @@ export default function AnnouncementsSection({
           onAction={() => clear(featured.id)}
         >
           <Link
-            href="/announcements"
+            href={`/announcements?id=${featured.id}`}
             className="relative block rounded-2xl p-4 text-white transition-transform hover:-translate-y-0.5"
             style={{ background: "linear-gradient(135deg, var(--ttc-pink-ink), var(--ttc-pink))" }}
           >
@@ -124,7 +132,7 @@ export default function AnnouncementsSection({
                 onAction={() => clear(a.id)}
               >
                 <Link
-                  href="/announcements"
+                  href={`/announcements?id=${a.id}`}
                   className="flex items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-black/[0.02] transition-colors"
                 >
                   <span className="truncate">{a.title}</span>
