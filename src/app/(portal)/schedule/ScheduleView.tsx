@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import ShiftStatusPill from "@/components/ShiftStatusPill";
-import MyDateTasksPanel from "@/components/MyDateTasksPanel";
 import { ChecklistIcon } from "@/components/icons";
 import { formatSlotDate, formatTime12h } from "@/lib/availability-format";
 import type { ShiftDTO } from "@/types";
@@ -19,12 +19,12 @@ const UPCOMING_STATUSES = new Set(["UPCOMING", "IN_PROGRESS", "CHANGE_REQUESTED"
  * A team member can't edit or delete anything here directly (client spec: "the Team Member must
  * not be able to edit or delete it directly") — phase 2 adds the one path around that: Request
  * Shift Change / Request Cancellation, below. Phase 3 (client spec, Sept 2026): "re-point tasks
- * and messages onto shifts instead of the original availability submission" — each shift now has
- * its own expandable task list (MyDateTasksPanel), same component AvailabilityCalendar already
- * uses for an availability date, just scoped to the shift's own date instead of an availability
- * submission's. Correction brief #2 (Sept 2026): the standalone per-shift conversation that used
- * to sit alongside that list is gone — each task now carries its own comment thread instead (see
- * DateTaskRow's own doc comment).
+ * and messages onto shifts instead of the original availability submission" — each shift's
+ * "Tasks" link below points at that date's own group on the My Tasks page (/tasks?date=<date>).
+ * Oct 2026 (CB, approving the mockup): this used to expand an inline MyDateTasksPanel right on
+ * this card, same component AvailabilityCalendar used for an availability date; both now link out
+ * to the real Tasks page instead — see MyTasksView's own doc comment for why (organizing a team
+ * member's tasks by date, including past ones, needed a real page, not a per-card panel).
  *
  * Oct 2026 (CB, on this page specifically: "more aesthetic and clean" on desktop): the shift
  * lists below used to be a single stacked column capped at max-w-2xl regardless of screen size —
@@ -35,10 +35,9 @@ const UPCOMING_STATUSES = new Set(["UPCOMING", "IN_PROGRESS", "CHANGE_REQUESTED"
  * forms already use), collapsing back to one column on mobile exactly as before. The cards
  * themselves, and everything in them, are unchanged.
  */
-export default function ScheduleView({ employeeId }: { employeeId: string }) {
+export default function ScheduleView() {
   const [shifts, setShifts] = useState<ShiftDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
-  const [openShiftId, setOpenShiftId] = useState<string | null>(null);
 
   async function load() {
     setLoadState("loading");
@@ -99,14 +98,7 @@ export default function ScheduleView({ employeeId }: { employeeId: string }) {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             {upcoming.map((s) => (
-              <ShiftCard
-                key={s.id}
-                shift={s}
-                employeeId={employeeId}
-                expanded={openShiftId === s.id}
-                onToggleExpand={() => setOpenShiftId(openShiftId === s.id ? null : s.id)}
-                onChanged={load}
-              />
+              <ShiftCard key={s.id} shift={s} onChanged={load} />
             ))}
           </div>
         )}
@@ -119,13 +111,7 @@ export default function ScheduleView({ employeeId }: { employeeId: string }) {
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             {past.map((s) => (
-              <ShiftCard
-                key={s.id}
-                shift={s}
-                employeeId={employeeId}
-                expanded={openShiftId === s.id}
-                onToggleExpand={() => setOpenShiftId(openShiftId === s.id ? null : s.id)}
-              />
+              <ShiftCard key={s.id} shift={s} />
             ))}
           </div>
         </section>
@@ -141,15 +127,9 @@ export default function ScheduleView({ employeeId }: { employeeId: string }) {
  *  request right up until it's actually over; see deriveShiftDisplayStatus's own doc comment). */
 function ShiftCard({
   shift,
-  employeeId,
-  expanded,
-  onToggleExpand,
   onChanged,
 }: {
   shift: ShiftDTO;
-  employeeId: string;
-  expanded: boolean;
-  onToggleExpand: () => void;
   onChanged?: () => void;
 }) {
   const [mode, setMode] = useState<"none" | "change" | "cancel">("none");
@@ -309,32 +289,18 @@ function ShiftCard({
       )}
 
       {/* Phase 3 (client spec, Sept 2026): "re-point tasks and messages onto shifts instead of
-          the original availability submission" — same task list AvailabilityCalendar already
-          shows for an availability date, now on the shift itself. Correction brief #2 (Sept
-          2026): each task now carries its own comment thread instead of a standalone per-shift
-          conversation — see MyDateTasksPanel's own doc comment. */}
-      <button
-        type="button"
-        onClick={onToggleExpand}
-        className={`mt-3 flex items-center gap-1.5 text-xs font-medium transition-colors ${
-          expanded ? "text-accent-ink" : "text-muted hover:text-accent-ink"
-        }`}
+          the original availability submission" — same tasks AvailabilityCalendar already links to
+          for an availability date, now on the shift itself. Oct 2026 (CB, approving the mockup):
+          this used to expand an inline task list right on this card; now it's a real link to that
+          date's own group on the My Tasks page, same deep-link shape as AnnouncementsSection's
+          ?id= and AvailabilityCalendar's own ?date= link just above it in this app. */}
+      <Link
+        href={`/tasks?date=${shift.date}`}
+        className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-muted hover:text-accent-ink transition-colors"
       >
         <ChecklistIcon className="h-3.5 w-3.5" />
         Tasks
-      </button>
-
-      {expanded && (
-        <div className="mt-2.5 space-y-2.5">
-          <div>
-            <p className="text-xs font-semibold text-muted mb-1 flex items-center gap-1.5">
-              <ChecklistIcon className="h-3.5 w-3.5" />
-              Tasks for this shift
-            </p>
-            <MyDateTasksPanel employeeId={employeeId} taskDate={shift.date} />
-          </div>
-        </div>
-      )}
+      </Link>
     </div>
   );
 }
