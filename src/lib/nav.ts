@@ -4,7 +4,7 @@ import {
   ClockIcon,
   CalendarIcon,
   FolderIcon,
-  ChecklistIcon,
+  GraduationCapIcon,
   CheckCircleIcon,
   UsersIcon,
   MegaphoneIcon,
@@ -46,12 +46,15 @@ export const EMPLOYEE_NAV: NavItem[] = [
   // matching the two separate database records behind them (see Shift in prisma/schema.prisma).
   { label: "My Schedule", href: "/schedule", icon: CalendarIcon },
   { label: "Documents", href: "/documents", icon: FolderIcon },
-  { label: "Onboarding", href: "/onboarding", icon: ChecklistIcon },
+  // Oct 2026 (CB: "I don't like that onboarding icon because it reads too much like... a
+  // checkbox icon"): was ChecklistIcon here too, same icon as "My Tasks" just below — now the
+  // graduation cap already used for Onboarding's own Training items, so the two keep reading as
+  // visually distinct in the sidebar (CheckCircleIcon on My Tasks, below, was already chosen for
+  // that same reason and didn't need to change).
+  { label: "Onboarding", href: "/onboarding", icon: GraduationCapIcon },
   // CB, Oct 2026: "there should be like a task page so you can see all your tasks... I want to
   // see it cleanly." Every task assigned to you, across every date (not just one date's card),
-  // gathered in one place — see src/app/(portal)/tasks/MyTasksView.tsx. CheckCircleIcon rather
-  // than reusing ChecklistIcon (already Onboarding's icon just above) so the two links stay
-  // visually distinct in the sidebar.
+  // gathered in one place — see src/app/(portal)/tasks/MyTasksView.tsx.
   { label: "My Tasks", href: "/tasks", icon: CheckCircleIcon },
   // CB, Sept 2026: "instead of notes, I want it to be messages... so its no longer notes its
   // 'My Messages.'" /messages is the unified inbox — the old general employee/supervisor
