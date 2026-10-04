@@ -87,6 +87,18 @@ model Employee {
   supervisor   Employee?  @relation("SupervisorToReports", fields: [supervisorId], references: [id])
   reports      Employee[] @relation("SupervisorToReports")
 
+  // CB, Oct 2026: "for Shawn and Daijour let's make sure that they get a notification... the
+  // team member selects their schedule and it's ready to be approved... I want an email to be
+  // sent out to them." resolveAvailabilityReviewerIds (src/lib/availability.ts) already notifies
+  // every SUPER_ADMIN/HR_ADMIN plus the submitter's own supervisor for every availability
+  // submission — Shawn (HR_ADMIN) was already covered, but Daijour (SUPERVISOR) only heard about
+  // it when he happened to be that specific submitter's supervisor, not for the team as a whole.
+  // A standing, per-person flag rather than hardcoding employee ids in source — same shape as
+  // clocksIn just above: independent of role, toggled per person, defaults false so nothing
+  // changes for anyone else until it's turned on. Set true for Shawn and Daijour directly in the
+  // database (see migration) rather than through an admin UI toggle, which doesn't exist yet.
+  isAvailabilityReviewer Boolean @default(false)
+
   ttcEmail       String  @unique
   workPhone      String?
   personalPhone  String?
