@@ -262,12 +262,19 @@ export async function listAvailabilityForEmployee(actor: CurrentEmployee, employ
  * a changed schedule is a new submission that goes through review again rather than quietly
  * rewriting what a supervisor already signed off on.
  */
-/** Who should hear about a freshly-submitted Availability — every admin (SUPER_ADMIN/HR_ADMIN)
- *  plus the submitter's own supervisor, if they have one. Deliberately the same set of people
+/** Who should hear about a freshly-submitted Availability — every admin (SUPER_ADMIN/HR_ADMIN),
+ *  the submitter's own supervisor if they have one, and anyone flagged isAvailabilityReviewer
+ *  (CB, Oct 2026: "for Shawn and Daijour let's make sure that they get a notification... the
+ *  team member selects their schedule and it's ready to be approved" — Daijour is a SUPERVISOR,
+ *  not an admin, so without this he'd only hear about submissions from his own direct reports,
+ *  not the team as a whole). The first two groups are the same set of people
  *  assertCanReviewAvailability (src/lib/authorization.ts) already lets review this particular
  *  employee's submission, just resolved the other direction: given the submitter, who can act on
  *  it, rather than given a reviewer, can they act on this submitter. A supervisor who isn't this
- *  employee's own supervisor never hears about it just because they supervise someone else. */
+ *  employee's own supervisor never hears about it just because they supervise someone else —
+ *  isAvailabilityReviewer is the deliberate, named-person exception to that. Self-excluded: if
+ *  the submitter themselves is flagged (e.g. Daijour submitting his own availability), they don't
+ *  get notified about their own submission. */
 async function resolveAvailabilityReviewerIds(tx: PrismaClient, employeeId: string): Promise<string[]> {
   const submitter = await tx.employee.findUnique({ where: { id: employeeId }, select: { supervisorId: true } });
   const admins = await tx.employee.findMany({
@@ -276,6 +283,12 @@ async function resolveAvailabilityReviewerIds(tx: PrismaClient, employeeId: stri
   });
   const ids = new Set(admins.map((a) => a.id));
   if (submitter?.supervisorId) ids.add(submitter.supervisorId);
+  const standingReviewers = await tx.employee.findMany({
+    where: { isAvailabilityReviewer: true, deactivatedAt: null },
+    select: { id: true },
+  });
+  for (const r of standingReviewers) ids.add(r.id);
+  ids.delete(employeeId);
   return Array.from(ids);
 }
 
