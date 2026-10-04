@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MegaphoneIcon, TrashIcon, ClockIcon, ChevronDownIcon } from "@/components/icons";
 import type {
   AnnouncementDTO,
@@ -41,6 +41,22 @@ export default function AnnouncementsView({ canManage }: { canManage: boolean })
   // Bumped after a successful post so the list below (which owns its own fetch-on-mount state)
   // re-fetches by remounting, rather than this view reaching into its internals.
   const [listKey, setListKey] = useState(0);
+  // CB, Oct 2026: "when I click on the notification it still doesn't take me to the
+  // notification." NotificationBell now links an announcement notification to
+  // /announcements?id=<id> — read straight off window.location (not next/navigation's
+  // useSearchParams), the same way MessagesInboxView already reads its own ?dm= deep link, so
+  // this page doesn't need a Suspense boundary. Cleared off the URL immediately after, so
+  // refreshing or sharing this page's link doesn't keep re-focusing the same post.
+  const [focusId, setFocusId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("id");
+    if (id) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setFocusId(id);
+      window.history.replaceState(null, "", "/announcements");
+    }
+  }, []);
 
   return (
     <div className="max-w-3xl">
@@ -65,7 +81,11 @@ export default function AnnouncementsView({ canManage }: { canManage: boolean })
         />
       )}
 
-      {canManage ? <AdminAnnouncementsList key={listKey} /> : <AnnouncementFeed />}
+      {canManage ? (
+        <AdminAnnouncementsList key={listKey} focusId={focusId} />
+      ) : (
+        <AnnouncementFeed focusId={focusId} />
+      )}
     </div>
   );
 }
@@ -74,9 +94,15 @@ export default function AnnouncementsView({ canManage }: { canManage: boolean })
 // Employee-facing feed (unchanged — read-only, no manage affordances)
 // ---------------------------------------------------------------------------
 
-function AnnouncementFeed() {
+function AnnouncementFeed({ focusId }: { focusId: string | null }) {
   const [announcements, setAnnouncements] = useState<AnnouncementDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
+  // The post a notification tap just landed on — briefly highlighted and scrolled to once the
+  // list is ready (see the effect below). hasFocused guards this from firing again later (e.g.
+  // if this component ever re-renders for an unrelated reason) — a notification should only ever
+  // jump you to its post once per visit, not re-grab the scroll position repeatedly.
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const hasFocused = useRef(false);
 
   useEffect(() => {
     async function load() {
@@ -93,6 +119,21 @@ function AnnouncementFeed() {
     }
     load();
   }, []);
+
+  // CB, Oct 2026: "when I click on the notification it still doesn't take me to the
+  // notification." focusId (read off the URL by the parent AnnouncementsView) is the specific
+  // post this view should land on.
+  useEffect(() => {
+    if (!focusId || loadState !== "ready" || hasFocused.current) return;
+    const el = document.querySelector(`[data-announcement-id="${focusId}"]`);
+    if (!el) return;
+    hasFocused.current = true;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setHighlightId(focusId);
+    const timer = window.setTimeout(() => setHighlightId(null), 2500);
+    return () => window.clearTimeout(timer);
+  }, [focusId, loadState]);
 
   if (loadState === "loading") {
     return (
@@ -124,7 +165,13 @@ function AnnouncementFeed() {
   return (
     <div className="space-y-3">
       {announcements.map((a) => (
-        <div key={a.id} className="bg-surface border border-border rounded-xl p-4">
+        <div
+          key={a.id}
+          data-announcement-id={a.id}
+          className={`bg-surface border border-border rounded-xl p-4 transition-colors duration-500 ${
+            highlightId === a.id ? "bg-[var(--ttc-pink)]/5 shadow-[inset_3px_0_0_var(--ttc-pink)]" : ""
+          }`}
+        >
           <div className="flex items-start justify-between gap-3 mb-1.5">
             <h2 className="text-sm font-semibold">{a.title}</h2>
             <span className="text-xs text-muted whitespace-nowrap shrink-0">
@@ -149,7 +196,7 @@ function announcementBadge(a: AnnouncementAdminDTO): { label: string; className:
   return { label: "Expired", className: "bg-black/5 text-muted" };
 }
 
-function AdminAnnouncementsList() {
+function AdminAnnouncementsList({ focusId }: { focusId: string | null }) {
   const [announcements, setAnnouncements] = useState<AnnouncementAdminDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -159,6 +206,10 @@ function AdminAnnouncementsList() {
   // already uses elsewhere in this app), rather than every row expanded by default and the list
   // turning into a wall of text.
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  // Same brief "you were sent here for this one" treatment AnnouncementFeed's own version uses —
+  // see that component's comment.
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const hasFocused = useRef(false);
 
   async function load() {
     setLoadState("loading");
@@ -177,6 +228,24 @@ function AdminAnnouncementsList() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, []);
+
+  // CB, Oct 2026: "when I click on the notification it still doesn't take me to the
+  // notification." focusId (read off the URL by the parent AnnouncementsView) opens that one
+  // row exactly as tapping it yourself would, then scrolls to and briefly highlights it. Guarded
+  // by hasFocused so a later reload (e.g. after deleting an unrelated post) doesn't reopen/rescroll
+  // to the same row a second time.
+  useEffect(() => {
+    if (!focusId || loadState !== "ready" || hasFocused.current) return;
+    if (!announcements.some((a) => a.id === focusId)) return;
+    hasFocused.current = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setExpandedId(focusId);
+    setHighlightId(focusId);
+    const el = document.querySelector(`[data-announcement-id="${focusId}"]`);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const timer = window.setTimeout(() => setHighlightId(null), 2500);
+    return () => window.clearTimeout(timer);
+  }, [focusId, loadState, announcements]);
 
   async function removeAnnouncement(id: string) {
     setBusyId(id);
@@ -221,7 +290,13 @@ function AdminAnnouncementsList() {
         const badge = announcementBadge(a);
         const open = expandedId === a.id;
         return (
-          <div key={a.id}>
+          <div
+            key={a.id}
+            data-announcement-id={a.id}
+            className={`transition-colors duration-500 ${
+              highlightId === a.id ? "bg-[var(--ttc-pink)]/5 shadow-[inset_3px_0_0_var(--ttc-pink)]" : ""
+            }`}
+          >
             <div className="px-4 py-3.5 flex items-center justify-between gap-3">
               {/* CB, Oct 2026: "I'm not able to click into them to see the full message." The
                   title/badge/dates/audience block is now a real button that expands this row in
