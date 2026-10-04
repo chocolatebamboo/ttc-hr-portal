@@ -56,12 +56,27 @@ export function ChevronRightIcon({ className = base }: IconProps) {
   );
 }
 
+/**
+ * Oct 2026 (CB, on this icon as it was used for the "Tasks" feature: "I want you to change the
+ * icon to be more of like a checklist icon"): the old version was just a rounded card with two
+ * checkmarks and two short lines — nothing in it actually read as a checklist specifically. This
+ * adds the one missing cue, a clip tab across the top, so it reads unmistakably as a clipboard/
+ * checklist rather than a generic rounded card. Same two checkmark+line rows as before, same
+ * hand-authored stroke style as every other icon in this file. See quick-actions.ts and nav.ts
+ * for why Onboarding no longer uses this same icon (it used to, which was the actual source of
+ * CB's separate "the onboarding icon reads too much like a checkbox" complaint) — this one now
+ * stays scoped to genuinely task/checklist-shaped things: My Tasks, the per-date Tasks links on
+ * Availability/My Schedule, and Onboarding's own TASK-type item icon.
+ */
 export function ChecklistIcon({ className = base }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
-      <rect x="4.5" y="3.5" width="15" height="17" rx="2" />
-      <path d="m8 8.2 1.3 1.3L11.8 7M8 15.2l1.3 1.3 2.5-2.5" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M14.5 8.5h3.2M14.5 15.5h3.2" strokeLinecap="round" />
+      <rect x="4.5" y="4.5" width="15" height="16" rx="2" />
+      <rect x="9" y="2.3" width="6" height="3.4" rx="1" />
+      <path d="m7.8 11 1.1 1.1L11 10" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M13 10.8h3.3" strokeLinecap="round" />
+      <path d="m7.8 15.8 1.1 1.1 2.1-2.1" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M13 15.6h3.3" strokeLinecap="round" />
     </svg>
   );
 }
