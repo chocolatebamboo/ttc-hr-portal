@@ -468,7 +468,7 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
               type="button"
               onClick={() => handleApproveChange(s.id)}
               disabled={busyId === s.id || !approveDate || !approveStartTime || !approveEndTime}
-              className="btn-outline self-start"
+              className="btn-outline text-xs px-3 py-1.5 self-start"
             >
               Confirm approval
             </button>
@@ -488,7 +488,7 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
               type="button"
               onClick={() => handleDeclineRequest(s.id)}
               disabled={busyId === s.id}
-              className="btn-outline self-start"
+              className="btn-outline text-xs px-3 py-1.5 self-start"
             >
               Confirm decline
             </button>
@@ -535,7 +535,7 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
               type="button"
               onClick={() => handleCancel(s.id)}
               disabled={busyId === s.id || !cancelReason.trim()}
-              className="btn-outline self-start"
+              className="btn-outline text-xs px-3 py-1.5 self-start"
             >
               Confirm cancel
             </button>
@@ -562,7 +562,7 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
               type="button"
               onClick={() => handleReassign(s.id)}
               disabled={busyId === s.id || !reassignTo}
-              className="btn-outline self-start"
+              className="btn-outline text-xs px-3 py-1.5 self-start"
             >
               Confirm reassign
             </button>
@@ -605,7 +605,18 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
     <div className="max-w-4xl">
       <div className="flex items-start justify-between gap-3 mb-1">
         <h1 className="page-title text-2xl">Team Schedule</h1>
-        <button type="button" className="btn-primary shrink-0" onClick={() => setShowCreate((v) => !v)}>
+        {/* CB, Oct 2026: "the button right now it's kinda looks scrunched in" — this was the one
+            page-header .btn-primary in the app with no size classes of its own (.btn-primary
+            carries no padding/font-size by default; every caller supplies it — see
+            MessagesInboxView's "New message"/AnnouncementsView's compose button for the same
+            title+button header shape), so it was rendering at whatever the surrounding text's
+            size happened to be with zero padding. Matched to that same text-sm px-3.5 py-2 size
+            other header-level primary buttons already use. */}
+        <button
+          type="button"
+          className="btn-primary text-sm px-3.5 py-2 shrink-0"
+          onClick={() => setShowCreate((v) => !v)}
+        >
           {showCreate ? "Cancel" : "New shift"}
         </button>
       </div>
@@ -865,7 +876,7 @@ function CreateShiftForm({
         type="button"
         disabled={!employeeId || !date}
         onClick={() => onCreate({ employeeId, date, startTime, endTime, note })}
-        className="btn-primary"
+        className="btn-primary text-sm px-5 py-2.5"
       >
         Create shift
       </button>
