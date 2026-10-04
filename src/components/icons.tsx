@@ -334,3 +334,16 @@ export function XIcon({ className = base }: IconProps) {
     </svg>
   );
 }
+
+// CB, Oct 2026: "I should be able to have an option to view the document internally" — the
+// Document Library's "View" action now opens an in-app preview modal (DocumentsView.tsx)
+// instead of just handing off to a new browser tab, so it gets its own glyph distinct from
+// DownloadIcon's "save a copy" action, which sits right next to it.
+export function EyeIcon({ className = base }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
+      <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="12" cy="12" r="2.8" />
+    </svg>
+  );
+}
