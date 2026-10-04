@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import AvailabilityStatusPill from "@/components/AvailabilityStatusPill";
 import JumpToTodayButton from "@/components/JumpToTodayButton";
-import MyDateTasksPanel from "@/components/MyDateTasksPanel";
 import SwipeReveal from "@/components/SwipeReveal";
 import { ChecklistIcon, ChevronDownIcon, TrashIcon } from "@/components/icons";
 import { formatSlotDate, formatTime12h } from "@/lib/availability-format";
@@ -86,8 +86,11 @@ function submissionsByDate(submissions: AvailabilityDTO[]): Map<string, Availabi
 }
 
 export interface AvailabilityCalendarControls {
-  /** The signed-in team member's own id — this calendar is always self-service, so it's the
-   *  employeeId every per-date MyDateTasksPanel below needs. */
+  /** The signed-in team member's own id — this calendar is always self-service. Oct 2026: no
+   *  longer read inside this component itself (the per-date "Tasks" link below now just points
+   *  at /tasks?date=<date> rather than rendering a self-scoped MyDateTasksPanel that needed it),
+   *  kept on the interface only because AvailabilityView's own callers already construct this
+   *  object with it. */
   employeeId: string;
   /** The signed-in team member's own submissions — newest first. This calendar is always
    *  self-service (submit your own availability); a supervisor/HR reviewing someone else's
@@ -310,7 +313,7 @@ export { useAvailabilityPanel };
  * Cancel button.
  */
 export default function AvailabilityCalendar({ controls }: { controls: AvailabilityCalendarControls }) {
-  const { submissions, employeeId } = controls;
+  const { submissions } = controls;
 
   // Ascending offset order (PAST_OFFSET .. MAX_FUTURE_OFFSET) so the array is already in
   // top-to-bottom render order with no reordering logic needed — past months first, current
@@ -469,7 +472,6 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
         <Panel
           key={viewingSubmission?.id ?? "draft"}
           viewingSubmission={viewingSubmission}
-          employeeId={employeeId}
           draftDates={draftDates}
           draft={draft}
           onUpdateTime={(dateKey, field, value) => setDraft((d) => ({ ...d, [dateKey]: { ...d[dateKey], [field]: value } }))}
@@ -607,7 +609,6 @@ function MonthSection({
 }
 export function Panel({
   viewingSubmission,
-  employeeId,
   draftDates,
   draft,
   onUpdateTime,
@@ -629,7 +630,6 @@ export function Panel({
   deleting,
 }: {
   viewingSubmission: AvailabilityDTO | undefined;
-  employeeId: string;
   draftDates: string[];
   draft: Record<string, { startTime: string; endTime: string }>;
   onUpdateTime: (dateKey: string, field: "startTime" | "endTime", value: string) => void;
@@ -712,7 +712,6 @@ export function Panel({
       {viewingSubmission ? (
         <SubmissionDetail
           submission={viewingSubmission}
-          employeeId={employeeId}
           onResubmit={onResubmit}
           onCancel={onCancel}
           cancelling={cancelling}
@@ -741,7 +740,6 @@ export function Panel({
 
 function SubmissionDetail({
   submission,
-  employeeId,
   onResubmit,
   onCancel,
   cancelling,
@@ -751,7 +749,6 @@ function SubmissionDetail({
   deleting,
 }: {
   submission: AvailabilityDTO;
-  employeeId: string;
   onResubmit?: () => void;
   onCancel?: () => void;
   cancelling?: boolean;
@@ -773,11 +770,6 @@ function SubmissionDetail({
   // to delete it and knock it off the schedule." Approved joins Cancelled as directly deletable
   // — see deleteAvailabilitySubmission's doc comment in src/lib/availability.ts.
   const canDelete = submission.status === "CANCELLED" || submission.status === "APPROVED";
-  // Which date's conversation is open — local to this one submission's panel rather than lifted
-  // up, since Panel remounts this component fresh (key={viewingSubmission?.id ?? "draft"})
-  // every time a different submission is opened, so there's never a stale open date to carry
-  // over from one submission to the next.
-  const [openDate, setOpenDate] = useState<string | null>(null);
 
   return (
     <div className="space-y-3">
@@ -787,31 +779,28 @@ function SubmissionDetail({
           <AvailabilityStatusPill status={submission.status} awaitingTask={submission.awaitingTask} />
         </div>
         <ul className="text-sm space-y-1">
-          {/* Tapping a date opens that date's own task list (MyDateTasksPanel) — the same
-              per-date tasks a supervisor/admin pushes from their own card (TeamAvailabilityCards'
-              DateTasksPanel). Correction brief #2 (Sept 2026): tasks now carry their own comment
-              thread each, replacing the standalone per-date conversation this used to open
-              alongside them — see MyDateTasksPanel's own doc comment. */}
+          {/* Oct 2026 (CB, approving the mockup: tapping "Tasks" on a date should take you to
+              the actual Tasks page, not just unfold a panel in place here): this used to toggle
+              MyDateTasksPanel open inline — now it's a real link to /tasks?date=<date>, the same
+              deep-link shape AnnouncementsSection already uses for ?id=. MyTasksView reads this
+              date off the URL and scrolls to + highlights that date's own group there, where
+              every other task for that date (not just this one submission's) is also visible. */}
           {lines.map((s) => {
-            const active = openDate === s.date;
             const removingThisDate = removingDateKey === `${submission.id}:${s.date}`;
             const row = (
-              <div
-                className={`flex items-center gap-1 rounded-lg transition-colors ${active ? "bg-white/15" : "hover:bg-white/10"}`}
-              >
-                <button
-                  type="button"
-                  onClick={() => setOpenDate(active ? null : s.date)}
-                  className="flex-1 min-w-0 flex items-center justify-between gap-2 px-2 py-1.5 text-left"
-                >
-                  <span>
+              <div className="flex items-center gap-1 rounded-lg hover:bg-white/10 transition-colors">
+                <div className="flex-1 min-w-0 flex items-center justify-between gap-2 px-2 py-1.5">
+                  <span className="truncate">
                     {formatSlotDate(s.date)}: {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
                   </span>
-                  <span className="flex items-center gap-1 shrink-0 text-xs text-white/60">
+                  <Link
+                    href={`/tasks?date=${s.date}`}
+                    className="flex items-center gap-1 shrink-0 text-xs font-medium text-white/80 bg-white/10 hover:bg-white/20 hover:text-white rounded-full px-2.5 py-1 transition-colors"
+                  >
                     <ChecklistIcon className="h-3 w-3" />
                     Tasks
-                  </span>
-                </button>
+                  </Link>
+                </div>
                 {/* One date at a time, distinct from "Clear this submission" below (CB, Sept
                     2026 — see this component's doc comment above). */}
                 {canClear && onRemoveDate && (
@@ -847,24 +836,6 @@ function SubmissionDetail({
                   </SwipeReveal>
                 ) : (
                   row
-                )}
-                {active && (
-                  <div className="mt-1.5 mb-2 space-y-2">
-                    {/* CB, Sept 2026: "I probably want some of the features of what was
-                        approved or what was selected to reflect on the availability page" and
-                        "once we create the task... they'll be able to... click a check mark" —
-                        the same per-date task list a supervisor/admin already sees and pushes to
-                        from their own card (TeamAvailabilityCards' DateTasksPanel), now visible
-                        and actionable from the employee's own side too, right where they're
-                        already looking at this date. */}
-                    <div>
-                      <p className="text-xs font-semibold text-white/60 mb-1 flex items-center gap-1.5">
-                        <ChecklistIcon className="h-3.5 w-3.5 text-white/60" />
-                        Tasks for this date
-                      </p>
-                      <MyDateTasksPanel employeeId={employeeId} taskDate={s.date} />
-                    </div>
-                  </div>
                 )}
               </li>
             );
