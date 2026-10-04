@@ -1,12 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   DOCUMENT_CATEGORY_LABEL,
   DOCUMENT_VISIBILITY_LABEL,
   formatDocumentDate,
+  fileExtensionFromName,
 } from "@/lib/documents-format";
-import { DownloadIcon, CheckCircleIcon, ArchiveIcon, FolderIcon, ChevronRightIcon } from "@/components/icons";
+import {
+  DownloadIcon,
+  EyeIcon,
+  CheckCircleIcon,
+  ArchiveIcon,
+  FolderIcon,
+  ChevronRightIcon,
+  GripIcon,
+  XIcon,
+} from "@/components/icons";
 import type {
   DocumentDTO,
   DocumentAdminSummaryDTO,
@@ -37,6 +47,138 @@ export default function DocumentsView({ canManage }: { canManage: boolean }) {
   );
 }
 
+/**
+ * CB, Oct 2026: "view the document internally and... download that document as well" — pulls a
+ * signed URL carrying Content-Disposition: attachment (see getSignedDownloadUrl's own doc
+ * comment in src/lib/storage.ts) and opens it, same "resolve a URL then window.open it" shape
+ * the view actions already use, just with `download=1` so the browser saves the file instead of
+ * rendering it. A module-level function rather than something tied to one component's state
+ * since both MyDocuments and the Document Library's DocumentTable need the exact same call.
+ */
+async function triggerDownload(documentId: string) {
+  try {
+    const res = await fetch(`/api/documents/${documentId}/download?download=1`);
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.url) window.open(data.url, "_blank", "noopener,noreferrer");
+  } catch {
+    // best-effort — same silent-fail shape the existing "View" open already had
+  }
+}
+
+const PREVIEWABLE_IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg"]);
+
+/**
+ * CB, Oct 2026: "I should be able to... have an option to view the document internally" — an
+ * in-app preview instead of handing off to a new browser tab. Shared by both MyDocuments and the
+ * Document Library's DocumentTable so there's exactly one preview surface in this app, not two
+ * near-identical ones. Only PDFs and common image types can actually render inline in an
+ * <iframe>/<img> (the signed URL is a storage link with no server-side conversion behind it) —
+ * everything else (Word docs, spreadsheets, etc.) falls back to a plain "download instead"
+ * prompt rather than a blank or broken frame.
+ */
+function DocumentViewerModal({
+  documentId,
+  title,
+  onClose,
+}: {
+  documentId: string;
+  title: string;
+  onClose: () => void;
+}) {
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [url, setUrl] = useState("");
+  const [fileName, setFileName] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch(`/api/documents/${documentId}/download`);
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!res.ok || !data.url) {
+          setState("error");
+          return;
+        }
+        setUrl(data.url);
+        setFileName(data.fileName ?? "");
+        setState("ready");
+      } catch {
+        if (!cancelled) setState("error");
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [documentId]);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  const ext = fileExtensionFromName(fileName);
+  const isPdf = ext === "pdf";
+  const isImage = PREVIEWABLE_IMAGE_EXTENSIONS.has(ext);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-3xl h-[85vh] bg-surface rounded-2xl flex flex-col overflow-hidden shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border shrink-0">
+          <p className="text-sm font-semibold truncate">{title}</p>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => triggerDownload(documentId)}
+              className="btn-neutral text-xs px-3 py-1.5 flex items-center gap-1.5"
+            >
+              <DownloadIcon className="h-3.5 w-3.5" />
+              Download
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close preview"
+              className="h-8 w-8 rounded-full flex items-center justify-center text-muted hover:bg-black/[0.05] transition-colors"
+            >
+              <XIcon className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 min-h-0 bg-black/[0.03] flex items-center justify-center overflow-auto">
+          {state === "loading" && <p className="text-sm text-muted">Loading…</p>}
+          {state === "error" && <p className="text-sm text-accent px-6 text-center">Couldn&apos;t load this document.</p>}
+          {state === "ready" && isPdf && <iframe src={url} title={title} className="w-full h-full border-0" />}
+          {state === "ready" && isImage && (
+            // eslint-disable-next-line @next/next/no-img-element -- signed storage URL, not a static asset
+            <img src={url} alt={title} className="max-w-full max-h-full object-contain" />
+          )}
+          {state === "ready" && !isPdf && !isImage && (
+            <div className="text-center px-6">
+              <p className="text-sm text-muted mb-3">Preview isn&apos;t available for this file type.</p>
+              <button
+                type="button"
+                onClick={() => triggerDownload(documentId)}
+                className="btn-primary text-sm px-4 py-2"
+              >
+                Download instead
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Employee-facing: documents shared with you by HR (unchanged by brief #4)
 // ---------------------------------------------------------------------------
@@ -45,7 +187,7 @@ function MyDocuments() {
   const [documents, setDocuments] = useState<DocumentDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [openingId, setOpeningId] = useState<string | null>(null);
+  const [viewingDoc, setViewingDoc] = useState<{ id: string; title: string } | null>(null);
 
   async function load() {
     setLoadState("loading");
@@ -72,17 +214,6 @@ function MyDocuments() {
       await load();
     } finally {
       setBusyId(null);
-    }
-  }
-
-  async function openDocument(id: string) {
-    setOpeningId(id);
-    try {
-      const res = await fetch(`/api/documents/${id}/download`);
-      const data = await res.json();
-      if (res.ok && data.url) window.open(data.url, "_blank", "noopener,noreferrer");
-    } finally {
-      setOpeningId(null);
     }
   }
 
@@ -125,7 +256,7 @@ function MyDocuments() {
       {loadState === "ready" && (
         <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
           {documents.map((doc) => (
-            <div key={doc.id} className="px-4 py-3.5 flex items-center justify-between gap-3">
+            <div key={doc.id} className="px-4 py-3.5 flex items-center justify-between gap-3 flex-wrap">
               <div className="min-w-0">
                 <p className="text-sm font-medium truncate">{doc.title}</p>
                 <p className="text-xs text-muted">
@@ -136,12 +267,18 @@ function MyDocuments() {
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <button
-                  onClick={() => openDocument(doc.id)}
-                  disabled={openingId === doc.id}
+                  onClick={() => setViewingDoc({ id: doc.id, title: doc.title })}
+                  className="btn-neutral text-xs px-3 py-1.5 flex items-center gap-1.5"
+                >
+                  <EyeIcon className="h-3.5 w-3.5" />
+                  View
+                </button>
+                <button
+                  onClick={() => triggerDownload(doc.id)}
                   className="btn-neutral text-xs px-3 py-1.5 flex items-center gap-1.5"
                 >
                   <DownloadIcon className="h-3.5 w-3.5" />
-                  {openingId === doc.id ? "Opening…" : "View"}
+                  Download
                 </button>
                 {doc.requiresAcknowledgment &&
                   (doc.acknowledgedAt ? (
@@ -162,6 +299,14 @@ function MyDocuments() {
             </div>
           ))}
         </div>
+      )}
+
+      {viewingDoc && (
+        <DocumentViewerModal
+          documentId={viewingDoc.id}
+          title={viewingDoc.title}
+          onClose={() => setViewingDoc(null)}
+        />
       )}
     </div>
   );
@@ -190,6 +335,18 @@ const CATEGORY_OPTIONS: DocumentCategory[] = [
 
 const VISIBILITY_OPTIONS: DocumentVisibility[] = ["GLOBAL", "DEPARTMENT", "INDIVIDUAL", "CONFIDENTIAL_HR"];
 
+// CB, Oct 2026: "I should be able to click and hold and drag documents into a folder" — same
+// press-and-hold tuning DragReorderList.tsx already settled on for this app's other drag
+// interaction (a deliberate hold, not an instant grab, so a plain tap/click elsewhere on the row
+// still behaves normally).
+const DRAG_LONG_PRESS_MS = 160;
+const DRAG_MOVE_SLOP_PX = 6;
+
+// The attribute every valid drop target (a folder tile, a breadcrumb crumb) carries, holding
+// that folder's id — or "" for the library root. elementFromPoint + closest() during the drag is
+// what actually finds the hovered one; see the pointer handlers below.
+const DROP_TARGET_ATTR = "data-drop-target";
+
 function DocumentLibrary() {
   const [folderId, setFolderId] = useState<string | null>(null);
   const [contents, setContents] = useState<DocumentFolderContentsDTO | null>(null);
@@ -200,9 +357,20 @@ function DocumentLibrary() {
   const [folderBusy, setFolderBusy] = useState(false);
   const [folderError, setFolderError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [openingId, setOpeningId] = useState<string | null>(null);
+  const [viewingDoc, setViewingDoc] = useState<{ id: string; title: string } | null>(null);
   const [versioningId, setVersioningId] = useState<string | null>(null);
   const [versionError, setVersionError] = useState("");
+
+  // Drag-to-move state — see the pointer handlers below (handleGripPointerDown etc.) for how
+  // these get set. draggingDoc is also what the floating "ghost" chip near the pointer renders
+  // from; dragOverKey ("" = root, a folder id, or null = not over a valid target) drives the
+  // highlight on whichever drop target the pointer is currently over.
+  const [draggingDoc, setDraggingDoc] = useState<{ id: string; title: string } | null>(null);
+  const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+  const [moveError, setMoveError] = useState("");
+  const pressTimer = useRef<number | null>(null);
+  const cleanupEarly = useRef<(() => void) | null>(null);
 
   async function load(id: string | null) {
     setLoadState("loading");
@@ -250,17 +418,6 @@ function DocumentLibrary() {
     }
   }
 
-  async function openDocument(id: string) {
-    setOpeningId(id);
-    try {
-      const res = await fetch(`/api/documents/${id}/download`);
-      const data = await res.json();
-      if (res.ok && data.url) window.open(data.url, "_blank", "noopener,noreferrer");
-    } finally {
-      setOpeningId(null);
-    }
-  }
-
   async function archive(id: string) {
     setBusyId(id);
     try {
@@ -292,6 +449,123 @@ function DocumentLibrary() {
     }
   }
 
+  async function moveDocument(documentId: string, targetFolderId: string | null) {
+    setMoveError("");
+    try {
+      const res = await fetch(`/api/documents/${documentId}/move`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ folderId: targetFolderId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setMoveError(data.error ?? "Couldn't move that document. Please try again.");
+        return;
+      }
+      await load(folderId);
+    } catch {
+      setMoveError("Unable to reach the server. Check your connection and try again.");
+    }
+  }
+
+  function clearPressTimer() {
+    if (pressTimer.current !== null) {
+      window.clearTimeout(pressTimer.current);
+      pressTimer.current = null;
+    }
+    if (cleanupEarly.current) {
+      cleanupEarly.current();
+      cleanupEarly.current = null;
+    }
+  }
+
+  // Armed from a document row's grip handle (DocumentTable below). A short hold has to elapse,
+  // with the pointer still roughly where it started, before a drag actually starts — otherwise a
+  // plain tap on the handle would hijack every click. Same shape DragReorderList.tsx already
+  // uses for its own press-and-hold, just ending in a cross-list drop instead of an in-list swap.
+  function handleGripPointerDown(doc: DocumentAdminSummaryDTO, e: React.PointerEvent) {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    clearPressTimer();
+
+    function onEarlyMove(ev: PointerEvent) {
+      if (Math.abs(ev.clientX - startX) > DRAG_MOVE_SLOP_PX || Math.abs(ev.clientY - startY) > DRAG_MOVE_SLOP_PX) {
+        clearPressTimer();
+      }
+    }
+    function onEarlyUp() {
+      clearPressTimer();
+    }
+    window.addEventListener("pointermove", onEarlyMove);
+    window.addEventListener("pointerup", onEarlyUp, { once: true });
+    cleanupEarly.current = () => {
+      window.removeEventListener("pointermove", onEarlyMove);
+      window.removeEventListener("pointerup", onEarlyUp);
+    };
+
+    pressTimer.current = window.setTimeout(() => {
+      pressTimer.current = null;
+      if (cleanupEarly.current) {
+        cleanupEarly.current();
+        cleanupEarly.current = null;
+      }
+      setMoveError("");
+      setDraggingDoc({ id: doc.id, title: doc.title });
+      setDragPos({ x: startX, y: startY });
+    }, DRAG_LONG_PRESS_MS);
+  }
+
+  useEffect(() => () => clearPressTimer(), []);
+
+  // Live while a drag is armed — tracks the pointer for the floating ghost chip and, via
+  // elementFromPoint + closest(DROP_TARGET_ATTR), which drop target (if any) it's currently over.
+  // Global listeners rather than per-element handlers because the pointer routinely moves faster
+  // than it stays over any one row once a drag starts, same reasoning NotificationBell's own
+  // outside-click effect already documents for why this has to be a window-level listener.
+  useEffect(() => {
+    if (!draggingDoc) return;
+
+    function targetKeyAt(x: number, y: number): string | null {
+      const el = document.elementFromPoint(x, y);
+      const target = el?.closest(`[${DROP_TARGET_ATTR}]`) as HTMLElement | null;
+      return target ? target.getAttribute(DROP_TARGET_ATTR) ?? "" : null;
+    }
+
+    function onMove(e: PointerEvent) {
+      setDragPos({ x: e.clientX, y: e.clientY });
+      setDragOverKey(targetKeyAt(e.clientX, e.clientY));
+    }
+
+    function finish(e: PointerEvent) {
+      const key = targetKeyAt(e.clientX, e.clientY);
+      if (key !== null && draggingDoc) {
+        void moveDocument(draggingDoc.id, key === "" ? null : key);
+      }
+      setDraggingDoc(null);
+      setDragPos(null);
+      setDragOverKey(null);
+    }
+
+    function cancel() {
+      setDraggingDoc(null);
+      setDragPos(null);
+      setDragOverKey(null);
+    }
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", cancel);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", cancel);
+    };
+    // moveDocument closes over folderId/load, which don't need to retrigger this effect — only
+    // starting/stopping a drag should.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draggingDoc]);
+
   const active = (contents?.documents ?? []).filter((d) => !d.archivedAt);
   const archived = (contents?.documents ?? []).filter((d) => d.archivedAt);
   const isEmpty =
@@ -302,21 +576,32 @@ function DocumentLibrary() {
       <h2 className="text-lg font-semibold mb-1">Document Library</h2>
       <p className="text-sm text-muted mb-4 max-w-md">
         Organize the shared library into folders, upload documents, and track acknowledgment.
-        Acknowledgment here is a read-and-confirm record for HR — not a legal e-signature.
+        Press and hold a document to drag it into a folder. Acknowledgment here is a
+        read-and-confirm record for HR — not a legal e-signature.
       </p>
 
       <div className="flex items-center flex-wrap gap-1 text-sm mb-4">
         <button
           type="button"
           onClick={() => openFolder(null)}
-          className={`font-medium ${folderId === null ? "text-accent-ink" : "text-muted hover:text-foreground"}`}
+          {...{ [DROP_TARGET_ATTR]: "" }}
+          className={`font-medium rounded-md px-1 -mx-1 transition-colors ${
+            folderId === null ? "text-accent-ink" : "text-muted hover:text-foreground"
+          } ${dragOverKey === "" ? "bg-accent/15 ring-2 ring-accent" : ""}`}
         >
           Library
         </button>
         {contents?.breadcrumb.map((f) => (
           <span key={f.id} className="flex items-center gap-1">
             <ChevronRightIcon className="h-3.5 w-3.5 text-muted/60" />
-            <button type="button" onClick={() => openFolder(f.id)} className="font-medium text-muted hover:text-foreground">
+            <button
+              type="button"
+              onClick={() => openFolder(f.id)}
+              {...{ [DROP_TARGET_ATTR]: f.id }}
+              className={`font-medium text-muted hover:text-foreground rounded-md px-1 -mx-1 transition-colors ${
+                dragOverKey === f.id ? "bg-accent/15 ring-2 ring-accent" : ""
+              }`}
+            >
               {f.name}
             </button>
           </span>
@@ -382,6 +667,8 @@ function DocumentLibrary() {
         />
       )}
 
+      {moveError && <p className="text-xs text-accent mb-3">{moveError}</p>}
+
       {loadState === "loading" && (
         <div className="space-y-2">
           {[0, 1].map((i) => (
@@ -405,7 +692,12 @@ function DocumentLibrary() {
                   key={f.id}
                   type="button"
                   onClick={() => openFolder(f.id)}
-                  className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3.5 py-3 text-left hover:bg-black/[0.02] transition-colors"
+                  {...{ [DROP_TARGET_ATTR]: f.id }}
+                  className={`flex items-center gap-2 rounded-xl border px-3.5 py-3 text-left transition-colors ${
+                    dragOverKey === f.id
+                      ? "border-accent bg-accent/10 ring-2 ring-accent"
+                      : "border-border bg-surface hover:bg-black/[0.02]"
+                  }`}
                 >
                   <FolderIcon className="h-5 w-5 text-muted shrink-0" />
                   <span className="text-sm font-medium truncate">{f.name}</span>
@@ -424,8 +716,7 @@ function DocumentLibrary() {
             <DocumentTable
               rows={active}
               onArchive={archive}
-              onView={openDocument}
-              openingId={openingId}
+              onView={(id, title) => setViewingDoc({ id, title })}
               busyId={busyId}
               versioningId={versioningId}
               onVersioningToggle={(id) => {
@@ -434,14 +725,40 @@ function DocumentLibrary() {
               }}
               onUploadVersion={uploadNewVersion}
               versionError={versionError}
+              draggingId={draggingDoc?.id ?? null}
+              onGripPointerDown={handleGripPointerDown}
             />
           )}
           {archived.length > 0 && (
             <div>
               <h3 className="text-sm font-medium text-muted mb-2">Archived</h3>
-              <DocumentTable rows={archived} onArchive={archive} onView={openDocument} openingId={openingId} busyId={busyId} archived />
+              <DocumentTable
+                rows={archived}
+                onArchive={archive}
+                onView={(id, title) => setViewingDoc({ id, title })}
+                busyId={busyId}
+                archived
+                draggingId={null}
+              />
             </div>
           )}
+        </div>
+      )}
+
+      {viewingDoc && (
+        <DocumentViewerModal
+          documentId={viewingDoc.id}
+          title={viewingDoc.title}
+          onClose={() => setViewingDoc(null)}
+        />
+      )}
+
+      {draggingDoc && dragPos && (
+        <div
+          className="fixed z-[60] pointer-events-none rounded-full bg-foreground text-background text-xs font-medium px-3 py-1.5 shadow-lg max-w-[220px] truncate"
+          style={{ left: dragPos.x, top: dragPos.y, transform: "translate(-50%, -130%)" }}
+        >
+          {draggingDoc.title}
         </div>
       )}
     </div>
@@ -452,61 +769,91 @@ function DocumentTable({
   rows,
   onArchive,
   onView,
-  openingId = null,
   busyId,
   archived = false,
   versioningId = null,
   onVersioningToggle,
   onUploadVersion,
   versionError = "",
+  draggingId,
+  onGripPointerDown,
 }: {
   rows: DocumentAdminSummaryDTO[];
   onArchive: (id: string) => void;
-  onView: (id: string) => void;
-  openingId?: string | null;
+  onView: (id: string, title: string) => void;
   busyId: string | null;
   archived?: boolean;
   versioningId?: string | null;
   onVersioningToggle?: (id: string) => void;
   onUploadVersion?: (id: string, file: File) => void;
   versionError?: string;
+  draggingId: string | null;
+  onGripPointerDown?: (doc: DocumentAdminSummaryDTO, e: React.PointerEvent) => void;
 }) {
   if (rows.length === 0) return null;
 
   return (
     <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
       {rows.map((doc) => (
-        <div key={doc.id} className="px-4 py-3.5">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-sm font-medium truncate">
-                {doc.title}
-                {doc.version > 1 ? ` · v${doc.version}` : ""}
-              </p>
-              <p className="text-xs text-muted">
-                {DOCUMENT_CATEGORY_LABEL[doc.category]} · {DOCUMENT_VISIBILITY_LABEL[doc.visibility]}
-                {doc.visibility !== "GLOBAL" ? ` (${doc.assignedToLabel})` : ""} · Added{" "}
-                {formatDocumentDate(doc.createdAt)}
-              </p>
-              {doc.requiresAcknowledgment && (
-                <p className="text-xs text-muted mt-0.5">
-                  {doc.acknowledgedCount} / {doc.eligibleCount} acknowledged at current version
-                </p>
+        <div
+          key={doc.id}
+          className={`px-4 py-3.5 transition-opacity ${draggingId === doc.id ? "opacity-40" : ""}`}
+        >
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="min-w-0 flex items-center gap-2">
+              {/* CB, Oct 2026: "click and hold and drag documents into a folder" — a dedicated
+                  handle rather than the whole row, so pressing "View"/"Archive"/etc. never races
+                  against the drag's own long-press timer. touchAction: none stops the browser's
+                  own scroll gesture from competing with a finger holding this down. */}
+              {!archived && onGripPointerDown && (
+                <button
+                  type="button"
+                  onPointerDown={(e) => onGripPointerDown(doc, e)}
+                  aria-label={`Drag ${doc.title} into a folder`}
+                  style={{ touchAction: "none" }}
+                  className="h-7 w-5 shrink-0 flex items-center justify-center text-muted/50 hover:text-muted cursor-grab active:cursor-grabbing"
+                >
+                  <GripIcon className="h-4 w-4" />
+                </button>
               )}
+              <div className="min-w-0">
+                <p className="text-sm font-medium truncate">
+                  {doc.title}
+                  {doc.version > 1 ? ` · v${doc.version}` : ""}
+                </p>
+                <p className="text-xs text-muted">
+                  {DOCUMENT_CATEGORY_LABEL[doc.category]} · {DOCUMENT_VISIBILITY_LABEL[doc.visibility]}
+                  {doc.visibility !== "GLOBAL" ? ` (${doc.assignedToLabel})` : ""} · Added{" "}
+                  {formatDocumentDate(doc.createdAt)}
+                </p>
+                {doc.requiresAcknowledgment && (
+                  <p className="text-xs text-muted mt-0.5">
+                    {doc.acknowledgedCount} / {doc.eligibleCount} acknowledged at current version
+                  </p>
+                )}
+              </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               {/* Archived documents aren't resolvable through the download endpoint (see
                   getDocumentForDownload in src/lib/documents.ts) — kept for the audit trail, not
                   for viewing, so there's no live link to offer here once archived. */}
               {!archived && (
-                <button
-                  onClick={() => onView(doc.id)}
-                  disabled={openingId === doc.id}
-                  className="btn-neutral text-xs px-3 py-1.5 flex items-center gap-1.5"
-                >
-                  <DownloadIcon className="h-3.5 w-3.5" />
-                  {openingId === doc.id ? "Opening…" : "View"}
-                </button>
+                <>
+                  <button
+                    onClick={() => onView(doc.id, doc.title)}
+                    className="btn-neutral text-xs px-3 py-1.5 flex items-center gap-1.5"
+                  >
+                    <EyeIcon className="h-3.5 w-3.5" />
+                    View
+                  </button>
+                  <button
+                    onClick={() => triggerDownload(doc.id)}
+                    className="btn-neutral text-xs px-3 py-1.5 flex items-center gap-1.5"
+                  >
+                    <DownloadIcon className="h-3.5 w-3.5" />
+                    Download
+                  </button>
+                </>
               )}
               {!archived && (
                 <>
