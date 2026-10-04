@@ -603,7 +603,6 @@ export default function AvailabilityView({
             <AvailabilityPanel
               key={stripPanel.viewingSubmission?.id ?? "draft"}
               viewingSubmission={stripPanel.viewingSubmission}
-              employeeId={employeeId}
               draftDates={stripPanel.draftDates}
               draft={stripPanel.draft}
               onUpdateTime={(dateKey, field, value) =>
