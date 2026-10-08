@@ -7,6 +7,7 @@ import SwipeReveal from "@/components/SwipeReveal";
 import { TrashIcon } from "@/components/icons";
 import { slotChips, submissionTitle } from "@/lib/availability-format";
 import { toneForStatus, STATUS_TONE } from "@/lib/status-tone";
+import { getWeek, formatWeekRange } from "@/lib/week";
 import type { AvailabilityDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error" | "empty";
@@ -29,6 +30,18 @@ type LoadState = "loading" | "ready" | "error" | "empty";
  * its own collapsible disclosure button, which already shows the "Your submissions" label (plus
  * a count) before it's ever expanded — rendering this component's own heading again right below
  * would just repeat that same text. Defaults to true so the one other place nothing changes.
+ *
+ * Oct 2026, round two (CB: "I like how it says probably this week, probably including like what
+ * the submissions is for this week so they could see it... if they need to go back in the past
+ * for other previous weeks they should be able to do that as well" — then, after a first version
+ * that collapsed older weeks behind a "Past weeks (3)" link: "I definitely don't necessarily
+ * like that... No"): the same week-paginated strip now used on My Tasks and My Schedule
+ * (TeamAvailabilityWeekPanel's own pattern, via getWeek/formatWeekRange in src/lib/week.ts) —
+ * one week at a time, unlimited paging either direction, nothing collapsed. A submission can
+ * span several dates (`slots`); it's counted as belonging to a week if ANY of its dates fall in
+ * that week — in practice every submission here is already a single week's worth (that's what
+ * the calendar above this component submits), so this is really just "does this submission's
+ * week match the one on screen," not a true multi-week split of one card's own chips.
  */
 export default function MyAvailabilityPreview({
   title = "Your availability",
@@ -41,6 +54,7 @@ export default function MyAvailabilityPreview({
 }) {
   const [submissions, setSubmissions] = useState<AvailabilityDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [offset, setOffset] = useState(0);
   // CB, Sept 2026: "the deleting isn't working on these" — pointing at old Cancelled entries
   // sitting in this list with no way to get rid of them. Which one (if any) a delete is
   // currently in flight for, so only that row shows a busy state.
@@ -123,6 +137,11 @@ export default function MyAvailabilityPreview({
     }
   }
 
+  const week = getWeek(offset);
+  const weekSubmissions = submissions.filter((s) =>
+    s.slots.some((sl) => sl.date >= week.start && sl.date <= week.end)
+  );
+
   return (
     <div>
       {showHeading && (
@@ -165,6 +184,41 @@ export default function MyAvailabilityPreview({
         </div>
       )}
 
+      {loadState === "ready" && (
+        <div className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 mb-3 w-fit">
+          <button
+            type="button"
+            onClick={() => setOffset((o) => o - 1)}
+            className="h-7 w-7 rounded-full border border-border flex items-center justify-center text-sm text-muted hover:text-foreground hover:bg-black/[0.03]"
+            aria-label="Previous week"
+          >
+            ‹
+          </button>
+          <span className="text-sm font-semibold min-w-[150px] text-center tabular-nums">
+            Week of {formatWeekRange(week.start, week.end)}
+          </span>
+          {offset === 0 && (
+            <span className="text-[11px] font-semibold text-accent-ink bg-accent/10 rounded-full px-2.5 py-0.5">
+              This week
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => setOffset((o) => o + 1)}
+            className="h-7 w-7 rounded-full border border-border flex items-center justify-center text-sm text-muted hover:text-foreground hover:bg-black/[0.03]"
+            aria-label="Next week"
+          >
+            ›
+          </button>
+        </div>
+      )}
+
+      {loadState === "ready" && weekSubmissions.length === 0 && (
+        <div className="rounded-xl border border-border bg-surface p-4 text-sm text-muted">
+          Nothing submitted for this week yet.
+        </div>
+      )}
+
       {/* CB, Sept 2026: "I like the fact that they have colored backgrounds... I don't see that
           for the availability side... it could get cluttered with just words." Solid colored
           cards now, same tone system the admin-facing team cards already use (src/lib/status-
@@ -173,9 +227,9 @@ export default function MyAvailabilityPreview({
           status changes, not a new one appearing. A submission still Approved-but-awaiting-a-
           task (two-step approval workflow) deliberately keeps reading amber, not pink, until a
           task's actually been pushed — see AvailabilityDTO.awaitingTask's own doc comment. */}
-      {loadState === "ready" && (
+      {loadState === "ready" && weekSubmissions.length > 0 && (
         <div className="space-y-2.5">
-          {submissions.map((s) => {
+          {weekSubmissions.map((s) => {
             const plain = s.status === "DENIED" || s.status === "CANCELLED";
             const stillInProgress = s.status === "APPROVED" && s.awaitingTask;
             const tone = plain ? null : stillInProgress ? STATUS_TONE.PENDING : toneForStatus(s.status);
