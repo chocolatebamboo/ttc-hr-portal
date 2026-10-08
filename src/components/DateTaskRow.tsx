@@ -42,10 +42,17 @@ const STATUS_LABEL: Record<DateTaskDTO["status"], string> = {
 // treatment AvailabilityStatusPill's onColor prop already established for this exact problem —
 // a light tint badge (the old bg-amber-100 text-amber-800 etc.) would nearly vanish against a
 // same-hue gradient background.
+// Oct 2026 (CB, on this card's all-amber look: "that yellow background... is kind of throwing
+// me off... once it's complete, I want the background to be green... cause it's gonna be
+// reviewed by either Sean or Daijour"): AWAITING_REVIEW now gets its own green tone
+// (STATUS_TONE.IN_REVIEW) instead of sharing amber with ASSIGNED/IN_PROGRESS — amber now means
+// only "still needs the team member's own action," green means "out of their hands, waiting on
+// a reviewer." See status-tone.ts's own doc comment on IN_REVIEW for why this is scoped to this
+// one status rather than folded into the app's general 4-tone system.
 const TASK_TONE: Record<DateTaskDTO["status"], { from: string; to: string }> = {
   ASSIGNED: STATUS_TONE.PENDING,
   IN_PROGRESS: STATUS_TONE.PENDING,
-  AWAITING_REVIEW: STATUS_TONE.PENDING,
+  AWAITING_REVIEW: STATUS_TONE.IN_REVIEW,
   APPROVED: STATUS_TONE.APPROVED,
   RETURNED: STATUS_TONE.DENIED,
 };
@@ -56,7 +63,7 @@ const TASK_TONE: Record<DateTaskDTO["status"], { from: string; to: string }> = {
 const STATUS_INK: Record<DateTaskDTO["status"], string> = {
   ASSIGNED: "#b45309", // amber-700
   IN_PROGRESS: "#b45309",
-  AWAITING_REVIEW: "#b45309",
+  AWAITING_REVIEW: "#047857", // emerald-700 — matches STATUS_TONE.IN_REVIEW above
   APPROVED: "var(--ttc-pink-ink)",
   RETURNED: "#be123c", // rose-700
 };
@@ -101,6 +108,23 @@ export default function DateTaskRow({
   const [downloading, setDownloading] = useState(false);
   const [returning, setReturning] = useState(false);
   const [returnNote, setReturnNote] = useState("");
+
+  // Oct 2026 (CB, on a long task description making the Home widget "look kind of cluttered"):
+  // the description clamps to 2 lines by default with a "Show more" toggle, same as this app's
+  // existing line-clamp-2 convention (NotificationBell, AnnouncementsSection). descOverflows is
+  // measured once against the CLAMPED height (descExpanded starts false, so the clamp class is
+  // already applied on first render) rather than assumed from character count, so a short
+  // description with unusually long words never grows a pointless "Show more" link and a long
+  // one that happens to fit in 2 lines doesn't either.
+  const descRef = useRef<HTMLParagraphElement | null>(null);
+  const [descExpanded, setDescExpanded] = useState(false);
+  const [descOverflows, setDescOverflows] = useState(false);
+
+  useEffect(() => {
+    const el = descRef.current;
+    if (!el) return;
+    setDescOverflows(el.scrollHeight > el.clientHeight + 1);
+  }, [task.description]);
 
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [comments, setComments] = useState<DateTaskCommentDTO[]>([]);
@@ -263,7 +287,25 @@ export default function DateTaskRow({
           {showDate && <p className="text-xs text-white/75 mt-0.5">{formatTaskDate(task.taskDate)}</p>}
 
           {task.description && (
-            <p className="text-sm text-white/90 mt-1 whitespace-pre-wrap break-words">{task.description}</p>
+            <>
+              <p
+                ref={descRef}
+                className={`text-sm text-white/90 mt-1 whitespace-pre-wrap break-words ${
+                  descExpanded ? "" : "line-clamp-2"
+                }`}
+              >
+                {task.description}
+              </p>
+              {descOverflows && (
+                <button
+                  type="button"
+                  onClick={() => setDescExpanded((v) => !v)}
+                  className="text-xs font-semibold text-white underline underline-offset-2 decoration-white/50 hover:decoration-white mt-0.5"
+                >
+                  {descExpanded ? "Show less" : "Show more"}
+                </button>
+              )}
+            </>
           )}
 
           <p className="text-xs text-white/75 mt-1.5">
@@ -306,20 +348,41 @@ export default function DateTaskRow({
 
         <div className="flex flex-col items-end gap-2 shrink-0">
           {/* CB, Sept 2026: "a bubble or a circle or something like that to confirm that it's
-              complete would be appropriate" — replaces the old plain "Submit" text button. An
-              empty ring while there's still something to do, filled solid white with a check
-              once it's actually Approved; AWAITING_REVIEW sits in between (already turned in,
-              not yet confirmed) as a dimmer, non-interactive ring so it doesn't look tappable
-              while it's genuinely out of the team member's hands. */}
+              complete would be appropriate" — replaces the old plain "Submit" text button.
+              AWAITING_REVIEW sits in between (already turned in, not yet confirmed) as a dimmer,
+              non-interactive ring so it doesn't look tappable while it's genuinely out of the
+              team member's hands; filled solid white with a check once it's actually Approved.
+              Round of QA, CB, on the plain empty ring: "I'm trying to get something that's
+              visually... communicate that you could click there to mark as complete" — a first
+              pass stacked a "Tap to complete" label underneath the whole card, which she then
+              rejected on sight ("I don't like how it's reading like underneath the bottom like
+              that... there isn't so much blank space, but then... it fits properly" / "maybe
+              Option B [pulsing dashed ring] would be best... tap to complete wording show up
+              briefly and then it disappears"). What's below is that final shape: the label and
+              ring stay in this same right-side column they always sat in — no new row, no extra
+              card height — the label fades in, holds long enough to read, then fades out on its
+              own (tap-hint-label, globals.css), leaving a softly pulsing dashed ring
+              (tap-hint-ring) as the lasting "something happens here" cue. A reduced-motion
+              viewer gets neither animation — see globals.css's own comment on why the label
+              just stays put rather than disappearing silently for them. */}
           {canTapComplete && (
-            <button
-              type="button"
-              onClick={() => runAction("submit")}
-              disabled={busy}
-              aria-label="Mark this task complete"
-              title="Mark complete"
-              className="h-9 w-9 rounded-full border-2 border-white/70 hover:bg-white/15 active:bg-white/25 transition-colors disabled:opacity-50 shrink-0"
-            />
+            <div className="flex items-center gap-1.5">
+              <span className="tap-hint-label max-w-[46px] text-right text-[9px] font-bold uppercase leading-tight tracking-wide text-white">
+                Tap to complete
+              </span>
+              <button
+                type="button"
+                onClick={() => runAction("submit")}
+                disabled={busy}
+                aria-label="Tap to mark this task complete"
+                title="Tap to mark complete"
+                className="tap-hint-ring flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-dashed border-white/85 transition-colors hover:bg-white/15 active:bg-white/25 disabled:opacity-50"
+              >
+                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="white" strokeWidth="3" strokeOpacity="0.9">
+                  <path d="m5 13 5 5L20 7" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            </div>
           )}
           {isOwnTask && task.status === "AWAITING_REVIEW" && (
             <div
