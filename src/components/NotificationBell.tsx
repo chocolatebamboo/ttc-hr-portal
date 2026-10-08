@@ -32,9 +32,11 @@ import type { NotificationDTO, NotificationType } from "@/types";
 const POLL_MS = 45_000;
 
 // Where clicking a notification should take you — keyed by targetType, with overrides for the
-// two types whose recipient is the admin/supervisor reviewing someone ELSE's submission, not the
-// submission's own employee looking at their own schedule/availability: SHIFT_REQUEST_RECEIVED
-// (added Phase 2) and AVAILABILITY_SUBMITTED (added Oct 2026, same reasoning).
+// types whose recipient is the admin/supervisor reviewing someone ELSE's submission, not the
+// submission's own employee looking at their own schedule/availability/tasks:
+// SHIFT_REQUEST_RECEIVED (added Phase 2), AVAILABILITY_SUBMITTED (added Oct 2026, same
+// reasoning), and DATE_TASK_SUBMITTED (added Oct 2026, same reasoning again — DateTasksPanel,
+// where a reviewer actually approves/returns a submitted task, lives on the Team Schedule page).
 function targetHref(n: NotificationDTO): string {
   if (n.targetType === "Shift") {
     return n.type === "SHIFT_REQUEST_RECEIVED" ? "/team/schedule" : "/schedule";
@@ -43,11 +45,13 @@ function targetHref(n: NotificationDTO): string {
     return n.type === "AVAILABILITY_SUBMITTED" ? "/admin/availability" : "/availability";
   }
   if (n.targetType === "PtoRequest") return "/time-off";
-  if (n.targetType === "DateTask") return "/dashboard";
+  if (n.targetType === "DateTask") {
+    return n.type === "DATE_TASK_SUBMITTED" ? "/team/schedule" : "/dashboard";
+  }
   // CB, Oct 2026, tapping an announcement notification: "when I click on the notification...
   // it should take you to [it]." Carries the specific announcement's id as a query param —
   // AnnouncementsView reads it off window.location the same way MessagesInboxView already does
-  // for its own ?dm= deep link (see that file's comment for why: avoids a Suspense boundary),
+  // for its own ?dm= deep link (see that file's own comment for why: avoids a Suspense boundary),
   // scrolls to that post and opens it, instead of just landing on the announcements list in
   // general the way this used to fall through to the /dashboard default below.
   if (n.targetType === "Announcement") return `/announcements?id=${n.targetId}`;
@@ -84,6 +88,7 @@ const TYPE_TONE: Record<NotificationType, "positive" | "negative" | "neutral"> =
   ANNOUNCEMENT_POSTED: "neutral",
   MESSAGE_RECEIVED: "neutral",
   AVAILABILITY_SUBMITTED: "neutral",
+  DATE_TASK_SUBMITTED: "neutral",
 };
 
 function Dot({ tone }: { tone: "positive" | "negative" | "neutral" }) {
