@@ -396,7 +396,13 @@ export default function EmployeesAdminView({
         <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
           {filtered.map((row) => (
             <div key={row.id} className="px-4 py-3.5">
-              <div className="flex items-center justify-between gap-3">
+              {/* CB: "on the mobile that we can see the names properly" — the row used to stay
+                  side-by-side at every width, so on a phone the fixed-width action buttons (View
+                  as / Resend Invite / Edit / Deactivate — up to four) left almost nothing for the
+                  name/title column, clipping names like "Haile Eugene" down to "Haile ...". Below
+                  sm, the row now stacks: name/title get the full width on their own line, and the
+                  actions wrap onto a second line instead of fighting them for space. */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   {row.avatarUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element -- public storage URL
@@ -456,7 +462,7 @@ export default function EmployeesAdminView({
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center flex-wrap gap-2 sm:shrink-0">
                   {canPreview && row.id !== currentEmployeeId && !row.deactivatedAt && (
                     <button
                       onClick={() => viewAs(row)}
