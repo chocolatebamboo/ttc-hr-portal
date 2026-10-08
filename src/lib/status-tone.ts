@@ -13,11 +13,20 @@
  * colors is pink and blue" — Approved already owns pink, so Cancelled (the other "closed out,
  * nothing to review" status) picks up the brand blue instead of slate.
  */
-export const STATUS_TONE: Record<"PENDING" | "APPROVED" | "DENIED" | "CANCELLED", { from: string; to: string }> = {
+export const STATUS_TONE: Record<"PENDING" | "APPROVED" | "DENIED" | "CANCELLED" | "IN_REVIEW", { from: string; to: string }> = {
   PENDING: { from: "#f59e0b", to: "#b45309" }, // amber-500 → amber-700
   APPROVED: { from: "var(--ttc-pink)", to: "var(--ttc-pink-ink)" },
   DENIED: { from: "#f43f5e", to: "#be123c" }, // rose-500 → rose-700
   CANCELLED: { from: "var(--ttc-blue)", to: "var(--ttc-blue-ink)" },
+  // Oct 2026 (CB, on My Tasks' all-amber cards: "that yellow background... is kind of throwing
+  // me off" — once a task is actually submitted and sitting with Shawn or Daijour, "I want the
+  // background to be green... cause it's gonna be reviewed"): a deliberate departure from the
+  // pink/blue/amber/rose palette documented above — CB confirmed this exact green after seeing
+  // it mocked up ("I like how submit awaiting review is there"). Scoped to DateTaskRow's
+  // AWAITING_REVIEW status only, not added to toneForStatus's generic PENDING/APPROVED/DENIED/
+  // CANCELLED lookup, since nothing else in this app has an analogous "submitted, out of your
+  // hands, waiting on someone else" state distinct from plain PENDING.
+  IN_REVIEW: { from: "#10b981", to: "#047857" }, // emerald-500 → emerald-700
 };
 
 export function toneForStatus(status: string): { from: string; to: string } {
