@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { withRlsContext } from "@/lib/db";
-import { assertCanAccessEmployeeRecords, assertCanAssignTasks, assertIsAdmin } from "@/lib/authorization";
+import { assertCanAccessEmployeeRecords, assertCanAssignTasks, isAdmin, ForbiddenError } from "@/lib/authorization";
 import { getSignedDownloadUrl, uploadDateTaskFile } from "@/lib/storage";
 import { writeAuditLog } from "@/lib/audit-log";
 import { writeNotification } from "@/lib/notifications";
@@ -45,6 +45,9 @@ type TaskRow = {
   priority: string;
   startedAt: Date | null;
   submittedAt: Date | null;
+  submissionNote: string | null;
+  submissionAttachmentKey: string | null;
+  submissionAttachmentName: string | null;
   approvedById: string | null;
   approvedAt: Date | null;
   returnedById: string | null;
@@ -78,6 +81,9 @@ function toDTO(row: TaskRow): DateTaskDTO {
     priority: row.priority as DateTaskDTO["priority"],
     startedAt: row.startedAt?.toISOString() ?? null,
     submittedAt: row.submittedAt?.toISOString() ?? null,
+    submissionNote: row.submissionNote,
+    hasSubmissionAttachment: row.submissionAttachmentKey !== null,
+    submissionAttachmentName: row.submissionAttachmentName,
     approvedById: row.approvedById,
     approvedByName: row.approvedBy ? nameOf(row.approvedBy) : null,
     approvedAt: row.approvedAt?.toISOString() ?? null,
@@ -142,17 +148,25 @@ export async function listMyDateTasks(actor: CurrentEmployee): Promise<DateTaskD
   return listDateTasks(actor, actor.id);
 }
 
-/** Every employee's AWAITING_REVIEW tasks in one query — admin only, same reasoning as
- *  listAllTeamNoteTopicCounts: used for an admin "you have tasks awaiting review" signal without
- *  a per-employee fetch. Tasks that are still ASSIGNED/IN_PROGRESS, already APPROVED, or
- *  RETURNED-and-not-yet-resubmitted are left out — none of those need a reviewer's action right
- *  now. */
+/** Every task this reviewer can actually act on that's AWAITING_REVIEW, in one query — org-wide
+ *  for an admin, narrowed to just their own reports for a SUPERVISOR, same
+ *  "isAdmin ? everyone : supervisorId = actor.id" shape listAdminShifts already uses (and the
+ *  exact set assertCanAssignTasks already allows to approve/return a given task — whoever shows
+ *  up in this list is always someone this actor is actually allowed to act on). Backs both the
+ *  admin "you have tasks awaiting review" signal and the My Tasks page's reviewer tab (Oct 2026,
+ *  CB: "I should be able to approve as well on the tasks page as well" — until now the only place
+ *  to approve a task was buried inside that employee's own date on Availability/Schedule).
+ *  Tasks that are still ASSIGNED/IN_PROGRESS, already APPROVED, or RETURNED-and-not-yet-
+ *  resubmitted are left out — none of those need a reviewer's action right now. */
 export async function listAllAwaitingReviewDateTasks(actor: CurrentEmployee): Promise<DateTaskDTO[]> {
-  assertIsAdmin(actor);
+  if (!isAdmin(actor) && actor.role !== "SUPERVISOR") throw new ForbiddenError();
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const rows: TaskRow[] = await tx.dateTask.findMany({
-      where: { status: "AWAITING_REVIEW" },
+      where: {
+        status: "AWAITING_REVIEW",
+        ...(isAdmin(actor) ? {} : { employee: { supervisorId: actor.id } }),
+      },
       include: TASK_INCLUDE,
       orderBy: [{ submittedAt: "asc" }],
     });
@@ -259,8 +273,25 @@ export async function getDateTaskAttachmentUrl(actor: CurrentEmployee, taskId: s
     throw new DateTaskNotFoundError();
   }
   await assertCanAccessEmployeeRecords(actor, row.employeeId);
-  
+
   return getSignedDownloadUrl(row.attachmentKey);
+}
+
+/** Same as getDateTaskAttachmentUrl above, but for the separate file left AT submit time
+ *  (submissionAttachmentKey) rather than the one set when the task was first assigned. */
+export async function getDateTaskSubmissionAttachmentUrl(actor: CurrentEmployee, taskId: string): Promise<string> {
+  const row: { employeeId: string; submissionAttachmentKey: string | null } | null = await withRlsContext(
+    { employeeId: actor.id, role: actor.role },
+    async (tx) =>
+      tx.dateTask.findUnique({ where: { id: taskId }, select: { employeeId: true, submissionAttachmentKey: true } })
+  );
+
+  if (!row || !row.submissionAttachmentKey) {
+    throw new DateTaskNotFoundError();
+  }
+  await assertCanAccessEmployeeRecords(actor, row.employeeId);
+
+  return getSignedDownloadUrl(row.submissionAttachmentKey);
 }
 
 async function loadOwnTaskRow(tx: PrismaClient, taskId: string): Promise<TaskRow> {
@@ -328,8 +359,23 @@ async function resolveTaskReviewerIds(tx: PrismaClient, employeeId: string): Pro
  *  AVAILABILITY_SUBMITTED, picked up by sendPendingNotificationEmails the same as everything
  *  else (DATE_TASK_SUBMITTED isn't in notification-emails.ts's PREFERENCE_BY_TYPE map, so it
  *  emails unconditionally, same as AVAILABILITY_SUBMITTED and every other admin/supervisor
- *  operational notification — this is an "act on this" alert, not a self-service preference). */
-export async function submitDateTask(actor: CurrentEmployee, taskId: string): Promise<DateTaskDTO> {
+ *  operational notification — this is an "act on this" alert, not a self-service preference).
+ *
+ *  Oct 2026, round two (CB: "I should be able to review what was submitted for the task" — a
+ *  direct code check confirmed this used to take no content at all, just a status flip): `note`
+ *  and `attachment` are both optional, same "stays fully optional" shape as createDateTask's own
+ *  attachment above — a bare tap with nothing typed still submits exactly as before. A
+ *  resubmit-after-RETURNED overwrites whatever was left on the previous submit rather than
+ *  appending to it; the returned task's own history (and its returnNote) is still there in the
+ *  comment thread either way. */
+export async function submitDateTask(
+  actor: CurrentEmployee,
+  taskId: string,
+  note?: string,
+  attachment?: { key: string; name: string }
+): Promise<DateTaskDTO> {
+  const trimmedNote = note?.trim() || null;
+
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const row = await loadOwnTaskRow(tx, taskId);
     if (row.employeeId !== actor.id) throw new DateTaskNotFoundError();
@@ -338,7 +384,13 @@ export async function submitDateTask(actor: CurrentEmployee, taskId: string): Pr
     }
     const updated: TaskRow = await tx.dateTask.update({
       where: { id: taskId },
-      data: { status: "AWAITING_REVIEW", submittedAt: new Date() },
+      data: {
+        status: "AWAITING_REVIEW",
+        submittedAt: new Date(),
+        submissionNote: trimmedNote,
+        submissionAttachmentKey: attachment?.key ?? null,
+        submissionAttachmentName: attachment?.name ?? null,
+      },
       include: TASK_INCLUDE,
     });
     await writeAuditLog(tx, {
