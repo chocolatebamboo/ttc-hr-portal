@@ -176,6 +176,12 @@ export default async function DashboardPage() {
           dismissal now works. */}
       <DashboardNotifications className="animate-in animate-in-2 mt-4" initial={notificationsSummary} />
 
+      {/* Oct 2026 (CB: "those notifications of like task approval and stuff like that needs to
+          go up top" — moved from its old spot further down the mobile stack / desktop sidebar to
+          sit right under the banners above, same top-of-page prominence, on both mobile and
+          desktop, before announcements or anything else). */}
+      <DateTasksSection className="animate-in animate-in-2 mt-4" employeeId={employee.id} />
+
       {/* Mobile: bold color-block layout (CB's Sept 2026 aesthetic ask, reference screenshots
           in chat). Desktop below kept its own two-column layout rather than copying this
           single-column style — see that block's own comment for how section order was brought
@@ -253,7 +259,6 @@ export default async function DashboardPage() {
           onboardingAttention={onboardingAttention}
           pendingAcknowledgments={pendingAcknowledgments}
         />
-        <DateTasksSection className="animate-in animate-in-4" employeeId={employee.id} />
         <TeamAvailabilityRequestsSection
           className="animate-in animate-in-4"
           initialPending={pendingTeamAvailability}
@@ -332,7 +337,6 @@ export default async function DashboardPage() {
             onboardingAttention={onboardingAttention}
             pendingAcknowledgments={pendingAcknowledgments}
           />
-          <DateTasksSection className="animate-in animate-in-2" employeeId={employee.id} />
           <TeamAvailabilityRequestsSection
             className="animate-in animate-in-3"
             initialPending={pendingTeamAvailability}
