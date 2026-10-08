@@ -80,7 +80,7 @@ export async function getPayrollHoursReport(
         workDate: { gte: startDate, lte: endDate },
         employeeId: { in: employeeIds },
       },
-      select: { employeeId: true, status: true, totalMinutes: true },
+      select: { employeeId: true, status: true, totalMinutes: true, workDate: true },
     });
 
     const ptoRequests = await tx.ptoRequest.findMany({
@@ -93,9 +93,22 @@ export async function getPayrollHoursReport(
       select: { employeeId: true, type: true, hours: true },
     });
 
-    const unapprovedEntryCount = timeEntries.filter(
-      (e: { status: string }) => e.status !== "APPROVED"
-    ).length;
+    // CB, Oct 2026, on the "N entries aren't approved" banner: "there should be a way that we
+    // could kind of view those entries... so we could go back there." Named rather than just
+    // counted, so the Reports page can link straight to each one instead of leaving HR to go
+    // hunting for them. employees (not nonZeroRows below) is the right name source here — an
+    // employee whose ONLY entries this period are unapproved ones has nothing in nonZeroRows at
+    // all, and they're exactly the person this list most needs to surface.
+    const employeeNameById = new Map(employees.map((e) => [e.id, `${e.preferredName || e.firstName} ${e.lastName}`]));
+    const unapprovedEntries = timeEntries
+      .filter((e: { status: string }) => e.status !== "APPROVED")
+      .map((e: { employeeId: string; workDate: Date }) => ({
+        employeeId: e.employeeId,
+        employeeName: employeeNameById.get(e.employeeId) ?? "Unknown",
+        date: e.workDate.toISOString().slice(0, 10),
+      }))
+      .sort((a: { date: string }, b: { date: string }) => a.date.localeCompare(b.date));
+    const unapprovedEntryCount = unapprovedEntries.length;
 
     const regularMinutesByEmployee = new Map<string, number>();
     for (const entry of timeEntries) {
@@ -148,6 +161,7 @@ export async function getPayrollHoursReport(
       endDate: endDate.toISOString().slice(0, 10),
       rows: nonZeroRows,
       unapprovedEntryCount,
+      unapprovedEntries,
     };
   });
 }
