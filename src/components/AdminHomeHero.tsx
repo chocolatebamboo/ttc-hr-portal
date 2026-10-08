@@ -76,31 +76,34 @@ function MenuRow({ s, onNavigate }: { s: AdminShiftDTO; onNavigate: () => void }
 }
 
 /**
- * The floating "today's schedule" menu (Oct 2026 redo — CB rejected the first version of this
- * feature, a same-page scroll-jump: "It's not functioning right it's supposed to function like
- * you can see the names what you click on it like it's on menu," and asked to see a mockup
- * before anything shipped again — approved, "Yes I like that," before this was built). Tapping
- * either stat tile pops this one panel right under it, showing the real people behind today's
- * numbers, instead of jumping to TeamScheduleGlance further down the page.
+ * The "today's schedule" menu (Oct 2026 redo — CB rejected the first version of this feature, a
+ * same-page scroll-jump: "It's not functioning right it's supposed to function like you can see
+ * the names what you click on it like it's on menu," and asked to see a mockup before anything
+ * shipped again — approved, "Yes I like that," before this was built). Tapping either stat tile
+ * reveals this one panel, showing the real people behind today's numbers, instead of jumping to
+ * TeamScheduleGlance further down the page.
  *
  * ONE combined panel, not two separate ones (CB, immediate follow-up after the first version of
  * this went out: "we should see the schedule today as well" — confirmed via a follow-up
  * question: "Either tile opens the same panel: 'Working right now' at the top, then everyone
  * else scheduled today underneath. One tap shows the whole picture"). So both tiles open this
  * exact component with the exact same `shifts` (todaysShifts, unfiltered) — which tile you
- * tapped only decides which side the panel hangs from (`align`), not what's inside it. Split
- * into the same two groups, with the same two labels, as TeamScheduleGlance's own "Who's working
- * right now"/"Today" split just below this hero on the page (rightNowShifts/restOfToday there) —
- * deliberately the same grouping and the same words, so this panel and that section never
- * disagree about who's in which bucket.
+ * tapped doesn't change what's inside it. Split into the same two groups, with the same two
+ * labels, as TeamScheduleGlance's own "Who's working right now"/"Today" split just below this
+ * hero on the page (rightNowShifts/restOfToday there) — deliberately the same grouping and the
+ * same words, so this panel and that section never disagree about who's in which bucket.
  *
- * `align`: which edge of the panel lines up with the tapped tile — "start" (left-anchored,
- * extends right) for the first/leftmost tile, "end" (right-anchored, extends left) for the
- * second/rightmost one. A fixed-width panel wider than either tile will overhang its own tile
- * either way; anchoring to the OUTER edge of whichever tile was tapped keeps it inside the hero
- * card's own bounds instead of running off the side of the screen on a narrow phone.
+ * Oct 2026 (CB, on a screenshot of this exact panel open: "it's not dropping down in a way that
+ * is like directly above the schedule someone and I needed to be cleanly in response to that" —
+ * confirmed against a before/after mockup): this used to render `absolute`, floating on top of
+ * whatever came after it in the layout ("Schedule someone", and TeamScheduleGlance further down)
+ * instead of making room for itself. It's now a plain in-flow block — see the two render
+ * branches below, where it sits right after the tile row and before "Schedule someone," pushing
+ * that button (and everything after it) down instead of covering it. Dropped the old `align`
+ * prop along with the absolute positioning it existed for — a full-width in-flow panel doesn't
+ * need to pick which tile's edge to hang off of.
  */
-function StatMenu({ shifts, align, onClose }: { shifts: AdminShiftDTO[]; align: "start" | "end"; onClose: () => void }) {
+function StatMenu({ shifts, onClose }: { shifts: AdminShiftDTO[]; onClose: () => void }) {
   const rightNowShifts = shifts.filter((s) => s.displayStatus === "IN_PROGRESS");
   const restOfToday = shifts.filter((s) => s.displayStatus !== "IN_PROGRESS");
 
@@ -108,16 +111,16 @@ function StatMenu({ shifts, align, onClose }: { shifts: AdminShiftDTO[]; align: 
     <>
       {/* Tapping anywhere outside the panel closes it (CB's mockup caption: "Tapping outside...
           closes it") — a full-viewport invisible layer is simpler and more reliable here than a
-          document click-outside listener, and needs no cleanup/ref wiring. */}
+          document click-outside listener, and needs no cleanup/ref wiring. Still a `fixed`
+          overlay even though the panel itself is no longer `absolute` — this is about catching
+          taps anywhere on the page, not about the panel's own position. */}
       <button
         type="button"
         aria-label="Close"
         onClick={onClose}
         className="fixed inset-0 z-20 cursor-default"
       />
-      <div
-        className={`absolute top-[calc(100%+10px)] ${align === "start" ? "left-0" : "right-0"} z-30 w-80 max-w-[calc(100vw-2.5rem)] rounded-2xl border border-border bg-surface shadow-xl overflow-hidden animate-in`}
-      >
+      <div className="relative z-30 rounded-2xl border border-border bg-surface shadow-xl overflow-hidden animate-in">
         <div className="max-h-80 overflow-y-auto">
           {rightNowShifts.length > 0 && (
             <div>
@@ -177,7 +180,7 @@ function StatMenu({ shifts, align, onClose }: { shifts: AdminShiftDTO[]; align: 
  * click in these areas... and we see who's clocked in currently and... who's scheduled today")
  * open the SAME StatMenu (above) — see that component's own doc comment for why this is one
  * combined panel rather than two separate ones; `openFrom` tracks which tile was tapped only to
- * decide which side the panel hangs from (`align`), not what's inside it. Opens no new page and
+ * decide its own outline/highlight state, not what's inside the panel. Opens no new page and
  * makes no new fetch, just reads from `todaysShifts` already in hand. Both tiles are
  * non-interactive (plain block, no button, no chevron) when `todaysShifts` is empty entirely —
  * nothing to show in the menu either way, so nothing to tap — but stay tappable even when that
@@ -268,8 +271,8 @@ export default function AdminHomeHero({
             <p className="text-sm font-medium text-white/75 mt-1.5">{liveDate}</p>
           </div>
 
-          <div className="flex gap-2.5 mb-5">
-            <div className="relative flex-1">
+          <div className={`flex gap-2.5 ${openFrom ? "mb-3" : "mb-5"}`}>
+            <div className="flex-1">
               {hasAnything ? (
                 <button
                   type="button"
@@ -289,12 +292,9 @@ export default function AdminHomeHero({
                   <p className="text-[11px] font-medium text-white/80 mt-1">Scheduled today</p>
                 </div>
               )}
-              {openFrom === "scheduled" && (
-                <StatMenu shifts={todaysShifts} align="start" onClose={() => setOpenFrom(null)} />
-              )}
             </div>
 
-            <div className="relative flex-1">
+            <div className="flex-1">
               {hasAnything ? (
                 <button
                   type="button"
@@ -314,11 +314,17 @@ export default function AdminHomeHero({
                   <p className="text-[11px] font-medium text-white/80 mt-1">In progress</p>
                 </div>
               )}
-              {openFrom === "progress" && (
-                <StatMenu shifts={todaysShifts} align="end" onClose={() => setOpenFrom(null)} />
-              )}
             </div>
           </div>
+
+          {/* In-flow, not absolute — see StatMenu's own doc comment. Sits right between the
+              tiles and "Schedule someone," pushing that button (and everything below it) down
+              instead of floating on top of it. */}
+          {openFrom && (
+            <div className="mb-5">
+              <StatMenu shifts={todaysShifts} onClose={() => setOpenFrom(null)} />
+            </div>
+          )}
 
           <button
             type="button"
@@ -346,13 +352,13 @@ export default function AdminHomeHero({
   return (
     <>
       <div className="rounded-2xl border border-border bg-surface p-6 shadow-sm relative">
-        <div className="flex items-start justify-between gap-4 flex-wrap mb-5">
+        <div className={`flex items-start justify-between gap-4 flex-wrap ${openFrom ? "mb-3" : "mb-5"}`}>
           <div>
             <p className="text-3xl font-bold tabular-nums leading-none tracking-tight mb-1.5">{liveTime}</p>
             <p className="text-xs uppercase tracking-wide text-muted/60">{liveDate}</p>
           </div>
           <div className="flex gap-5">
-            <div className="relative">
+            <div>
               {hasAnything ? (
                 <button
                   type="button"
@@ -370,12 +376,9 @@ export default function AdminHomeHero({
                   <p className="text-xs text-muted">Scheduled today</p>
                 </div>
               )}
-              {openFrom === "scheduled" && (
-                <StatMenu shifts={todaysShifts} align="start" onClose={() => setOpenFrom(null)} />
-              )}
             </div>
 
-            <div className="relative">
+            <div>
               {hasAnything ? (
                 <button
                   type="button"
@@ -393,12 +396,18 @@ export default function AdminHomeHero({
                   <p className="text-xs text-muted">In progress</p>
                 </div>
               )}
-              {openFrom === "progress" && (
-                <StatMenu shifts={todaysShifts} align="end" onClose={() => setOpenFrom(null)} />
-              )}
             </div>
           </div>
         </div>
+
+        {/* In-flow, not absolute — see StatMenu's own doc comment. Sits between the header row
+            and the "Schedule someone" row, pushing the latter down instead of floating on top
+            of it. */}
+        {openFrom && (
+          <div className="mb-5">
+            <StatMenu shifts={todaysShifts} onClose={() => setOpenFrom(null)} />
+          </div>
+        )}
 
         <div className="flex items-center gap-4 flex-wrap">
           <button
