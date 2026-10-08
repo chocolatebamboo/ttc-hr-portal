@@ -6,7 +6,7 @@ import DateTasksPanel from "@/components/DateTasksPanel";
 import { ChecklistIcon } from "@/components/icons";
 import { formatSlotDate, formatTime12h } from "@/lib/availability-format";
 import { getWeek, formatWeekRange } from "@/lib/week";
-import type { AdminShiftDTO, AssignmentOptionsDTO, DirectReportDTO, ShiftStatus } from "@/types";
+import type { AdminShiftDTO, AssignmentOptionsDTO, DateTaskDTO, DirectReportDTO, ShiftStatus } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -87,6 +87,12 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
   const [employeeOptions, setEmployeeOptions] = useState<EmployeeOption[]>([]);
   const [departmentOptions, setDepartmentOptions] = useState<{ id: string; name: string }[]>([]);
   const [openShiftId, setOpenShiftId] = useState<string | null>(null);
+  // Lets each shift row's Tasks toggle say what's actually there before it's opened (Add task /
+  // View task / View tasks) instead of the same label regardless of state — approved via mockup
+  // first. Keyed `${employeeId}__${date}` since the task list this is built from isn't scoped
+  // to one shift — same employeeId+taskDate filter DateTasksPanel itself already applies
+  // client-side against its own per-employee fetch.
+  const [taskCounts, setTaskCounts] = useState<Record<string, number>>({});
 
   const [employeeFilter, setEmployeeFilter] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("");
@@ -177,6 +183,44 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
       return true;
     });
   }, [shifts, employeeFilter, departmentFilter, statusFilter, week]);
+
+  // Backs the Tasks toggle's wording (renderShiftRow below) — one fetch per visible employee
+  // rather than one per shift, same "small enough that a second endpoint isn't worth it"
+  // reasoning DateTasksPanel's own doc comment already gives for this exact endpoint. Re-runs
+  // whenever the visible shift set changes (filters/week/a reload after an action) or a Tasks
+  // panel opens or closes — the latter so a toggle's label picks up a task just added or
+  // changed without threading a dedicated callback through DateTasksPanel/DateTaskRow.
+  useEffect(() => {
+    const ids = Array.from(new Set(filtered.map((s) => s.employeeId)));
+    if (ids.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setTaskCounts({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const counts: Record<string, number> = {};
+      await Promise.all(
+        ids.map(async (id) => {
+          try {
+            const res = await fetch(`/api/date-tasks/${id}`);
+            if (!res.ok) return;
+            const data: { tasks: DateTaskDTO[] } = await res.json();
+            for (const t of data.tasks) {
+              const key = `${id}__${t.taskDate}`;
+              counts[key] = (counts[key] ?? 0) + 1;
+            }
+          } catch {
+            // best-effort — that employee's rows just keep the default "Add task" label
+          }
+        })
+      );
+      if (!cancelled) setTaskCounts(counts);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [filtered, openShiftId]);
 
   // Oct 2026 (CB, after seeing the filtered-to-one-person view in production): she didn't like
   // that person's name repeating on every card below, and wanted the page "widgetized" and
@@ -360,6 +404,8 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
     // approve/decline (see SHIFT_RESOLVABLE_STATUSES in src/lib/shifts.ts).
     const canManage = s.status === "UPCOMING" || s.status === "CHANGE_REQUESTED" || s.status === "CANCELLATION_REQUESTED";
     const hasPendingRequest = s.status === "CHANGE_REQUESTED" || s.status === "CANCELLATION_REQUESTED";
+    const isTasksOpen = openShiftId === s.id;
+    const taskCount = taskCounts[`${s.employeeId}__${s.date}`] ?? 0;
     return (
       <div key={s.id} className="px-4 py-3.5">
         <div className="flex items-start justify-between gap-3">
@@ -575,18 +621,31 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
             (Sept 2026): each task now carries its own comment thread (DateTaskRow), replacing
             the standalone per-shift conversation that used to sit alongside this list — see
             DateTasksPanel's own doc comment. */}
+        {/* Round 3 (CB, Oct 2026, on the mockup: too much going on — approved the plain
+            version with no review annotations): says what's actually there before you open
+            it instead of an unconditional "Tasks" — a count badge only shows once there's
+            more than one, since "View task" already says there's exactly one. */}
         <button
           type="button"
-          onClick={() => setOpenShiftId(openShiftId === s.id ? null : s.id)}
+          onClick={() => setOpenShiftId(isTasksOpen ? null : s.id)}
           className={`mt-3 flex items-center gap-1.5 text-xs font-medium transition-colors ${
-            openShiftId === s.id ? "text-accent-ink" : "text-muted hover:text-accent-ink"
+            isTasksOpen
+              ? "text-accent-ink"
+              : taskCount > 0
+                ? "text-accent-ink hover:opacity-80"
+                : "text-muted hover:text-accent-ink"
           }`}
         >
           <ChecklistIcon className="h-3.5 w-3.5" />
-          Tasks
+          {taskCount === 0 ? "Add task" : taskCount === 1 ? "View task" : "View tasks"}
+          {taskCount > 1 && (
+            <span className="inline-flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-accent-ink text-white text-[10px] font-bold">
+              {taskCount}
+            </span>
+          )}
         </button>
 
-        {openShiftId === s.id && (
+        {isTasksOpen && (
           <div className="mt-2.5 space-y-2.5">
             <div>
               <p className="text-xs font-semibold text-muted mb-1 flex items-center gap-1.5">
