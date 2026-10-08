@@ -33,7 +33,10 @@ export async function GET(request: NextRequest) {
     const employeeLabel = employeeId ? report.rows[0]?.employeeCode : undefined;
     const pdf = toPayrollPdf(report, employeeLabel);
 
-    return new NextResponse(pdf, {
+    // Newer @types/node types Buffer as Uint8Array<ArrayBufferLike> rather than
+    // Uint8Array<ArrayBuffer>, which NextResponse's body type (BodyInit) no longer accepts
+    // directly — this copies it into a plain Uint8Array<ArrayBuffer> to satisfy that.
+    return new NextResponse(new Uint8Array(pdf), {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
