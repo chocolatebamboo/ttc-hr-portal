@@ -5,11 +5,25 @@ import Link from "next/link";
 import ShiftStatusPill from "@/components/ShiftStatusPill";
 import { ChecklistIcon } from "@/components/icons";
 import { formatSlotDate, formatTime12h } from "@/lib/availability-format";
-import type { ShiftDTO } from "@/types";
+import { getWeek, formatWeekRange } from "@/lib/week";
+import type { ShiftDTO, ShiftStatus } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
 
-const UPCOMING_STATUSES = new Set(["UPCOMING", "IN_PROGRESS", "CHANGE_REQUESTED", "CANCELLATION_REQUESTED"]);
+// Same color logic ShiftStatusPill's own STYLE map already uses (sky = upcoming, emerald =
+// happening now, muted = closed out, amber = a pending request, violet = reassigned, rose =
+// no clock-in) — reused here as a left-edge accent bar on each card instead of invented fresh,
+// so a status reads the same way whether you're looking at its pill or its card.
+const ACCENT: Record<ShiftStatus, string> = {
+  UPCOMING: "#0ea5e9",
+  IN_PROGRESS: "#10b981",
+  COMPLETED: "rgba(107,101,96,0.35)",
+  CHANGE_REQUESTED: "#f59e0b",
+  CANCELLATION_REQUESTED: "#f59e0b",
+  CANCELLED: "rgba(107,101,96,0.35)",
+  REASSIGNED: "#8b5cf6",
+  MISSED: "#f43f5e",
+};
 
 /**
  * "My Schedule" — phase 1 of the scheduling workflow rebuild (client spec, Sept 2026): the
@@ -26,18 +40,19 @@ const UPCOMING_STATUSES = new Set(["UPCOMING", "IN_PROGRESS", "CHANGE_REQUESTED"
  * to the real Tasks page instead — see MyTasksView's own doc comment for why (organizing a team
  * member's tasks by date, including past ones, needed a real page, not a per-card panel).
  *
- * Oct 2026 (CB, on this page specifically: "more aesthetic and clean" on desktop): the shift
- * lists below used to be a single stacked column capped at max-w-2xl regardless of screen size —
- * fine on a phone, but on desktop it left most of the page empty on either side. Widened to
- * max-w-4xl (same width ProfileView and Team Schedule already settled on) with each section's
- * cards laid out as a two-column grid at the sm breakpoint and up (grid-cols-1 sm:grid-cols-2 —
- * the same responsive-grid convention Team Schedule's own filter row and EmployeesAdminView's
- * forms already use), collapsing back to one column on mobile exactly as before. The cards
- * themselves, and everything in them, are unchanged.
+ * Oct 2026, round two (CB: "my schedule needs to read a little better... that page needs to
+ * look a lot more aesthetic and organized and clean... remember we're going from a week to week
+ * basis"): the old Upcoming/"Past & other" split is replaced with the same week-paginated strip
+ * now used on My Tasks and Availability's "Your submissions" (TeamAvailabilityWeekPanel's own
+ * pattern, via the shared getWeek/formatWeekRange helpers in src/lib/week.ts) — one week of
+ * shifts on screen at a time, oldest first, instead of two buckets that would only grow over
+ * time. Each card also gets a left-edge color accent matching its status pill (see the ACCENT
+ * map above) so the page reads at a glance instead of as a wall of identical white cards.
  */
 export default function ScheduleView() {
   const [shifts, setShifts] = useState<ShiftDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [offset, setOffset] = useState(0);
 
   async function load() {
     setLoadState("loading");
@@ -75,8 +90,10 @@ export default function ScheduleView() {
     );
   }
 
-  const upcoming = shifts.filter((s) => UPCOMING_STATUSES.has(s.displayStatus));
-  const past = shifts.filter((s) => !UPCOMING_STATUSES.has(s.displayStatus));
+  const week = getWeek(offset);
+  const weekShifts = [...shifts.filter((s) => s.date >= week.start && s.date <= week.end)].sort((a, b) =>
+    a.date === b.date ? a.startTime.localeCompare(b.startTime) : a.date < b.date ? -1 : 1
+  );
 
   return (
     <div className="max-w-4xl">
@@ -86,35 +103,43 @@ export default function ScheduleView() {
         you&apos;ve submitted as available.
       </p>
 
-      <section className="mb-8">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted mb-2.5">
-          Upcoming ({upcoming.length})
-        </h2>
-        {upcoming.length === 0 ? (
-          <div className="rounded-2xl border border-border bg-surface p-4 text-sm text-muted">
-            No upcoming shifts yet. Once a supervisor confirms your availability as a shift, it
-            shows up here.
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {upcoming.map((s) => (
-              <ShiftCard key={s.id} shift={s} onChanged={load} />
-            ))}
-          </div>
+      <div className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 mb-4 w-fit">
+        <button
+          type="button"
+          onClick={() => setOffset((o) => o - 1)}
+          className="h-7 w-7 rounded-full border border-border flex items-center justify-center text-sm text-muted hover:text-foreground hover:bg-black/[0.03]"
+          aria-label="Previous week"
+        >
+          ‹
+        </button>
+        <span className="text-sm font-semibold min-w-[150px] text-center tabular-nums">
+          Week of {formatWeekRange(week.start, week.end)}
+        </span>
+        {offset === 0 && (
+          <span className="text-[11px] font-semibold text-accent-ink bg-accent/10 rounded-full px-2.5 py-0.5">
+            This week
+          </span>
         )}
-      </section>
+        <button
+          type="button"
+          onClick={() => setOffset((o) => o + 1)}
+          className="h-7 w-7 rounded-full border border-border flex items-center justify-center text-sm text-muted hover:text-foreground hover:bg-black/[0.03]"
+          aria-label="Next week"
+        >
+          ›
+        </button>
+      </div>
 
-      {past.length > 0 && (
-        <section>
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted mb-2.5">
-            Past & other ({past.length})
-          </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {past.map((s) => (
-              <ShiftCard key={s.id} shift={s} />
-            ))}
-          </div>
-        </section>
+      {weekShifts.length === 0 ? (
+        <div className="rounded-2xl border border-border bg-surface p-4 text-sm text-muted">
+          Nothing scheduled this week.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          {weekShifts.map((s) => (
+            <ShiftCard key={s.id} shift={s} onChanged={load} />
+          ))}
+        </div>
       )}
     </div>
   );
@@ -181,7 +206,12 @@ function ShiftCard({
   }
 
   return (
-    <div className="rounded-2xl border border-border bg-surface p-4">
+    <div className="relative overflow-hidden rounded-2xl border border-border bg-surface p-4 pl-5">
+      <span
+        className="absolute left-0 top-0 bottom-0 w-1"
+        style={{ background: ACCENT[shift.displayStatus] }}
+        aria-hidden="true"
+      />
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold">{formatSlotDate(shift.date)}</p>
