@@ -683,6 +683,13 @@ export interface DateTaskDTO {
   priority: DateTaskPriority;
   startedAt: string | null; // ISO — set on ASSIGNED/RETURNED -> IN_PROGRESS
   submittedAt: string | null; // ISO — set on -> AWAITING_REVIEW (was `completedAt`)
+  /** What the employee left at the moment they submitted — optional note + optional one file,
+   *  same shape as the task's own original hasAttachment/attachmentName pair below. Null/false
+   *  until a submit actually happens; a RETURNED-then-resubmitted task overwrites both with
+   *  whatever was left on the latest submit. */
+  submissionNote: string | null;
+  hasSubmissionAttachment: boolean;
+  submissionAttachmentName: string | null;
   approvedById: string | null;
   approvedByName: string | null;
   approvedAt: string | null; // ISO
