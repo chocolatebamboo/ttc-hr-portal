@@ -123,6 +123,13 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
   const [regularEntries, setRegularEntries] = useState<TimeEntryDTO[] | null>(null);
   const [regularLoading, setRegularLoading] = useState(false);
   const [regularError, setRegularError] = useState("");
+  // Round six (CB): "I kind of want to drop down so we could look at the other team members...
+  // without having to go all the way back to the full team page." Reuses the same `employees`
+  // list and handleEmployeeChange the Team Member picker up top already has — this is just a
+  // second entry point into the exact same switch, placed where CB's eyes already are once
+  // she's deep in one person's report. Reset to closed on every generate() (same reasoning as
+  // regularExpanded above): switching people or dates should never leave a stale open panel.
+  const [switcherOpen, setSwitcherOpen] = useState(false);
 
   async function generate(s: string, e: string, empId: string) {
     setLoadState("loading");
@@ -130,6 +137,7 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
     setRegularExpanded(false);
     setRegularEntries(null);
     setRegularError("");
+    setSwitcherOpen(false);
     try {
       const query = `?start=${s}&end=${e}${empId ? `&employeeId=${empId}` : ""}`;
       const res = await fetch(`/api/payroll/hours${query}`);
@@ -529,12 +537,64 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
                     </span>
                   </span>
                   <div className="min-w-0">
-                    <p className="font-serif text-lg font-bold text-white truncate">{report.rows[0].name}</p>
+                    {/* Round six (CB): "I kind of want to drop down so we could look at the
+                        other team members... without having to go all the way back to the full
+                        team page." The name itself is the control (CB, on a first version of
+                        this with a separate "Switch to" row next to "← All team members": "I
+                        feel like there's a better way... reads cleanly") — one dropdown next to
+                        the name to jump to a specific person, one link above to leave the
+                        single-person view entirely, instead of two nav controls stacked in one
+                        thin strip doing similar-feeling things. */}
+                    <button
+                      type="button"
+                      onClick={() => setSwitcherOpen((v) => !v)}
+                      aria-expanded={switcherOpen}
+                      className="flex items-center gap-1.5 max-w-full"
+                    >
+                      <span className="font-serif text-lg font-bold text-white truncate">{report.rows[0].name}</span>
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="white"
+                        strokeWidth="3"
+                        aria-hidden="true"
+                        className={`shrink-0 opacity-80 transition-transform ${switcherOpen ? "rotate-180" : ""}`}
+                      >
+                        <path d="M6 9l6 6 6-6" />
+                      </svg>
+                    </button>
                     <p className="text-sm text-white/85 truncate">
                       {report.rows[0].employeeCode} · {report.rows[0].jobTitle}
                     </p>
                   </div>
                 </div>
+                {switcherOpen && (
+                  <div className="mt-3 bg-white rounded-xl shadow-lg overflow-hidden max-h-56 overflow-y-auto">
+                    {employees.map((emp) => (
+                      <button
+                        key={emp.id}
+                        type="button"
+                        onClick={() => handleEmployeeChange(emp.id)}
+                        className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-left border-t border-border first:border-t-0 ${
+                          emp.id === employeeId
+                            ? "bg-accent/10 text-accent-ink font-semibold"
+                            : "text-foreground hover:bg-black/[0.02]"
+                        }`}
+                      >
+                        <span
+                          className={`h-[22px] w-[22px] rounded-md shrink-0 flex items-center justify-center text-[9px] font-bold ${
+                            emp.id === employeeId ? "bg-accent-ink text-white" : "bg-border text-muted"
+                          }`}
+                        >
+                          {initialsOf(emp.name) || "?"}
+                        </span>
+                        {emp.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {/* Round six (CB, on a screenshot: "it's kind of awkwardly placed with the
                     card... the hierarchy needs to fit correctly and cleanly"): the period used
                     to be crammed into the top-right corner of the identity row, fighting the
