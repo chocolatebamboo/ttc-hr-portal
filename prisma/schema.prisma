@@ -626,6 +626,15 @@ model DateTask {
   startedAt   DateTime?
   submittedAt DateTime?
 
+  // CB, Oct 2026: "I should be able to review what was submitted for the task" — a short note
+  // and an optional photo/file, captured at the moment the employee taps complete (submitDateTask,
+  // src/lib/date-tasks.ts), rather than nothing at all beyond a status flip. Both stay nullable —
+  // a bare submit with nothing typed still works exactly as before. See this column's own
+  // migration (20261008_date_task_submission_note) for the full reasoning.
+  submissionNote           String?
+  submissionAttachmentKey  String?
+  submissionAttachmentName String?
+
   approvedById String?
   approvedBy   Employee? @relation("DateTaskApprovedBy", fields: [approvedById], references: [id])
   approvedAt   DateTime?
