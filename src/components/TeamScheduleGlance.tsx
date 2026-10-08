@@ -6,9 +6,10 @@
 // dashboard/page.tsx, a Server Component, the same way it did before that toggle existed.
 import Link from "next/link";
 import ShiftStatusPill from "@/components/ShiftStatusPill";
+import ClockedInNowSection from "@/components/ClockedInNowSection";
 import { formatTime12h, formatSlotDate } from "@/lib/availability-format";
 import { dateKeyDaysFromNow } from "@/lib/time";
-import type { AdminShiftDTO } from "@/types";
+import type { AdminShiftDTO, CurrentlyClockedInRowDTO } from "@/types";
 
 // Sept 2026 hotfix: this file has no "use client" directive (it renders directly inside
 // dashboard/page.tsx, a Server Component) but was importing initialsOf as a plain function from
@@ -133,8 +134,25 @@ function groupUpcomingByEmployee(upcomingShifts: AdminShiftDTO[]): UpcomingEmplo
  * there isn't anything currently in the field then we shouldn't see it at all cause its
  * cluttering the home page"). Upcoming is unaffected by that rule — it already only renders when
  * it has something to show (upcomingGroups.length > 0 below) — so a quiet today never hides what's
- * scheduled next. If both are empty the whole widget renders nothing, same "no stray empty
- * section" call ClockedInNowSection/TimeOffSection/AvailabilityStatusSection now make too.
+ * scheduled next. If all three (today, upcoming, and currentlyClockedIn below) are empty the
+ * whole widget renders nothing, same "no stray empty section" call TimeOffSection/
+ * AvailabilityStatusSection make too.
+ *
+ * `currentlyClockedIn` (CB, Oct 2026, drawing an arrow on a screenshot from "Full schedule" down
+ * to "Clocked in now" sitting all the way at the bottom of the page: "I need it to kind of go in
+ * the area every time that I pointed the arrow to... I just want it to be a little bit more
+ * visible"): ClockedInNowSection now renders HERE, between "Who's working right now"/"Today" and
+ * "Upcoming," instead of as its own separate block further down dashboard/page.tsx — exactly
+ * where her arrow pointed. It's still the same self-contained component (own 30s poll, own
+ * "nothing clocked in" null-return) just mounted in a different spot; `currentlyClockedIn` is the
+ * same listCurrentlyClockedIn() snapshot dashboard/page.tsx already fetched for it before this
+ * change, passed through as this component's own `initial` prop. One tradeoff worth naming: the
+ * empty-everything guard below is evaluated once, server-side, from this initial snapshot — if a
+ * team with literally nothing scheduled ever (no today, no upcoming) has someone clock in
+ * mid-visit, that first clock-in won't surface until the next page load, since the whole widget
+ * would have already rendered nothing. Not a practical concern for a small team that's always got
+ * something on the books, and the common case (today has shifts, or clock-ins come from people
+ * who ARE on today's schedule) poll-updates live same as before.
  */
 const UPCOMING_COLLAPSED_COUNT = 4;
 
@@ -175,10 +193,12 @@ function ShiftGlanceRow({ s }: { s: AdminShiftDTO }) {
 export default function TeamScheduleGlance({
   shifts,
   upcomingShifts,
+  currentlyClockedIn,
   className,
 }: {
   shifts: AdminShiftDTO[];
   upcomingShifts: AdminShiftDTO[];
+  currentlyClockedIn: CurrentlyClockedInRowDTO[];
   className?: string;
 }) {
   const tomorrowKey = dateKeyDaysFromNow(1);
@@ -196,7 +216,7 @@ export default function TeamScheduleGlance({
     </Link>
   );
 
-  if (shifts.length === 0 && upcomingGroups.length === 0) return null;
+  if (shifts.length === 0 && upcomingGroups.length === 0 && currentlyClockedIn.length === 0) return null;
 
   // Oct 2026 (CB, circling "Scheduled today"/"In progress" on AdminHomeHero's own stat tiles:
   // "is it possible for us to... click in these areas... and we see who's clocked in currently
@@ -236,8 +256,13 @@ export default function TeamScheduleGlance({
         </div>
       )}
 
+      <ClockedInNowSection
+        className={shifts.length > 0 ? "mt-4" : ""}
+        initial={currentlyClockedIn}
+      />
+
       {upcomingGroups.length > 0 && (
-        <div className={shifts.length > 0 ? "mt-4" : ""}>
+        <div className={shifts.length > 0 || currentlyClockedIn.length > 0 ? "mt-4" : ""}>
           <h2 className="text-sm font-medium text-muted mb-2">Upcoming</h2>
           <div className="bg-surface border border-border rounded-2xl divide-y divide-border overflow-hidden">
             {visibleUpcomingGroups.map((g) => (
