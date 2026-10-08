@@ -267,6 +267,30 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
     generate(range.start, range.end, employeeId);
   }
 
+  /** Round six (CB, on a screenshot of the Period row): "we should be able to toggle and go to
+   *  the different... other two weeks. Past to present... I should be able to click the
+   *  different dates and it auto-update" — the prev/next arrows flanking the date range below.
+   *  Steps the current range back or forward by its own length (14 days for a 2-Week Report, 7
+   *  for This Week, etc.) rather than jumping to some fixed preset, so the same two buttons work
+   *  regardless of which preset — or hand-picked range — produced what's currently on screen.
+   *  periodPreset is deliberately left untouched here (unlike handleSubmit's "custom" reset):
+   *  paging through 2-week blocks stays tagged "2-Week Report" the whole time, since each one
+   *  really is a 2-week block, just not THE 2-week block lastTwoWeeksRange would pick on its
+   *  own. */
+  function shiftPeriod(direction: -1 | 1) {
+    const spanDays = Math.round((new Date(`${end}T00:00:00`).getTime() - new Date(`${start}T00:00:00`).getTime()) / 86400000) + 1;
+    const toKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const newStartDate = new Date(`${start}T00:00:00`);
+    newStartDate.setDate(newStartDate.getDate() + direction * spanDays);
+    const newEndDate = new Date(`${end}T00:00:00`);
+    newEndDate.setDate(newEndDate.getDate() + direction * spanDays);
+    const newStart = toKey(newStartDate);
+    const newEnd = toKey(newEndDate);
+    setStart(newStart);
+    setEnd(newEnd);
+    generate(newStart, newEnd, employeeId);
+  }
+
   const rangeInvalid = end < start;
   const exportQuery = `?start=${start}&end=${end}${employeeId ? `&employeeId=${employeeId}` : ""}`;
 
@@ -520,11 +544,43 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
                     PERIOD_PRESET_LABEL names which preset produced this exact range (most often
                     "2-Week Report," Sean/Daijour's own payroll pull), so it reads as a known,
                     intentional period rather than just whatever dates happen to be showing —
-                    silent for a hand-picked range. */}
+                    silent for a hand-picked range. The prev/next arrows (shiftPeriod's own doc
+                    comment above) let CB page straight through past 2-week blocks from here,
+                    instead of having to go edit the date fields by hand every time. */}
                 <div className="mt-4 pt-3.5 border-t border-white/20 flex items-center justify-between gap-3 flex-wrap">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-[10px] font-semibold uppercase tracking-wide text-white/65">Period</span>
-                    <span className="text-sm font-semibold text-white/95">{formatWeekRange(report.startDate, report.endDate)}</span>
+                  <div className="flex items-center gap-1.5">
+                    {/* No loadState-based disabling here (unlike the preset buttons above) —
+                        this whole card only renders while loadState === "ready" to begin with,
+                        so a mid-fetch disabled state would never actually show. */}
+                    <button
+                      type="button"
+                      onClick={() => shiftPeriod(-1)}
+                      aria-label="Previous period"
+                      className="h-[22px] w-[22px] shrink-0 rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" aria-hidden="true">
+                        <path d="M15 6l-6 6 6 6" />
+                      </svg>
+                    </button>
+                    <div className="flex flex-col items-center leading-tight">
+                      <span className="text-[9px] font-semibold uppercase tracking-wide text-white/65">Period</span>
+                      <span className="text-sm font-semibold text-white/95 whitespace-nowrap">
+                        {formatWeekRange(report.startDate, report.endDate)}
+                      </span>
+                    </div>
+                    {/* Can't page into the future — once the shown period already reaches today,
+                        there's nothing newer to generate. */}
+                    <button
+                      type="button"
+                      onClick={() => shiftPeriod(1)}
+                      disabled={end >= todayDateKey()}
+                      aria-label="Next period"
+                      className="h-[22px] w-[22px] shrink-0 rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center disabled:opacity-30"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" aria-hidden="true">
+                        <path d="M9 6l6 6-6 6" />
+                      </svg>
+                    </button>
                   </div>
                   {PERIOD_PRESET_LABEL[periodPreset] && (
                     <span className="text-[11px] font-bold uppercase tracking-wide text-accent-ink bg-white rounded-full px-3 py-1">
