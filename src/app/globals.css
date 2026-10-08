@@ -150,6 +150,53 @@ body {
 }
 
 /*
+ * DateTaskRow's "tap to complete" hint (CB, Oct 2026 — see that component's own doc comment for
+ * the full back-and-forth that landed here): the label beside an actionable task's circle fades
+ * in with the card, holds for about 2.5s so it's actually readable, then fades out over the
+ * last second, leaving the dashed ring itself to keep a soft recurring pulse as the lasting
+ * "something happens here" cue — CB: "maybe it could be like tap to complete like the wording
+ * show up briefly and then it disappears... so that users can understand the functionality."
+ * `both` keeps the label at its final (invisible) opacity after the animation ends instead of
+ * snapping back to visible. Reduced-motion viewers get neither animation: the label stays
+ * visible (not just un-animated-then-vanished — see the component's own aria-label, which
+ * doesn't depend on this text either way) and the ring stays a plain static dashed circle,
+ * since the whole point of this motion is explaining the control, and removing the explanation
+ * for someone who has animation disabled would defeat that rather than just slow it down.
+ */
+@keyframes tap-hint-fade {
+  0%,
+  71% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.tap-hint-label {
+  animation: tap-hint-fade 3.5s ease-in both;
+}
+@keyframes tap-hint-pulse {
+  0%,
+  55% {
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.45);
+  }
+  100% {
+    box-shadow: 0 0 0 7px rgba(255, 255, 255, 0);
+  }
+}
+.tap-hint-ring {
+  animation: tap-hint-pulse 2.4s ease-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tap-hint-label {
+    animation: none;
+  }
+  .tap-hint-ring {
+    animation: none;
+  }
+}
+
+/*
  * Shared component classes — kept in one place so every page's buttons, page titles and
  * empty states read as one system instead of each screen hand-rolling its own Tailwind
  * string. Pill-shaped buttons and bold serif page titles are the two most recognizable
