@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getWeek } from "@/lib/week";
+import { getWeek, formatWeekRange } from "@/lib/week";
 import ActivityHistoryView from "./ActivityHistoryView";
 import type { PayrollHoursReportDTO } from "@/types";
 
@@ -24,6 +24,35 @@ function todayDateKey(): string {
 function thisWeekRange(): { start: string; end: string } {
   const week = getWeek(0);
   return { start: week.start, end: todayDateKey() < week.end ? todayDateKey() : week.end };
+}
+
+/** Round four (CB, Oct 2026): "a 'last 2 weeks' button... matching Shawn's biweekly payroll
+ *  pull cadence" — the 14 days ending today, not a calendar-aligned pair of weeks, since what
+ *  matters here is matching whenever Shawn actually runs payroll, not the calendar's own week
+ *  boundaries. */
+function lastTwoWeeksRange(): { start: string; end: string } {
+  const end = todayDateKey();
+  const endDate = new Date(`${end}T00:00:00`);
+  const startDate = new Date(endDate);
+  startDate.setDate(startDate.getDate() - 13);
+  const start = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, "0")}-${String(startDate.getDate()).padStart(2, "0")}`;
+  return { start, end };
+}
+
+// Same local-copy convention every other consumer of "initials from a name" already follows in
+// this app (see TeamScheduleGlance.tsx's own doc comment on this exact choice) — used below for
+// the single-employee "full report" banner's avatar.
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
+}
+
+/** Short weekday + month/day for the unapproved-entries list — plain Date formatting rather
+ *  than reaching for formatSlotDate (that one's tuned for a shift/task row's own fuller date
+ *  label; this list is compact by design, one line per entry). */
+function formatShortDate(dateKey: string): string {
+  const d = new Date(`${dateKey}T00:00:00`);
+  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
 /**
@@ -59,6 +88,10 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
   const [report, setReport] = useState<PayrollHoursReportDTO | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [errorMessage, setErrorMessage] = useState("");
+  // Round four (CB, Oct 2026, on the mockup: "there should be a way that we could kind of view
+  // those entries that are not necessarily approved... so we could go back there"): the banner
+  // itself now toggles this instead of just sitting there as inert text.
+  const [showUnapproved, setShowUnapproved] = useState(false);
 
   async function generate(s: string, e: string, empId: string) {
     setLoadState("loading");
@@ -143,8 +176,15 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
     generate(s, e, employeeId);
   }
 
+  function useLastTwoWeeks() {
+    const range = lastTwoWeeksRange();
+    setStart(range.start);
+    setEnd(range.end);
+    generate(range.start, range.end, employeeId);
+  }
+
   const rangeInvalid = end < start;
-  const csvQuery = `?start=${start}&end=${end}${employeeId ? `&employeeId=${employeeId}` : ""}`;
+  const exportQuery = `?start=${start}&end=${end}${employeeId ? `&employeeId=${employeeId}` : ""}`;
 
   return (
     <div className="max-w-4xl">
@@ -197,6 +237,11 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
         <button type="button" onClick={useThisMonth} disabled={loadState === "loading"} className="btn-neutral text-xs px-3 py-1.5">
           This month
         </button>
+        {/* Round four (CB, Oct 2026): "a 'last 2 weeks' button... matching Shawn's biweekly
+            payroll pull cadence" — see lastTwoWeeksRange's own doc comment above. */}
+        <button type="button" onClick={useLastTwoWeeks} disabled={loadState === "loading"} className="btn-neutral text-xs px-3 py-1.5">
+          Last 2 weeks
+        </button>
       </div>
 
       <form onSubmit={handleSubmit} className="bg-surface border border-border rounded-xl p-4 mb-5 flex flex-wrap items-end gap-3">
@@ -238,7 +283,18 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
         <button type="submit" disabled={rangeInvalid || loadState === "loading"} className="btn-primary text-sm px-5 py-2">
           {loadState === "loading" ? "Generating…" : "Generate"}
         </button>
-                        {report && loadState !== "error" && <a href={`/api/payroll/hours/csv${csvQuery}`} className="btn-neutral text-sm px-5 py-2">Download CSV</a>}
+        {/* Round four (CB, Oct 2026): "let's also have the option to download pdf" — same report,
+            same filename convention, just a second format alongside the original CSV export. */}
+        {report && loadState !== "error" && (
+          <>
+            <a href={`/api/payroll/hours/csv${exportQuery}`} className="btn-neutral text-sm px-5 py-2">
+              Download CSV
+            </a>
+            <a href={`/api/payroll/hours/pdf${exportQuery}`} className="btn-outline text-sm px-5 py-2">
+              Download PDF
+            </a>
+          </>
+        )}
         {rangeInvalid && <p className="text-xs text-accent basis-full">End date must be on or after the start date.</p>}
       </form>
 
@@ -262,94 +318,221 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
 
       {loadState === "ready" && report && (
         <div>
+          {/* Round four (CB, Oct 2026, on the mockup: "there should be a way that we could kind
+              of view those entries that are not necessarily approved... so we could go back
+              there"): the banner itself now expands into exactly which entries, each one
+              linking straight to that person's Timesheet tab on the week it falls in
+              (ReviewTimesheetView's own ?week= read) instead of just naming a count and leaving
+              HR to go hunting through My Team by hand. */}
           {report.unapprovedEntryCount > 0 && (
-            <div className="rounded-xl border border-accent/30 bg-accent/5 px-4 py-3 text-sm text-accent-ink mb-4">
-              {report.unapprovedEntryCount} time {report.unapprovedEntryCount === 1 ? "entry" : "entries"} in this
-              period {report.unapprovedEntryCount === 1 ? "isn't" : "aren't"} approved yet, so{" "}
-              {report.unapprovedEntryCount === 1 ? "its" : "their"} hours aren&apos;t included below. Check My Team
-              before running payroll on this export.
+            <div className="rounded-xl border border-accent/30 bg-accent/5 mb-4 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setShowUnapproved((v) => !v)}
+                className="w-full flex items-center justify-between gap-3 px-4 py-3 text-sm text-accent-ink text-left"
+              >
+                <span>
+                  {report.unapprovedEntryCount} time {report.unapprovedEntryCount === 1 ? "entry" : "entries"} in
+                  this period {report.unapprovedEntryCount === 1 ? "isn't" : "aren't"} approved yet, so{" "}
+                  {report.unapprovedEntryCount === 1 ? "its" : "their"} hours aren&apos;t included below.
+                </span>
+                <span className="shrink-0 text-xs">{showUnapproved ? "▴" : "▾"}</span>
+              </button>
+              {showUnapproved && (
+                <div className="border-t border-accent/20">
+                  {report.unapprovedEntries.map((entry, i) => (
+                    <a
+                      key={`${entry.employeeId}-${entry.date}-${i}`}
+                      href={`/team/${entry.employeeId}?week=${entry.date}`}
+                      className={`flex items-center justify-between gap-3 px-4 py-2.5 text-sm hover:bg-accent/5 ${
+                        i > 0 ? "border-t border-accent/10" : ""
+                      }`}
+                    >
+                      <span>
+                        <span className="font-semibold text-accent-ink">{entry.employeeName}</span>{" "}
+                        <span className="text-muted">· {formatShortDate(entry.date)}</span>
+                      </span>
+                      <span className="shrink-0 text-xs font-medium text-accent-ink">Review →</span>
+                    </a>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
-          {/* CB, round four: "that bottom half where you see the different team members...
-              needs to read a little bit more cleanly in a widget format... I shouldn't have to
-              slide to the left or right." Below md, this card list replaces the table entirely
-              (no horizontal scroll); at md and up the original table takes over. */}
-          <div className="md:hidden space-y-2.5">
-            {report.rows.map((row) => (
-              <div key={row.employeeId} className="bg-surface border border-border rounded-xl p-4">
-                <div className="flex items-start justify-between gap-3">
+          {employeeId !== "" && report.rows[0] ? (
+            // Round four (CB, Oct 2026: "i should be able to see the full report when clicking
+            // their name or... view full report"): the same per-person identity-banner shell
+            // TeamScheduleView's own single-employee view already uses, so clicking into one
+            // person reads as a distinct "here's their full report" screen rather than just a
+            // shorter version of the same list.
+            <div>
+              <button
+                type="button"
+                onClick={() => handleEmployeeChange("")}
+                className="text-sm font-medium text-muted hover:text-accent-ink mb-3"
+              >
+                ← All team members
+              </button>
+              <div
+                className="rounded-2xl overflow-hidden shadow-sm mb-4 p-5"
+                style={{ background: "linear-gradient(135deg, var(--ttc-pink-ink), var(--ttc-pink))" }}
+              >
+                <div className="flex items-center gap-3.5 flex-wrap">
+                  <span className="h-12 w-12 rounded-xl bg-white shrink-0 flex items-center justify-center">
+                    <span className="font-serif font-bold text-base text-accent-ink">
+                      {initialsOf(report.rows[0].name) || "?"}
+                    </span>
+                  </span>
                   <div className="min-w-0">
-                    <p className="font-medium truncate">{row.name}</p>
-                    <p className="text-xs text-muted mt-0.5">
-                      {row.employeeCode}
-                      {row.department ? ` · ${row.department}` : ""}
+                    <p className="font-serif text-lg font-bold text-white truncate">{report.rows[0].name}</p>
+                    <p className="text-sm text-white/85 truncate">
+                      {report.rows[0].employeeCode}
+                      {report.rows[0].department ? ` · ${report.rows[0].department}` : ""}
                     </p>
                   </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-xs text-muted">Total</p>
-                    <p className="text-base font-semibold tabular-nums">{row.totalHours.toFixed(2)}</p>
+                  <div className="ml-auto text-right shrink-0">
+                    <p className="text-xs text-white/70">Period</p>
+                    <p className="text-sm font-semibold text-white/90">{formatWeekRange(report.startDate, report.endDate)}</p>
                   </div>
                 </div>
-                <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm border-t border-border pt-3">
-                  <div className="flex items-center justify-between">
-                    <dt className="text-xs text-muted">Regular</dt>
-                    <dd className="tabular-nums">{row.regularHours.toFixed(2)}</dd>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <dt className="text-xs text-muted">Vacation</dt>
-                    <dd className="tabular-nums">{row.vacationHours.toFixed(2)}</dd>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <dt className="text-xs text-muted">Sick</dt>
-                    <dd className="tabular-nums">{row.sickHours.toFixed(2)}</dd>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <dt className="text-xs text-muted">Personal</dt>
-                    <dd className="tabular-nums">{row.personalHours.toFixed(2)}</dd>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <dt className="text-xs text-muted">Other Leave</dt>
-                    <dd className="tabular-nums">{row.otherLeaveHours.toFixed(2)}</dd>
-                  </div>
-                </dl>
               </div>
-            ))}
-          </div>
 
-          <div className="hidden md:block bg-surface border border-border rounded-xl overflow-hidden overflow-x-auto">
-            <table className="w-full text-sm min-w-[720px]">
-              <thead>
-                <tr className="border-b border-border text-left text-xs text-muted uppercase tracking-wide">
-                  <th className="px-4 py-2.5 font-medium">Team Member</th>
-                  <th className="px-4 py-2.5 font-medium">Department</th>
-                  <th className="px-4 py-2.5 font-medium text-right">Regular</th>
-                  <th className="px-4 py-2.5 font-medium text-right">Vacation</th>
-                  <th className="px-4 py-2.5 font-medium text-right">Sick</th>
-                  <th className="px-4 py-2.5 font-medium text-right">Personal</th>
-                  <th className="px-4 py-2.5 font-medium text-right">Other Leave</th>
-                  <th className="px-4 py-2.5 font-medium text-right">Total</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {report.rows.map((row) => (
-                  <tr key={row.employeeId}>
-                    <td className="px-4 py-2.5">
-                      <p className="font-medium">{row.name}</p>
-                      <p className="text-xs text-muted">{row.employeeCode}</p>
-                    </td>
-                    <td className="px-4 py-2.5 text-muted">{row.department ?? "—"}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">{row.regularHours.toFixed(2)}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">{row.vacationHours.toFixed(2)}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">{row.sickHours.toFixed(2)}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">{row.personalHours.toFixed(2)}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">{row.otherLeaveHours.toFixed(2)}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums font-medium">{row.totalHours.toFixed(2)}</td>
-                  </tr>
+              <div className="bg-surface border border-border rounded-xl overflow-hidden">
+                {[
+                  { label: "Regular", value: report.rows[0].regularHours },
+                  { label: "Vacation", value: report.rows[0].vacationHours },
+                  { label: "Sick", value: report.rows[0].sickHours },
+                  { label: "Personal", value: report.rows[0].personalHours },
+                  { label: "Other Leave", value: report.rows[0].otherLeaveHours },
+                ].map((line) => (
+                  <div key={line.label} className="flex items-center justify-between px-5 py-3 border-b border-border text-sm">
+                    <span className="text-muted">{line.label}</span>
+                    <span className="font-semibold tabular-nums">{line.value.toFixed(2)}</span>
+                  </div>
                 ))}
-              </tbody>
-            </table>
-          </div>
+                <div className="flex items-center justify-between px-5 py-3.5 bg-accent/5 text-sm">
+                  <span className="font-semibold text-accent-ink">Total</span>
+                  <span className="font-semibold text-accent-ink text-base tabular-nums">
+                    {report.rows[0].totalHours.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div>
+              {/* CB, round four: "that bottom half where you see the different team members...
+                  needs to read a little bit more cleanly in a widget format... I shouldn't have
+                  to slide to the left or right." Below md, this card list replaces the table
+                  entirely (no horizontal scroll); at md and up the original table takes over. */}
+              <div className="md:hidden space-y-2.5">
+                {report.rows.map((row) => (
+                  <div key={row.employeeId} className="bg-surface border border-border rounded-xl p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <button
+                          type="button"
+                          onClick={() => handleEmployeeChange(row.employeeId)}
+                          className="font-medium text-accent-ink underline decoration-accent-ink/30 underline-offset-2 truncate text-left"
+                        >
+                          {row.name}
+                        </button>
+                        <p className="text-xs text-muted mt-0.5">
+                          {row.employeeCode}
+                          {row.department ? ` · ${row.department}` : ""}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-xs text-muted">Total</p>
+                        <p className="text-base font-semibold tabular-nums">{row.totalHours.toFixed(2)}</p>
+                      </div>
+                    </div>
+                    <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm border-t border-border pt-3">
+                      <div className="flex items-center justify-between">
+                        <dt className="text-xs text-muted">Regular</dt>
+                        <dd className="tabular-nums">{row.regularHours.toFixed(2)}</dd>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <dt className="text-xs text-muted">Vacation</dt>
+                        <dd className="tabular-nums">{row.vacationHours.toFixed(2)}</dd>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <dt className="text-xs text-muted">Sick</dt>
+                        <dd className="tabular-nums">{row.sickHours.toFixed(2)}</dd>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <dt className="text-xs text-muted">Personal</dt>
+                        <dd className="tabular-nums">{row.personalHours.toFixed(2)}</dd>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <dt className="text-xs text-muted">Other Leave</dt>
+                        <dd className="tabular-nums">{row.otherLeaveHours.toFixed(2)}</dd>
+                      </div>
+                    </dl>
+                    <div className="flex justify-end mt-2.5 pt-2.5 border-t border-border">
+                      <button
+                        type="button"
+                        onClick={() => handleEmployeeChange(row.employeeId)}
+                        className="text-xs font-semibold text-accent-ink"
+                      >
+                        View full report →
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="hidden md:block bg-surface border border-border rounded-xl overflow-hidden overflow-x-auto">
+                <table className="w-full text-sm min-w-[760px]">
+                  <thead>
+                    <tr className="border-b border-border text-left text-xs text-muted uppercase tracking-wide">
+                      <th className="px-4 py-2.5 font-medium">Team Member</th>
+                      <th className="px-4 py-2.5 font-medium">Department</th>
+                      <th className="px-4 py-2.5 font-medium text-right">Regular</th>
+                      <th className="px-4 py-2.5 font-medium text-right">Vacation</th>
+                      <th className="px-4 py-2.5 font-medium text-right">Sick</th>
+                      <th className="px-4 py-2.5 font-medium text-right">Personal</th>
+                      <th className="px-4 py-2.5 font-medium text-right">Other Leave</th>
+                      <th className="px-4 py-2.5 font-medium text-right">Total</th>
+                      <th className="px-4 py-2.5 font-medium text-right"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {report.rows.map((row) => (
+                      <tr key={row.employeeId}>
+                        <td className="px-4 py-2.5">
+                          <button
+                            type="button"
+                            onClick={() => handleEmployeeChange(row.employeeId)}
+                            className="font-medium text-accent-ink underline decoration-accent-ink/30 underline-offset-2"
+                          >
+                            {row.name}
+                          </button>
+                          <p className="text-xs text-muted">{row.employeeCode}</p>
+                        </td>
+                        <td className="px-4 py-2.5 text-muted">{row.department ?? "—"}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">{row.regularHours.toFixed(2)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">{row.vacationHours.toFixed(2)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">{row.sickHours.toFixed(2)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">{row.personalHours.toFixed(2)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">{row.otherLeaveHours.toFixed(2)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums font-medium">{row.totalHours.toFixed(2)}</td>
+                        <td className="px-4 py-2.5 text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleEmployeeChange(row.employeeId)}
+                            className="text-xs font-semibold text-accent-ink whitespace-nowrap"
+                          >
+                            View full report →
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
         </div>
