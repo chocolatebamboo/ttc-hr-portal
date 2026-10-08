@@ -1104,6 +1104,14 @@ export interface PayrollHoursRowDTO {
   employeeCode: string;
   name: string;
   department: string | null;
+  /** CB, round five: "I don't like the department... I need it to have like their actual
+   *  title, not like operations or facilities" — same complaint, same fix, as
+   *  AdminShiftDTO.employeeJobTitle's own doc comment (most of TTC is one department in
+   *  practice, so a generic department name on-screen reads as useless). `department` above is
+   *  left alone — the payroll-company CSV export still carries it, since changing that external
+   *  file's column contract wasn't part of this ask — this is purely additive for the on-screen
+   *  report and its PDF, which both now show this instead. */
+  jobTitle: string;
   regularHours: number;
   vacationHours: number;
   sickHours: number;
