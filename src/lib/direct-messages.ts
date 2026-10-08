@@ -450,9 +450,20 @@ export async function postMessage(
   }
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
-    const recipient = await tx.employee.findUnique({ where: { id: recipientId }, select: { id: true } });
+    const recipient = await tx.employee.findUnique({ where: { id: recipientId }, select: { id: true, role: true } });
     if (!recipient) {
       throw new InvalidDirectMessageError("That person couldn't be found.");
+    }
+    // CB, Oct 2026: "they shouldn't be able to contact me... I'm just the overseeing eye." The
+    // Directory/picker/@mention surfaces no longer list a SUPER_ADMIN to anyone but themselves
+    // (see listDirectory's own doc comment in src/lib/directory.ts), but that's a UI-level
+    // omission, not an access check — a stale deep link (e.g. an old /messages?dm=<id> bookmark)
+    // or an existing @mention reference could still point straight at this recipientId. This is
+    // the actual enforcement: a non-SUPER_ADMIN sender can't create a NEW message to a
+    // SUPER_ADMIN at all. Deliberately scoped to new sends only — it doesn't touch or hide
+    // whatever history already exists, so nothing already in someone's inbox disappears.
+    if (recipient.role === "SUPER_ADMIN" && actor.role !== "SUPER_ADMIN") {
+      throw new InvalidDirectMessageError("This person isn't available to message.");
     }
 
     let resolvedReplyToId: string | null = null;
