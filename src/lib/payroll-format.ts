@@ -71,7 +71,10 @@ const WHITE: PdfColor = [1, 1, 1];
 // why these are left- rather than right-aligned.
 const COLUMNS: { key: keyof PayrollHoursReportDTO["rows"][number]; label: string; x: number }[] = [
   { key: "name", label: "Team Member", x: 0 },
-  { key: "department", label: "Department", x: 125 },
+  // Round five (CB): "I don't like the department... I need it to have like their actual
+  // title, not like operations or facilities" — same column slot, swapped field; see
+  // PayrollHoursRowDTO.jobTitle's own doc comment.
+  { key: "jobTitle", label: "Job Title", x: 125 },
   { key: "regularHours", label: "Regular", x: 230 },
   { key: "vacationHours", label: "Vacation", x: 282 },
   { key: "sickHours", label: "Sick", x: 334 },
@@ -82,7 +85,6 @@ const COLUMNS: { key: keyof PayrollHoursReportDTO["rows"][number]; label: string
 
 function cellText(row: PayrollHoursReportDTO["rows"][number], key: (typeof COLUMNS)[number]["key"]): string {
   const value = row[key];
-  if (key === "department") return (value as string | null) ?? "—";
   if (typeof value === "number") return value.toFixed(2);
   return String(value);
 }
@@ -159,7 +161,7 @@ function renderSingleEmployeePdf(doc: PdfDocument, report: PayrollHoursReportDTO
   const bannerHeight = 56;
   doc.rect(left, bannerTop, width, bannerHeight, { fill: TTC_PINK_INK });
   doc.text(left + 16, bannerTop + 24, row.name, { bold: true, size: 15, color: WHITE });
-  doc.text(left + 16, bannerTop + 42, `${row.employeeCode}${row.department ? ` · ${row.department}` : ""}`, {
+  doc.text(left + 16, bannerTop + 42, `${row.employeeCode} · ${row.jobTitle}`, {
     size: 9.5,
     color: WHITE,
   });
