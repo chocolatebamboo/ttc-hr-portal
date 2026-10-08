@@ -49,14 +49,26 @@ function priorityRank(t: DateTaskDTO): number {
  * the week offset containing it, so landing here jumps straight to the right week (not
  * necessarily "this week") instead of a now-nonexistent full list, same "deep-link scrolls you
  * to it and briefly highlights it" shape as before — just scoped to a week instead of a page.
+ *
+ * Oct 2026, round three (CB: "I should be able to approve as well on the tasks page as well" —
+ * until now the only place an admin/supervisor could actually approve a task was buried inside
+ * that employee's own date on Availability/Schedule): a second tab, admin/supervisor only, for
+ * every outstanding task across the team (listAllAwaitingReviewDateTasks via
+ * /api/date-tasks/awaiting-review — org-wide for an admin, narrowed to just Daijour's own
+ * reports for a SUPERVISOR). Deliberately a flat newest-first queue rather than the week-paged
+ * view "My tasks" uses — a reviewer is clearing a backlog, not browsing a calendar.
  */
-export default function MyTasksView({ employeeId }: { employeeId: string }) {
+export default function MyTasksView({ employeeId, canReview }: { employeeId: string; canReview: boolean }) {
+  const [tab, setTab] = useState<"mine" | "review">("mine");
   const [tasks, setTasks] = useState<DateTaskDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [offset, setOffset] = useState(0);
   const [focusDate, setFocusDate] = useState<string | null>(null);
   const [highlightDate, setHighlightDate] = useState<string | null>(null);
   const hasFocused = useRef(false);
+
+  const [reviewTasks, setReviewTasks] = useState<DateTaskDTO[]>([]);
+  const [reviewLoadState, setReviewLoadState] = useState<LoadState>("loading");
 
   async function load() {
     setLoadState("loading");
@@ -71,11 +83,30 @@ export default function MyTasksView({ employeeId }: { employeeId: string }) {
     }
   }
 
+  async function loadReview() {
+    setReviewLoadState("loading");
+    try {
+      const res = await fetch("/api/date-tasks/awaiting-review");
+      if (!res.ok) throw new Error();
+      const data: { tasks: DateTaskDTO[] } = await res.json();
+      setReviewTasks(data.tasks);
+      setReviewLoadState("ready");
+    } catch {
+      setReviewLoadState("error");
+    }
+  }
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employeeId]);
+
+  useEffect(() => {
+    if (!canReview) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadReview();
+  }, [canReview]);
 
   useEffect(() => {
     const date = new URLSearchParams(window.location.search).get("date");
@@ -112,9 +143,39 @@ export default function MyTasksView({ employeeId }: { employeeId: string }) {
     <div className="max-w-3xl">
       <div className="mb-5">
         <h1 className="page-title text-2xl">My Tasks</h1>
-        <p className="text-sm text-muted mt-0.5">Everything assigned to you, one week at a time.</p>
+        <p className="text-sm text-muted mt-0.5">
+          {tab === "mine" ? "Everything assigned to you, one week at a time." : "Every outstanding task across your team, oldest first."}
+        </p>
       </div>
 
+      {/* Oct 2026 (CB: "I should be able to approve as well on the tasks page as well"): admin/
+          supervisor only — a regular team member never sees this row at all, same page as
+          before. */}
+      {canReview && (
+        <div className="flex gap-1.5 bg-black/[0.04] rounded-full p-1 mb-4 w-fit">
+          <button
+            type="button"
+            onClick={() => setTab("mine")}
+            className={`text-sm font-semibold rounded-full px-4 py-1.5 transition-colors ${
+              tab === "mine" ? "bg-surface text-accent-ink shadow-sm" : "text-muted hover:text-foreground"
+            }`}
+          >
+            My tasks
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("review")}
+            className={`text-sm font-semibold rounded-full px-4 py-1.5 transition-colors ${
+              tab === "review" ? "bg-surface text-accent-ink shadow-sm" : "text-muted hover:text-foreground"
+            }`}
+          >
+            Awaiting review{reviewLoadState === "ready" && reviewTasks.length > 0 ? ` (${reviewTasks.length})` : ""}
+          </button>
+        </div>
+      )}
+
+      {tab === "mine" && (
+      <>
       {loadState === "loading" && (
         <div className="space-y-2">
           {[0, 1, 2].map((i) => (
@@ -198,6 +259,41 @@ export default function MyTasksView({ employeeId }: { employeeId: string }) {
                 >
                   <DateTaskRow task={t} viewerId={employeeId} canReview={false} showDate onChanged={load} />
                 </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+      </>
+      )}
+
+      {tab === "review" && (
+        <>
+          {reviewLoadState === "loading" && (
+            <div className="space-y-2">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="h-24 rounded-2xl bg-black/[0.04] animate-pulse" />
+              ))}
+            </div>
+          )}
+
+          {reviewLoadState === "error" && (
+            <div className="rounded-xl border border-border bg-surface p-6 text-sm text-accent">
+              Unable to load the team&apos;s tasks. Please try again or contact HR.
+            </div>
+          )}
+
+          {reviewLoadState === "ready" && reviewTasks.length === 0 && (
+            <div className="rounded-xl border border-border bg-surface p-8 text-center text-sm text-muted flex flex-col items-center gap-2">
+              <ChecklistIcon className="h-8 w-8 text-muted/60" />
+              Nothing waiting on a review right now.
+            </div>
+          )}
+
+          {reviewLoadState === "ready" && reviewTasks.length > 0 && (
+            <div className="space-y-2.5">
+              {reviewTasks.map((t) => (
+                <DateTaskRow key={t.id} task={t} viewerId={employeeId} canReview showDate showEmployee onChanged={loadReview} />
               ))}
             </div>
           )}
