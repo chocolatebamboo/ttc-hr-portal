@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { getWeek, formatWeekRange } from "@/lib/week";
+import { formatClockTime } from "@/lib/time";
 import ActivityHistoryView from "./ActivityHistoryView";
-import type { PayrollHoursReportDTO } from "@/types";
+import type { PayrollHoursReportDTO, TimeEntryDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error" | "empty";
 type EmployeeOption = { id: string; name: string };
@@ -84,6 +85,20 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
   // are still one click away for anyone who actually wants a different range.
   const [start, setStart] = useState(lastTwoWeeksRange().start);
   const [end, setEnd] = useState(lastTwoWeeksRange().end);
+  // Round six (CB, on a screenshot of the single-employee card): "label... the card['s] two
+  // week report if we're contingent on that specific one" — the card showed the date range
+  // (e.g. "Sep 25 – Oct 8, 2026") but nothing said THAT'S the biweekly payroll window Sean/
+  // Daijour are pulling, as opposed to any other two-week stretch someone picked by hand.
+  // Tracks which preset button (if any) produced the period currently on screen — "custom"
+  // once the start/end date fields are hand-edited and Generate is clicked, since at that
+  // point the range no longer necessarily matches what a preset would produce.
+  const [periodPreset, setPeriodPreset] = useState<"week" | "month" | "twoWeeks" | "custom">("twoWeeks");
+  const PERIOD_PRESET_LABEL: Record<"week" | "month" | "twoWeeks" | "custom", string | null> = {
+    week: "This Week",
+    month: "This Month",
+    twoWeeks: "2-Week Report",
+    custom: null,
+  };
   // "" means every employee (the original full-company view) — CB: "I could imagine it would
   // be nice to... look at somebody's specific hours [without having to] go through the whole
   // list of people", but also still wants the full view available, so this is additive rather
@@ -97,10 +112,24 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
   // those entries that are not necessarily approved... so we could go back there"): the banner
   // itself now toggles this instead of just sitting there as inert text.
   const [showUnapproved, setShowUnapproved] = useState(false);
+  // Round six (CB): "once we click into their name, I should be able to see... their full
+  // actual schedule, not just the hours, but the different schedules cleanly as a drop down" —
+  // scoped down to "each worked day's hours" (date, clock-in/out times, hours). Lazily loaded
+  // the first time it's opened for a given employee/period, not fetched up front with the rest
+  // of the report — most visits to a person's full report never open this. null = not fetched
+  // yet for the current employeeId/start/end; generate() below resets it to null whenever any
+  // of those change, so switching people or dates never shows stale days.
+  const [regularExpanded, setRegularExpanded] = useState(false);
+  const [regularEntries, setRegularEntries] = useState<TimeEntryDTO[] | null>(null);
+  const [regularLoading, setRegularLoading] = useState(false);
+  const [regularError, setRegularError] = useState("");
 
   async function generate(s: string, e: string, empId: string) {
     setLoadState("loading");
     setErrorMessage("");
+    setRegularExpanded(false);
+    setRegularEntries(null);
+    setRegularError("");
     try {
       const query = `?start=${s}&end=${e}${empId ? `&employeeId=${empId}` : ""}`;
       const res = await fetch(`/api/payroll/hours${query}`);
@@ -115,6 +144,31 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
     } catch {
       setLoadState("error");
       setErrorMessage("Unable to reach the server. Check your connection and try again.");
+    }
+  }
+
+  /** Toggles the day-by-day panel under "Regular" on the single-employee report, fetching the
+   *  period's time entries (reusing the same endpoint ReviewTimesheetView's own Timesheet tab
+   *  already calls — see that route's own doc comment) the first time it's opened, then just
+   *  toggling visibility on every tap after that. Only APPROVED entries with at least one
+   *  session are shown — anything else contributed nothing to the Regular total above, so
+   *  listing it here would make the breakdown's own sum not match the number it's explaining. */
+  async function toggleRegularBreakdown() {
+    const next = !regularExpanded;
+    setRegularExpanded(next);
+    if (next && regularEntries === null && employeeId) {
+      setRegularLoading(true);
+      setRegularError("");
+      try {
+        const res = await fetch(`/api/time/timesheet?employeeId=${employeeId}&start=${start}&end=${end}`);
+        if (!res.ok) throw new Error();
+        const data: { entries: TimeEntryDTO[] } = await res.json();
+        setRegularEntries(data.entries.filter((entry) => entry.status === "APPROVED" && entry.sessions.length > 0));
+      } catch {
+        setRegularError("Unable to load the day-by-day breakdown. Please try again.");
+      } finally {
+        setRegularLoading(false);
+      }
     }
   }
 
@@ -158,6 +212,10 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    // Hand-edited dates aren't guaranteed to match any preset's own range anymore (even if they
+    // happen to land on the same two dates a preset button would have picked) — "custom" keeps
+    // the label honest rather than claiming a preset that wasn't actually clicked.
+    setPeriodPreset("custom");
     generate(start, end, employeeId);
   }
 
@@ -188,6 +246,7 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
     const week = thisWeekRange();
     setStart(week.start);
     setEnd(week.end);
+    setPeriodPreset("week");
     generate(week.start, week.end, employeeId);
   }
 
@@ -196,6 +255,7 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
     const e = todayDateKey();
     setStart(s);
     setEnd(e);
+    setPeriodPreset("month");
     generate(s, e, employeeId);
   }
 
@@ -203,6 +263,7 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
     const range = lastTwoWeeksRange();
     setStart(range.start);
     setEnd(range.end);
+    setPeriodPreset("twoWeeks");
     generate(range.start, range.end, employeeId);
   }
 
@@ -214,15 +275,31 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
   // of whichever report is currently showing (the single-employee full report, or the
   // all-team-members list), so it reads as "export what I'm looking at" rather than cluttering
   // the Generate controls above.
+  //
+  // Round six (CB, on a mobile screenshot): "the download PDF and CSV is like stacked on top of
+  // each other... need them to be all on the same plane." The label + two full-size buttons
+  // never fit one row at phone width, so flex-wrap was dropping each onto its own line. Below
+  // sm, the label moves above as its own line and the two buttons split one row evenly
+  // (flex-1, smaller padding so they fit); at sm and up this collapses back to the original
+  // single inline row, label included.
   const exportActions = (
-    <div className="flex flex-wrap items-center justify-end gap-2 mt-4 pt-4 border-t border-border">
-      <span className="text-xs text-muted mr-1">Export this report:</span>
-      <a href={`/api/payroll/hours/csv${exportQuery}`} className="btn-neutral text-sm px-5 py-2">
-        Download CSV
-      </a>
-      <a href={`/api/payroll/hours/pdf${exportQuery}`} className="btn-outline text-sm px-5 py-2">
-        Download PDF
-      </a>
+    <div className="mt-4 pt-4 border-t border-border">
+      <p className="text-xs text-muted mb-2 sm:hidden">Export this report:</p>
+      <div className="flex items-center justify-end gap-2">
+        <span className="hidden sm:inline text-xs text-muted mr-1">Export this report:</span>
+        <a
+          href={`/api/payroll/hours/csv${exportQuery}`}
+          className="btn-neutral flex-1 sm:flex-none text-center text-sm px-3 sm:px-5 py-2"
+        >
+          Download CSV
+        </a>
+        <a
+          href={`/api/payroll/hours/pdf${exportQuery}`}
+          className="btn-outline flex-1 sm:flex-none text-center text-sm px-3 sm:px-5 py-2"
+        >
+          Download PDF
+        </a>
+      </div>
     </div>
   );
 
@@ -424,13 +501,66 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
                   <div className="ml-auto text-right shrink-0">
                     <p className="text-xs text-white/70">Period</p>
                     <p className="text-sm font-semibold text-white/90">{formatWeekRange(report.startDate, report.endDate)}</p>
+                    {/* Round six (CB): "label... the card['s] two week report if we're
+                        contingent on that specific one" — names which preset produced this
+                        exact range (most often "2-Week Report," Sean/Daijour's own payroll
+                        pull), so it reads as a known, intentional period rather than just
+                        whatever dates happen to be showing. Silent for a hand-picked range. */}
+                    {PERIOD_PRESET_LABEL[periodPreset] && (
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-white/75 mt-1 inline-block bg-white/15 rounded-full px-2 py-0.5">
+                        {PERIOD_PRESET_LABEL[periodPreset]}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
 
               <div className="bg-surface border border-border rounded-xl overflow-hidden">
+                {/* Round six (CB): "once we click into their name, I should be able to see...
+                    their full actual schedule, not just the hours, but the different schedules
+                    cleanly as a drop down so that we could see the context of each one" —
+                    scoped to "each worked day's hours." Only Regular breaks down like this
+                    (Vacation/Sick/Personal/Other Leave stay plain totals below) since Regular is
+                    the one number built from a list of individual worked days in the first
+                    place — see toggleRegularBreakdown's own doc comment above. */}
+                <button
+                  type="button"
+                  onClick={toggleRegularBreakdown}
+                  aria-expanded={regularExpanded}
+                  className="w-full flex items-center justify-between px-5 py-3 border-b border-border text-sm text-left hover:bg-black/[0.015]"
+                >
+                  <span className="text-muted flex items-center gap-1.5">
+                    Regular
+                    <span className="text-[10px] text-accent-ink">{regularExpanded ? "▴" : "▾"}</span>
+                  </span>
+                  <span className="font-semibold tabular-nums">{report.rows[0].regularHours.toFixed(2)}</span>
+                </button>
+                {regularExpanded && (
+                  <div className="px-5 py-2.5 border-b border-border bg-black/[0.015]">
+                    {regularLoading && <p className="text-xs text-muted py-1.5">Loading…</p>}
+                    {regularError && <p className="text-xs text-accent py-1.5">{regularError}</p>}
+                    {!regularLoading && !regularError && regularEntries && regularEntries.length === 0 && (
+                      <p className="text-xs text-muted py-1.5">No approved worked days in this period.</p>
+                    )}
+                    {!regularLoading &&
+                      regularEntries &&
+                      regularEntries.map((entry, i) => (
+                        <div
+                          key={entry.id}
+                          className={`flex items-center justify-between gap-3 py-2 text-xs ${i > 0 ? "border-t border-border" : ""}`}
+                        >
+                          <span className="font-medium min-w-[88px] shrink-0">{formatShortDate(entry.workDate)}</span>
+                          <span className="text-muted flex-1 px-2">
+                            {entry.sessions.map((s) => `${formatClockTime(s.clockIn)} – ${formatClockTime(s.clockOut)}`).join(", ")}
+                          </span>
+                          <span className="tabular-nums font-medium shrink-0">
+                            {entry.totalMinutes != null ? (entry.totalMinutes / 60).toFixed(2) : "—"}
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                )}
                 {[
-                  { label: "Regular", value: report.rows[0].regularHours },
                   { label: "Vacation", value: report.rows[0].vacationHours },
                   { label: "Sick", value: report.rows[0].sickHours },
                   { label: "Personal", value: report.rows[0].personalHours },
