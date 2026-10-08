@@ -13,7 +13,6 @@ import { getDashboardNotificationsSummary } from "@/lib/dashboard-notifications"
 import TimeClockCard from "@/components/TimeClockCard";
 import AdminHomeHero from "@/components/AdminHomeHero";
 import TeamScheduleGlance from "@/components/TeamScheduleGlance";
-import ClockedInNowSection from "@/components/ClockedInNowSection";
 import TimeOffSection from "@/components/TimeOffSection";
 import AvailabilityStatusSection from "@/components/AvailabilityStatusSection";
 import TeamAvailabilityRequestsSection from "@/components/TeamAvailabilityRequestsSection";
@@ -208,11 +207,8 @@ export default async function DashboardPage() {
             className="animate-in animate-in-2"
             shifts={todaysShifts}
             upcomingShifts={upcomingShifts}
+            currentlyClockedIn={currentlyClockedIn}
           />
-        )}
-
-        {canSeeAdminHomeDashboard(employee) && (
-          <ClockedInNowSection className="animate-in animate-in-2" initial={currentlyClockedIn} />
         )}
 
         {/* Oct 2026 (CB, circling this exact row on a screenshot of her own admin dashboard):
@@ -302,11 +298,8 @@ export default async function DashboardPage() {
               className="animate-in animate-in-2"
               shifts={todaysShifts}
               upcomingShifts={upcomingShifts}
+              currentlyClockedIn={currentlyClockedIn}
             />
-          )}
-
-          {canSeeAdminHomeDashboard(employee) && (
-            <ClockedInNowSection className="animate-in animate-in-2" initial={currentlyClockedIn} />
           )}
 
           {/* Same tiles, same isAdmin(employee) gate, as the mobile block above — see that
