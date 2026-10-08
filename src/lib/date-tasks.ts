@@ -297,10 +297,38 @@ export async function startDateTask(actor: CurrentEmployee, taskId: string): Pro
   });
 }
 
+/** Oct 2026 (CB: "we just have to make sure that the admin is like gets that notification
+ *  clearly so that they they can review and approve" — a direct code check confirmed the gap:
+ *  submitDateTask below used to only write an audit log, nothing told anyone a task needed
+ *  review): admins plus the task's own employee's supervisor — the exact same set
+ *  assertCanAssignTasks already treats as allowed to approve/return this employee's tasks, so
+ *  whoever gets notified is exactly whoever can actually act on it. Mirrors
+ *  resolveAvailabilityReviewerIds's shape (src/lib/availability.ts) minus its one extra source —
+ *  there's no standing-reviewer flag for tasks the way isAvailabilityReviewer exists for
+ *  availability. */
+async function resolveTaskReviewerIds(tx: PrismaClient, employeeId: string): Promise<string[]> {
+  const submitter = await tx.employee.findUnique({ where: { id: employeeId }, select: { supervisorId: true } });
+  const admins = await tx.employee.findMany({
+    where: { role: { in: ["SUPER_ADMIN", "HR_ADMIN"] }, deactivatedAt: null },
+    select: { id: true },
+  });
+  const ids = new Set(admins.map((a) => a.id));
+  if (submitter?.supervisorId) ids.add(submitter.supervisorId);
+  ids.delete(employeeId);
+  return Array.from(ids);
+}
+
 /** The employee submitting their own task for review — only the task's own subject, from
  *  ASSIGNED, IN_PROGRESS, or RETURNED (a returned task may be resubmitted directly, without
  *  necessarily going through startDateTask again first). Admins/supervisors don't submit a task
- *  on someone's behalf; they approve or return it below. */
+ *  on someone's behalf; they approve or return it below.
+ *
+ *  Oct 2026: now also notifies every reviewer (resolveTaskReviewerIds above) — same
+ *  "notify whoever needs to act on this" shape submitAvailability already uses for
+ *  AVAILABILITY_SUBMITTED, picked up by sendPendingNotificationEmails the same as everything
+ *  else (DATE_TASK_SUBMITTED isn't in notification-emails.ts's PREFERENCE_BY_TYPE map, so it
+ *  emails unconditionally, same as AVAILABILITY_SUBMITTED and every other admin/supervisor
+ *  operational notification — this is an "act on this" alert, not a self-service preference). */
 export async function submitDateTask(actor: CurrentEmployee, taskId: string): Promise<DateTaskDTO> {
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const row = await loadOwnTaskRow(tx, taskId);
@@ -321,6 +349,17 @@ export async function submitDateTask(actor: CurrentEmployee, taskId: string): Pr
       oldValue: row.status,
       newValue: "AWAITING_REVIEW",
     });
+    const reviewerIds = await resolveTaskReviewerIds(tx, row.employeeId);
+    for (const recipientId of reviewerIds) {
+      await writeNotification(tx, {
+        recipientId,
+        type: "DATE_TASK_SUBMITTED",
+        title: `${nameOf(actor)} submitted a task for review`,
+        body: updated.title,
+        targetType: "DateTask",
+        targetId: updated.id,
+      });
+    }
     return toDTO(updated);
   });
 }
