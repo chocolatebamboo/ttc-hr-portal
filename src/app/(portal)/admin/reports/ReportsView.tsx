@@ -350,17 +350,29 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
           : "Approved hours for a pay period, ready to hand to your payroll company. This is hours only — no pay rate, overtime, or tax math happens here."}
       </p>
 
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
         <button type="button" onClick={useThisWeek} disabled={loadState === "loading"} className="btn-neutral text-xs px-3 py-1.5">
           This week
         </button>
         <button type="button" onClick={useThisMonth} disabled={loadState === "loading"} className="btn-neutral text-xs px-3 py-1.5">
           This month
         </button>
-        {/* Round four (CB, Oct 2026): "a 'last 2 weeks' button... matching Shawn's biweekly
-            payroll pull cadence" — see lastTwoWeeksRange's own doc comment above. */}
-        <button type="button" onClick={useLastTwoWeeks} disabled={loadState === "loading"} className="btn-neutral text-xs px-3 py-1.5">
-          Last 2 weeks
+        {/* Round six (CB, on a screenshot): "at the top where it says last two weeks I think we
+            need to reword that to say two week report as well and make that pink because
+            that's going to be important for Sean and Daijour" — Sean/Daijour's own biweekly
+            payroll pull (see lastTwoWeeksRange's own doc comment above), so this one preset is
+            now visually called out from "This week"/"This month" rather than reading as just
+            another neutral option among three. */}
+        <button
+          type="button"
+          onClick={useLastTwoWeeks}
+          disabled={loadState === "loading"}
+          className="inline-flex items-center gap-1.5 rounded-full border-[1.5px] border-accent-ink text-accent-ink bg-accent/10 text-xs font-semibold px-3.5 py-1.5 disabled:opacity-60"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+            <path d="M8 2v4M16 2v4M3 10h18M5 6h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z" />
+          </svg>
+          2 Week Report
         </button>
       </div>
 
@@ -486,7 +498,7 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
                 className="rounded-2xl overflow-hidden shadow-sm mb-4 p-5"
                 style={{ background: "linear-gradient(135deg, var(--ttc-pink-ink), var(--ttc-pink))" }}
               >
-                <div className="flex items-center gap-3.5 flex-wrap">
+                <div className="flex items-center gap-3.5">
                   <span className="h-12 w-12 rounded-xl bg-white shrink-0 flex items-center justify-center">
                     <span className="font-serif font-bold text-base text-accent-ink">
                       {initialsOf(report.rows[0].name) || "?"}
@@ -498,20 +510,27 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
                       {report.rows[0].employeeCode} · {report.rows[0].jobTitle}
                     </p>
                   </div>
-                  <div className="ml-auto text-right shrink-0">
-                    <p className="text-xs text-white/70">Period</p>
-                    <p className="text-sm font-semibold text-white/90">{formatWeekRange(report.startDate, report.endDate)}</p>
-                    {/* Round six (CB): "label... the card['s] two week report if we're
-                        contingent on that specific one" — names which preset produced this
-                        exact range (most often "2-Week Report," Sean/Daijour's own payroll
-                        pull), so it reads as a known, intentional period rather than just
-                        whatever dates happen to be showing. Silent for a hand-picked range. */}
-                    {PERIOD_PRESET_LABEL[periodPreset] && (
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-white/75 mt-1 inline-block bg-white/15 rounded-full px-2 py-0.5">
-                        {PERIOD_PRESET_LABEL[periodPreset]}
-                      </p>
-                    )}
+                </div>
+                {/* Round six (CB, on a screenshot: "it's kind of awkwardly placed with the
+                    card... the hierarchy needs to fit correctly and cleanly"): the period used
+                    to be crammed into the top-right corner of the identity row, fighting the
+                    name/role for space and nearly touching the card's own rounded corner. Its
+                    own full-width row below a divider gives both the date range and the preset
+                    pill room to actually read, instead of a cramped vertical stack in a corner.
+                    PERIOD_PRESET_LABEL names which preset produced this exact range (most often
+                    "2-Week Report," Sean/Daijour's own payroll pull), so it reads as a known,
+                    intentional period rather than just whatever dates happen to be showing —
+                    silent for a hand-picked range. */}
+                <div className="mt-4 pt-3.5 border-t border-white/20 flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-white/65">Period</span>
+                    <span className="text-sm font-semibold text-white/95">{formatWeekRange(report.startDate, report.endDate)}</span>
                   </div>
+                  {PERIOD_PRESET_LABEL[periodPreset] && (
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-accent-ink bg-white rounded-full px-3 py-1">
+                      {PERIOD_PRESET_LABEL[periodPreset]}
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -523,20 +542,42 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
                     (Vacation/Sick/Personal/Other Leave stay plain totals below) since Regular is
                     the one number built from a list of individual worked days in the first
                     place — see toggleRegularBreakdown's own doc comment above. */}
+                {/* Round six (CB, on a screenshot of the collapsed row): "I'm still not seeing
+                    the drop down... currently it's just showing the hours but I don't see that
+                    breakdown" — the feature itself was already live, but the only sign it was
+                    clickable was a 10px character next to "Regular," identical in weight to the
+                    plain (non-interactive) Vacation/Sick/Personal/Other Leave rows right below
+                    it. A tinted background, an explicit "View days" label, and a real chevron
+                    icon (rather than a tiny ▾/▴ glyph that doesn't reliably render the same way
+                    across devices/fonts) now mark this one row as a button, not just text. */}
                 <button
                   type="button"
                   onClick={toggleRegularBreakdown}
                   aria-expanded={regularExpanded}
-                  className="w-full flex items-center justify-between px-5 py-3 border-b border-border text-sm text-left hover:bg-black/[0.015]"
+                  className="w-full flex items-center justify-between px-5 py-3 border-b border-border text-sm text-left bg-accent/5 hover:bg-accent/10 transition-colors"
                 >
-                  <span className="text-muted flex items-center gap-1.5">
-                    Regular
-                    <span className="text-[10px] text-accent-ink">{regularExpanded ? "▴" : "▾"}</span>
+                  <span className="flex items-center gap-2">
+                    <span className="font-semibold text-foreground">Regular</span>
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-accent-ink">
+                      View days
+                      <svg
+                        width="11"
+                        height="11"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="3"
+                        aria-hidden="true"
+                        className={`transition-transform ${regularExpanded ? "rotate-180" : ""}`}
+                      >
+                        <path d="M6 9l6 6 6-6" />
+                      </svg>
+                    </span>
                   </span>
                   <span className="font-semibold tabular-nums">{report.rows[0].regularHours.toFixed(2)}</span>
                 </button>
                 {regularExpanded && (
-                  <div className="px-5 py-2.5 border-b border-border bg-black/[0.015]">
+                  <div className="px-5 py-2.5 border-b border-border bg-accent/[0.03]">
                     {regularLoading && <p className="text-xs text-muted py-1.5">Loading…</p>}
                     {regularError && <p className="text-xs text-accent py-1.5">{regularError}</p>}
                     {!regularLoading && !regularError && regularEntries && regularEntries.length === 0 && (
