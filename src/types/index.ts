@@ -1112,13 +1112,27 @@ export interface PayrollHoursRowDTO {
   totalHours: number;
 }
 
+/** One time entry sitting outside the report above — CB, Oct 2026, on the "N entries aren't
+ *  approved" banner: "there should be a way that we could kind of view those entries... so we
+ *  could go back there." `date` is the entry's own workDate (not when it was submitted), ready
+ *  to deep-link into that employee's Timesheet tab on the week it actually falls in — see
+ *  ReviewTimesheetView's own `?week=` read. */
+export interface PayrollUnapprovedEntryDTO {
+  employeeId: string;
+  employeeName: string;
+  date: string; // ISO date, e.g. "2026-10-06"
+}
+
 export interface PayrollHoursReportDTO {
   startDate: string; // ISO date, e.g. "2026-08-01"
   endDate: string;
   rows: PayrollHoursRowDTO[];
   /** Time entries that overlap the period but aren't Approved yet — their hours are excluded
-   *  from every row above, so a nonzero count here means the export is likely incomplete. */
+   *  from every row above, so a nonzero count here means the export is likely incomplete.
+   *  Always equal to unapprovedEntries.length; kept as its own field since most callers only
+   *  need the count, not the list. */
   unapprovedEntryCount: number;
+  unapprovedEntries: PayrollUnapprovedEntryDTO[];
 }
 
 /** Phase 4 (client spec, Sept 2026): "a real in-app notification feed" — see Notification's own
