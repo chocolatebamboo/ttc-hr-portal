@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { DateTaskDTO } from "@/types";
 import DateTaskRow from "@/components/DateTaskRow";
+import { ChevronDownIcon } from "@/components/icons";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -21,10 +22,17 @@ type LoadState = "loading" | "ready" | "error";
  * Approved tasks drop out of this list entirely (nothing left here needs their attention), and
  * the whole section disappears once there's nothing left that isn't APPROVED — same "shows while
  * true" shape as the dashboard's other attention sections.
+ *
+ * Collapsible (CB, Oct 2026: "I don't want it to be too cluttered... I want to make sure that
+ * it's collapsible" — this widget sits on Home, above several other sections, so a team member
+ * with several tasks assigned was pushing everything below it down the page). Starts open (the
+ * common case is one or two tasks, where collapsing by default would just be an extra tap to see
+ * them) — the count in the header lets you tell at a glance how many are in there either way.
  */
 export default function DateTasksSection({ className, employeeId }: { className?: string; employeeId: string }) {
   const [tasks, setTasks] = useState<DateTaskDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [collapsed, setCollapsed] = useState(false);
 
   async function load() {
     setLoadState("loading");
@@ -51,14 +59,27 @@ export default function DateTasksSection({ className, employeeId }: { className?
 
   return (
     <div className={className}>
-      <h2 className="text-sm font-medium text-muted mb-2">Your tasks</h2>
-      <div className="space-y-2.5">
-        {loadState === "loading" && <div className="h-16 rounded-2xl bg-black/[0.04] animate-pulse" />}
-        {loadState === "ready" &&
-          tasks.map((t) => (
-            <DateTaskRow key={t.id} task={t} viewerId={employeeId} canReview={false} showDate onChanged={load} />
-          ))}
-      </div>
+      <button
+        type="button"
+        onClick={() => setCollapsed((v) => !v)}
+        className="flex w-full items-center justify-between mb-2"
+      >
+        <h2 className="text-sm font-medium text-muted">
+          Your tasks{loadState === "ready" && tasks.length > 0 ? ` (${tasks.length})` : ""}
+        </h2>
+        <ChevronDownIcon
+          className={`h-3.5 w-3.5 text-muted transition-transform ${collapsed ? "" : "rotate-180"}`}
+        />
+      </button>
+      {!collapsed && (
+        <div className="space-y-2.5">
+          {loadState === "loading" && <div className="h-16 rounded-2xl bg-black/[0.04] animate-pulse" />}
+          {loadState === "ready" &&
+            tasks.map((t) => (
+              <DateTaskRow key={t.id} task={t} viewerId={employeeId} canReview={false} showDate onChanged={load} />
+            ))}
+        </div>
+      )}
     </div>
   );
 }
