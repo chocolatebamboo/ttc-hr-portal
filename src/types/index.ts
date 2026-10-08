@@ -1140,7 +1140,8 @@ export type NotificationType =
   | "DATE_TASK_RETURNED"
   | "ANNOUNCEMENT_POSTED"
   | "MESSAGE_RECEIVED"
-  | "AVAILABILITY_SUBMITTED";
+  | "AVAILABILITY_SUBMITTED"
+  | "DATE_TASK_SUBMITTED";
 
 export interface NotificationDTO {
   id: string;
