@@ -77,8 +77,13 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
   // switcher between the pre-existing payroll-hours export and the new Activity History filter
   // below, rather than a separate nav entry for one more admin-only list.
   const [tab, setTab] = useState<Tab>("payroll");
-  const [start, setStart] = useState(firstOfMonth());
-  const [end, setEnd] = useState(todayDateKey());
+  // Round five (CB): "since the reports need to be every two weeks for payroll... how can we
+  // best present it... so she could easily have the two week report" — Sean and Daijour's own
+  // payroll pull is always this exact 14-day window, so Reports now opens straight into it
+  // instead of making them click "Last 2 weeks" themselves every time. "This month"/"This week"
+  // are still one click away for anyone who actually wants a different range.
+  const [start, setStart] = useState(lastTwoWeeksRange().start);
+  const [end, setEnd] = useState(lastTwoWeeksRange().end);
   // "" means every employee (the original full-company view) — CB: "I could imagine it would
   // be nice to... look at somebody's specific hours [without having to] go through the whole
   // list of people", but also still wants the full view available, so this is additive rather
@@ -156,10 +161,28 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
     generate(start, end, employeeId);
   }
 
+  // Round five (CB): "when I click into the name and then I slide back, it's like it's going
+  // to the team schedule, but it should go back to like the all team members" — switching into
+  // a single person's report never touched browser history before, so a back gesture skipped
+  // straight past "all team members" to whatever page was open before Reports. Pushing a real
+  // history entry here (and restoring it on popstate below) makes "back" land on the
+  // all-team-members view first, like any other drill-down/back pair in this app.
   function handleEmployeeChange(id: string) {
     setEmployeeId(id);
     generate(start, end, id);
+    const url = id ? `${window.location.pathname}?employeeId=${id}` : window.location.pathname;
+    window.history.pushState({ employeeId: id }, "", url);
   }
+
+  useEffect(() => {
+    function onPopState(ev: PopStateEvent) {
+      const id = (ev.state?.employeeId as string | undefined) ?? "";
+      setEmployeeId(id);
+      generate(start, end, id);
+    }
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [start, end]);
 
   function useThisWeek() {
     const week = thisWeekRange();
@@ -186,8 +209,25 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
   const rangeInvalid = end < start;
   const exportQuery = `?start=${start}&end=${end}${employeeId ? `&employeeId=${employeeId}` : ""}`;
 
+  // Round five (CB): "the download PDF and download CSV should be like kind of on the bottom
+  // area" (both desktop and mobile) — moved out of the filter form, into its own row at the end
+  // of whichever report is currently showing (the single-employee full report, or the
+  // all-team-members list), so it reads as "export what I'm looking at" rather than cluttering
+  // the Generate controls above.
+  const exportActions = (
+    <div className="flex flex-wrap items-center justify-end gap-2 mt-4 pt-4 border-t border-border">
+      <span className="text-xs text-muted mr-1">Export this report:</span>
+      <a href={`/api/payroll/hours/csv${exportQuery}`} className="btn-neutral text-sm px-5 py-2">
+        Download CSV
+      </a>
+      <a href={`/api/payroll/hours/pdf${exportQuery}`} className="btn-outline text-sm px-5 py-2">
+        Download PDF
+      </a>
+    </div>
+  );
+
   return (
-    <div className="max-w-4xl">
+    <div className="max-w-5xl">
       <h1 className="page-title text-2xl mb-1">Reports</h1>
 
       {/* "team" scope (a Supervisor) never sees this switcher at all — Activity History reads
@@ -223,8 +263,11 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
       {tab === "activity" ? (
         <ActivityHistoryView />
       ) : (
-        <div className="max-w-3xl">
-      <p className="text-sm text-muted mb-4">
+        <div>
+      {/* Round five (CB): the table below needs the page's full width to lay out without a
+          horizontal scrollbar — this paragraph keeps its own narrower measure so the
+          explanatory copy stays easy to read instead of stretching edge to edge with it. */}
+      <p className="text-sm text-muted mb-4 max-w-2xl">
         {scope === "team"
           ? "Approved hours for your own team, for a pay period. This is hours only — no pay rate, overtime, or tax math happens here."
           : "Approved hours for a pay period, ready to hand to your payroll company. This is hours only — no pay rate, overtime, or tax math happens here."}
@@ -283,18 +326,6 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
         <button type="submit" disabled={rangeInvalid || loadState === "loading"} className="btn-primary text-sm px-5 py-2">
           {loadState === "loading" ? "Generating…" : "Generate"}
         </button>
-        {/* Round four (CB, Oct 2026): "let's also have the option to download pdf" — same report,
-            same filename convention, just a second format alongside the original CSV export. */}
-        {report && loadState !== "error" && (
-          <>
-            <a href={`/api/payroll/hours/csv${exportQuery}`} className="btn-neutral text-sm px-5 py-2">
-              Download CSV
-            </a>
-            <a href={`/api/payroll/hours/pdf${exportQuery}`} className="btn-outline text-sm px-5 py-2">
-              Download PDF
-            </a>
-          </>
-        )}
         {rangeInvalid && <p className="text-xs text-accent basis-full">End date must be on or after the start date.</p>}
       </form>
 
@@ -387,8 +418,7 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
                   <div className="min-w-0">
                     <p className="font-serif text-lg font-bold text-white truncate">{report.rows[0].name}</p>
                     <p className="text-sm text-white/85 truncate">
-                      {report.rows[0].employeeCode}
-                      {report.rows[0].department ? ` · ${report.rows[0].department}` : ""}
+                      {report.rows[0].employeeCode} · {report.rows[0].jobTitle}
                     </p>
                   </div>
                   <div className="ml-auto text-right shrink-0">
@@ -418,6 +448,7 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
                   </span>
                 </div>
               </div>
+              {exportActions}
             </div>
           ) : (
             <div>
@@ -438,8 +469,7 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
                           {row.name}
                         </button>
                         <p className="text-xs text-muted mt-0.5">
-                          {row.employeeCode}
-                          {row.department ? ` · ${row.department}` : ""}
+                          {row.employeeCode} · {row.jobTitle}
                         </p>
                       </div>
                       <div className="text-right shrink-0">
@@ -487,7 +517,7 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
                   <thead>
                     <tr className="border-b border-border text-left text-xs text-muted uppercase tracking-wide">
                       <th className="px-4 py-2.5 font-medium">Team Member</th>
-                      <th className="px-4 py-2.5 font-medium">Department</th>
+                      <th className="px-4 py-2.5 font-medium">Job Title</th>
                       <th className="px-4 py-2.5 font-medium text-right">Regular</th>
                       <th className="px-4 py-2.5 font-medium text-right">Vacation</th>
                       <th className="px-4 py-2.5 font-medium text-right">Sick</th>
@@ -510,7 +540,7 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
                           </button>
                           <p className="text-xs text-muted">{row.employeeCode}</p>
                         </td>
-                        <td className="px-4 py-2.5 text-muted">{row.department ?? "—"}</td>
+                        <td className="px-4 py-2.5 text-muted">{row.jobTitle}</td>
                         <td className="px-4 py-2.5 text-right tabular-nums">{row.regularHours.toFixed(2)}</td>
                         <td className="px-4 py-2.5 text-right tabular-nums">{row.vacationHours.toFixed(2)}</td>
                         <td className="px-4 py-2.5 text-right tabular-nums">{row.sickHours.toFixed(2)}</td>
@@ -531,6 +561,7 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
                   </tbody>
                 </table>
               </div>
+              {exportActions}
             </div>
           )}
         </div>
