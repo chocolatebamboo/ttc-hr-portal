@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getWeek, formatWeekRange } from "@/lib/week";
+import { getWeek, formatWeekRange, weekOffsetForDate } from "@/lib/week";
 import TimesheetTable from "@/components/TimesheetTable";
 import type { TimeEntryDTO } from "@/types";
 
@@ -30,6 +30,22 @@ export default function ReviewTimesheetView({ employeeId }: { employeeId: string
       setLoadState("error");
     }
   }
+
+  // Oct 2026: picks up ?week=<date> from the Reports page's unapproved-entries banner (CB:
+  // "there should be a way that we could kind of view those entries... so we could go back
+  // there") and lands this widget on the week that date actually falls in, instead of always
+  // defaulting to "this week" — same window.location.search read + clear-after-read pattern
+  // TeamScheduleView's own ?dateFrom= deep link already uses, for the same Suspense-boundary
+  // reason. Clamped to 0 (never into the future) since a crafted/odd date shouldn't push this
+  // past what the "Next week" button itself allows.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const week = params.get("week");
+    if (!week) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setOffset(Math.min(0, weekOffsetForDate(week)));
+    window.history.replaceState(null, "", window.location.pathname);
+  }, []);
 
   useEffect(() => {
     // Fetch-on-mount / on-week-or-employee-change: this widget has no server-rendered
