@@ -58,6 +58,19 @@ export interface TimeSessionDTO {
   /** The team member's own stated reason for an exception clock-in — required whenever
    *  isException is true, null otherwise. */
   exceptionReason: string | null;
+  /** The scheduled shift's own start/end time ("HH:MM", same raw shape as ShiftDTO.startTime/
+   *  endTime — format with formatTime12h for display), when this session matched one at
+   *  clock-in — see shiftId above. CB, Oct 2026, looking at a flagged/auto-clocked-out day:
+   *  "we should be able to see the exact time that they were supposed to clock in... what was
+   *  the actual time frame they were supposed to clock out, even if it automatically clocks
+   *  them out" — so the timesheet can always show what was scheduled right next to what
+   *  actually got recorded, not just the flag saying something didn't match. Both null when
+   *  shiftId is null (nothing scheduled to compare against); both fields optional/undefined
+   *  entirely on a route that doesn't bother loading the shift relation (only GET
+   *  /api/time/timesheet does, as of Oct 2026 — same optional-on-some-routes shape as
+   *  reviewComment below). */
+  scheduledStartTime?: string | null;
+  scheduledEndTime?: string | null;
 }
 
 export interface TimeEntryDTO {
