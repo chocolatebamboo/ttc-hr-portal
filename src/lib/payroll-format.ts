@@ -192,6 +192,13 @@ function renderSingleEmployeePdf(doc: PdfDocument, report: PayrollHoursReportDTO
     { label: "Other Leave", value: row.otherLeaveHours },
     { label: "Total", value: row.totalHours, total: true },
   ];
+  // CB: "make sure the PDF reads properly and that those divider lines isn't clashing with
+  // anything" — a direct check of pdf.ts's own text() confirmed `y` there is the text's BASELINE,
+  // not its top, so the old y += 20 / line at y - 6 only left 6pt between a row's baseline and
+  // the divider below it, but just 14pt between that divider and the NEXT row's baseline — and a
+  // Helvetica cap-height/ascender at 10-11pt runs to roughly 7-9pt, so the next row's own text
+  // visually overlapped the line above it, worst on the bold 11pt "Total" row. y += 24 and the
+  // line drawn at y - 10 instead gives each divider about 14pt of clearance on both sides.
   for (const line of breakdown) {
     doc.text(left, y, line.label, {
       size: line.total ? 10.5 : 10,
@@ -203,8 +210,8 @@ function renderSingleEmployeePdf(doc: PdfDocument, report: PayrollHoursReportDTO
       bold: !!line.total,
       color: line.total ? TTC_PINK_INK : FOREGROUND,
     });
-    y += 20;
-    if (!line.total) doc.line(left, y - 6, right, { color: BORDER, width: 0.75 });
+    y += 24;
+    if (!line.total) doc.line(left, y - 10, right, { color: BORDER, width: 0.75 });
   }
 }
 
