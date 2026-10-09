@@ -174,6 +174,28 @@ export async function listAllAwaitingReviewDateTasks(actor: CurrentEmployee): Pr
   });
 }
 
+/** The reviewer's own recent approvals — same admin-wide/supervisor-scoped visibility rule as
+ *  listAllAwaitingReviewDateTasks above, narrowed further to this actor's own approvedById so
+ *  "Completed" only ever shows what THIS reviewer actually confirmed, not everything anyone else
+ *  on the team approved too. Oct 2026 (CB: "I should be able to see... a completed task section"
+ *  — asked for both the Home dashboard's Team tasks widget and the Tasks page's Awaiting review
+ *  tab): backs that same closed-by-default Completed group in both places. Capped at the most
+ *  recent 20 — a running history, not an exhaustive archive (the Activity History tab already
+ *  exists for that). */
+export async function listRecentlyApprovedDateTasks(actor: CurrentEmployee): Promise<DateTaskDTO[]> {
+  if (!isAdmin(actor) && actor.role !== "SUPERVISOR") throw new ForbiddenError();
+
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const rows: TaskRow[] = await tx.dateTask.findMany({
+      where: { status: "APPROVED", approvedById: actor.id },
+      include: TASK_INCLUDE,
+      orderBy: [{ approvedAt: "desc" }],
+      take: 20,
+    });
+    return rows.map(toDTO);
+  });
+}
+
 /** Create a task on one employee's specific date — admin or that employee's own supervisor only
  *  (assertCanAssignTasks), never the employee themselves. `attachment` is optional, matching
  *  every other one-file-per-post surface in this app (TeamNote, DirectMessage messages). */
