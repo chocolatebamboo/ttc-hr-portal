@@ -626,6 +626,17 @@ model DateTask {
   startedAt   DateTime?
   submittedAt DateTime?
 
+  // Oct 2026, round two (CB: "we get some reminders to approve their tasks... I don't want them
+  // to forget"): submitDateTask already notifies every reviewer once, at submit time
+  // (DATE_TASK_SUBMITTED) — this tracks the last time a FOLLOW-UP reminder went out for a task
+  // that's still sitting in AWAITING_REVIEW, so src/lib/date-task-reminders.ts's cron job can
+  // tell "never reminded yet" (null) apart from "already reminded, due for another nudge" and
+  // keep re-notifying once a day until someone actually approves or returns it. Reset implicitly
+  // on resubmission: submittedAt moves forward on every resubmit (submitDateTask), and the job
+  // only ever considers a task whose submittedAt is itself already past the reminder interval, so
+  // a stale lastReviewReminderAt from before a RETURNED/resubmit cycle can't fire early.
+  lastReviewReminderAt DateTime?
+
   // CB, Oct 2026: "I should be able to review what was submitted for the task" — a short note
   // and an optional photo/file, captured at the moment the employee taps complete (submitDateTask,
   // src/lib/date-tasks.ts), rather than nothing at all beyond a status flip. Both stay nullable —
@@ -1081,6 +1092,15 @@ enum NotificationType {
   // it was waiting on them. Emailed unconditionally, same reasoning as AVAILABILITY_SUBMITTED —
   // not added to PREFERENCE_BY_TYPE in notification-emails.ts.
   DATE_TASK_SUBMITTED
+
+  // Added Oct 2026, round two, CB: "we get some reminders to approve their tasks... I don't want
+  // them to forget." DATE_TASK_SUBMITTED above only ever fires once, right when the task is
+  // submitted — this is the follow-up src/lib/date-task-reminders.ts's own cron job sends once a
+  // task has sat in AWAITING_REVIEW for 24 hours, then once a day again for as long as it keeps
+  // sitting there unreviewed (DateTask.lastReviewReminderAt tracks the last one sent). Emailed
+  // unconditionally, same reasoning as DATE_TASK_SUBMITTED just above — an admin/supervisor
+  // operational notification, not a self-service preference.
+  DATE_TASK_REVIEW_REMINDER
 }
 
 model Notification {
