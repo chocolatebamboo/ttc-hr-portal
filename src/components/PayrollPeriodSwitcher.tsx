@@ -20,6 +20,15 @@ import { getCurrentPayrollPeriodOffset, getPayrollPeriod, formatWeekRange } from
  * future date. LoggedHoursSection's own switcher (not rebuilt on top of this component, to avoid
  * re-touching an already-shipped, already-verified file) caps it instead, since a future pay
  * period can't have any hours logged yet.
+ *
+ * Oct 2026, round five (CB, previewing as Haile on My Tasks, paging forward off the real current
+ * period: "I don't like the fact that it's saying current for every single date"): the two states
+ * here used to share the exact same word, "Current" — a static pill badge when `offset ===
+ * currentOffset`, or a plain-text shortcut button to jump back to that period otherwise — telling
+ * them apart meant noticing a faint background pill was (or wasn't) there, easy to miss at a
+ * glance on a phone. The shortcut button now reads "Jump to current" so it can never be misread
+ * as the page itself claiming a non-current period is the current one; the badge keeps the plain
+ * "Current" label since it's the one case where that word is simply true.
  */
 export default function PayrollPeriodSwitcher({
   offset,
@@ -57,7 +66,7 @@ export default function PayrollPeriodSwitcher({
           onClick={() => onOffsetChange(currentOffset)}
           className="text-[11px] font-semibold text-accent-ink hover:underline shrink-0"
         >
-          Current
+          Jump to current
         </button>
       )}
       <button
