@@ -3,6 +3,7 @@
 import { useState } from "react";
 import StatusPill from "@/components/StatusPill";
 import { WarningIcon } from "@/components/icons";
+import { formatTime12h } from "@/lib/availability-format";
 import { combineDateAndTime, formatClockTime, formatMinutes, todayDateKey, toTimeInputValue } from "@/lib/time";
 import type { TimeEntryDTO } from "@/types";
 
@@ -157,6 +158,19 @@ function TimesheetRow({
                   <div className="tabular-nums whitespace-nowrap text-xs">
                     {formatClockTime(s.clockIn)} – {s.clockOut ? formatClockTime(s.clockOut) : "in progress"}
                   </div>
+                  {/* CB, Oct 2026, on a flagged/auto-clocked-out day: "we should be able to see
+                      the exact time that they were supposed to clock in... what was the actual
+                      time frame they were supposed to clock out, even if it automatically clocks
+                      them out." Shown whenever this session matched a scheduled shift at
+                      clock-in (scheduledStartTime/EndTime come from GET /api/time/timesheet
+                      only — see TimeSessionDTO's own doc comment), not just on a flagged row,
+                      so a reviewer can always see the schedule right next to the recorded time
+                      instead of only being told something didn't match. */}
+                  {s.scheduledStartTime && s.scheduledEndTime && (
+                    <div className="text-[11px] text-muted whitespace-nowrap">
+                      Scheduled {formatTime12h(s.scheduledStartTime)} – {formatTime12h(s.scheduledEndTime)}
+                    </div>
+                  )}
                   {/* Phase 3 (client spec, Sept 2026): flags a clock-in that had no scheduled
                       shift, or fell outside its 15-minute window — visible here on both the
                       employee's own view and the supervisor/HR review view, since this table
