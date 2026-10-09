@@ -173,3 +173,35 @@ export function timeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
   return h * 60 + m;
 }
+
+/** Converts a "YYYY-MM-DD" date key + "HH:MM" time, both read as wall-clock values in
+ *  `timeZone` (ORG_TIMEZONE by default), into the real UTC instant they represent. A Shift's
+ *  own date/startTime/endTime are always wall-clock values for TTC's timezone, never UTC —
+ *  this is for the rare server-side spot that needs one of them as an actual point in time to
+ *  compare against a real timestamp like TimeSession.clockIn (see autoCloseStaleClockIns in
+ *  auto-clockout.ts, which has to turn a shift's scheduled endTime into a real instant to
+ *  decide whether it falls before the 4-hour auto-clockout cap).
+ *
+ *  One correction pass: format a same-clock-reading UTC guess back through `timeZone` and
+ *  shift by however far that reading missed the mark. That's exact everywhere except the
+ *  handful of minutes spanning a DST transition itself, which nothing else in this app
+ *  accounts for either (orgNow() above has the same sharp edge). */
+export function zonedDateTimeToUtc(dateKey: string, time: string, timeZone: string = ORG_TIMEZONE): Date {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  const guess = Date.UTC(year, month - 1, day, hour, minute);
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(guess));
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+  const readAsUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour") % 24, get("minute"));
+
+  return new Date(guess + (guess - readAsUtc));
+}
