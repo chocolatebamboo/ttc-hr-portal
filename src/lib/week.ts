@@ -81,6 +81,25 @@ export function getCurrentPayrollPeriodOffset(): number {
   return daysSinceAnchor % PAYROLL_PERIOD_DAYS === 0 ? 0 : 1;
 }
 
+/** Inverse of getPayrollPeriod, same shape as weekOffsetForDate above but for pay periods
+ *  instead of calendar weeks: given a date key, which getPayrollPeriod offset its own period is
+ *  from today's (0 = the most recently closed period — see getPayrollPeriod's own doc comment —
+ *  negative further into the past, positive into the future). Round four (CB, Oct 2026, on My
+ *  Tasks: "I should be able to see all the tasks that's [under] review for that period of
+ *  time... based off of those two week intervals"): MyTasksView's own `?date=` deep link (from
+ *  the "Tasks" link on an Availability/Schedule card) uses this the same way weekOffsetForDate
+ *  used to, now that both of that page's tabs page by 2-week period instead of calendar week. */
+export function payrollPeriodOffsetForDate(dateKey: string): number {
+  const anchor = new Date(`${PAYROLL_PERIOD_END_ANCHOR}T00:00:00`);
+  const today = new Date(`${toDateKey(new Date())}T00:00:00`);
+  const target = new Date(`${dateKey}T00:00:00`);
+  const todaysDaysSinceAnchor = Math.round((today.getTime() - anchor.getTime()) / 86400000);
+  const periodsElapsedToday = Math.floor(todaysDaysSinceAnchor / PAYROLL_PERIOD_DAYS);
+  const targetDaysSinceAnchor = Math.round((target.getTime() - anchor.getTime()) / 86400000);
+  const targetPeriodIndex = Math.ceil(targetDaysSinceAnchor / PAYROLL_PERIOD_DAYS);
+  return targetPeriodIndex - periodsElapsedToday;
+}
+
 export function formatWeekRange(start: string, end: string): string {
   const s = new Date(`${start}T00:00:00`);
   const e = new Date(`${end}T00:00:00`);
