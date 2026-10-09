@@ -1,14 +1,14 @@
 import { withRlsContext } from "@/lib/db";
-import { computeTotalMinutes } from "@/lib/time";
+import { computeTotalMinutes, zonedDateTimeToUtc } from "@/lib/time";
 
 /**
  * CB, Sept 2026: "if you didn't clock out... it should automatically clock you out after, like,
  * I would say, three hours, four hours max. because I forgot to clock out last night, and it
  * went over twelve hours, and then it documented it to be twelve hours. I don't necessarily
- * want that because that's not necessarily true." Confirmed via follow-up: 4 hours, and the
- * recorded clockOut is cut off at exactly the cap (not "now") — the whole point is that letting
- * a forgotten session keep accumulating real elapsed time is what produced the wrong 12-hour
- * entry in the first place.
+ * want that because that's not necessarily true." Confirmed via follow-up: 4 hours — this stays
+ * the outer safety cap (see autoCloseStaleClockIns's own doc comment below for what actually
+ * gets recorded most of the time now) so a forgotten session can never again balloon into a
+ * wrong 12-hour entry no matter what the schedule says.
  */
 const AUTO_CLOCKOUT_CAP_MS = 4 * 60 * 60 * 1000;
 
@@ -28,25 +28,35 @@ export interface AutoClockoutResult {
 }
 
 /**
- * Finds every open (no clockOut) TimeSession that's been running at least AUTO_CLOCKOUT_CAP_MS,
- * force-closes it at exactly clockIn + cap (never "now" — see the doc comment above), recomputes
- * the parent TimeEntry's totalMinutes, and puts that entry into AWAITING_APPROVAL so a supervisor
- * sees it needs a look — same status applyClockAction already uses for any ordinary clock-out,
- * reused here rather than inventing a separate "auto-closed" TimeEntry status, per CB's
- * "flagged for review" answer. A TimeEntryAuditEvent with the new AUTO_CLOCK_OUT action and no
- * actor records *why* the clockOut doesn't match what the team member would have entered
- * themselves, so it's visibly different from a normal clock-out in the audit trail HR already
- * has (ReviewTimesheetView, etc.) rather than looking like an ordinary self-reported day.
+ * Finds every open (no clockOut) TimeSession that's been running at least AUTO_CLOCKOUT_CAP_MS
+ * and force-closes it — never at "now" (see the doc comment above), and, as of Oct 2026, not
+ * reflexively at clockIn + cap either. CB, on a clean clock-in that just ran past the scheduled
+ * end time because the team member forgot to clock out: "doesn't it cut off based off of the
+ * schedule that was agreed upon?... it just records the time that they were scheduled [to clock
+ * out]." So when this session matched a shift at clock-in (TimeSession.shiftId — see
+ * resolveClockInShift in src/lib/time-actions.ts) and that shift's own scheduled end time falls
+ * before the 4-hour cap, THAT'S what gets recorded as the clockOut — the 4-hour cap only ever
+ * kicks in as the fallback: no shift was matched at all, or the shift runs longer than 4 hours
+ * anyway. Either way the recorded time is never later than clockIn + AUTO_CLOCKOUT_CAP_MS, so a
+ * forgotten clock-out still can't balloon into the wrong 12-hour entry this cap exists to
+ * prevent.
  *
- * Oct 2026: also flips this session's own isException/exceptionReason (same two columns an
- * ordinary out-of-window clock-in already uses — see resolveClockInShift in
- * src/lib/time-actions.ts), for two reasons: TimesheetTable already renders any isException
- * session with a visible "Flagged: ..." chip, so this is now visible right on the timesheet
- * itself instead of only in an audit table nothing in the UI reads; and applyClockAction's new
- * auto-approve check (CB: "it should be marked as complete" once a clean clock-out happens)
- * reads isException across every session in the entry to decide whether a later clock-out this
- * same day can skip manual review — a capped, possibly-wrong auto-clockout session must never
- * let a same-day reopen slip through as "clean."
+ * Whether the day still needs a supervisor's look follows the same shape as applyClockAction's
+ * own auto-approve check (src/lib/time-actions.ts, "every session this day matched an
+ * already-approved shift, on time, with nothing flagged"): a session closed cleanly against its
+ * own schedule, with nothing already flagged about its clock-in, is left isException: false —
+ * invisible as anything out of the ordinary, same as a normal on-time clock-out — and if that
+ * leaves nothing flagged anywhere else in the day either, the whole entry goes straight to
+ * APPROVED with its own TIMESHEET_AUTO_APPROVED audit row, exactly like a clean manual clock-out
+ * already does. Anything less certain (no shift matched, the shift ran past the 4-hour cap so
+ * the fallback had to be used, or the clock-in itself was already flagged) is marked
+ * isException: true with a reason explaining why, which both shows a "Flagged: ..." chip right
+ * on the timesheet (TimesheetTable already renders any isException session that way) and makes
+ * applyClockAction's own auto-approve check correctly refuse to wave through a later same-day
+ * reopen as "clean." A TimeEntryAuditEvent with the AUTO_CLOCK_OUT action and no actor is always
+ * written regardless, so the audit trail HR already has (ReviewTimesheetView, etc.) can always
+ * show *why* a clockOut doesn't match what the team member would have entered themselves, even
+ * on a day that needed no review at all.
  *
  * Called by POST /api/cron/auto-clockout, on the same 15-minute GitHub Actions schedule as the
  * clock-out reminder and shift reminder jobs (see README's "Auto clock-out" section) — a session
@@ -59,7 +69,7 @@ export async function autoCloseStaleClockIns(): Promise<AutoClockoutResult> {
   return withRlsContext(SYSTEM_ACTOR, async (tx) => {
     const sessions = await tx.timeSession.findMany({
       where: { clockOut: null, clockIn: { lte: cutoff } },
-      select: { id: true, clockIn: true, timeEntryId: true },
+      select: { id: true, clockIn: true, timeEntryId: true, shiftId: true, isException: true, exceptionReason: true },
     });
 
     const closed: AutoClockoutResult["closed"] = [];
@@ -67,26 +77,47 @@ export async function autoCloseStaleClockIns(): Promise<AutoClockoutResult> {
 
     for (const session of sessions) {
       try {
-        const cappedClockOut = new Date(session.clockIn.getTime() + AUTO_CLOCKOUT_CAP_MS);
+        const capTime = new Date(session.clockIn.getTime() + AUTO_CLOCKOUT_CAP_MS);
+
+        const shift = session.shiftId
+          ? await tx.shift.findUnique({ where: { id: session.shiftId }, select: { date: true, endTime: true } })
+          : null;
+        const scheduledEnd = shift ? zonedDateTimeToUtc(shift.date, shift.endTime) : null;
+        const usedSchedule = !!scheduledEnd && scheduledEnd > session.clockIn && scheduledEnd <= capTime;
+        const clockOut = usedSchedule ? scheduledEnd! : capTime;
+
+        const alreadyFlagged = session.isException;
+        const cleanClose = usedSchedule && !alreadyFlagged;
+
+        const autoCloseNote = usedSchedule
+          ? "Automatically clocked out at the end of their scheduled shift — forgot to clock out."
+          : `Automatically clocked out after being open ${AUTO_CLOCKOUT_CAP_MS / 3_600_000} hours — no scheduled shift to go by.`;
+        const newExceptionReason = cleanClose
+          ? null
+          : alreadyFlagged && session.exceptionReason
+            ? `${session.exceptionReason} ${autoCloseNote}`
+            : autoCloseNote;
 
         await tx.timeSession.update({
           where: { id: session.id },
           data: {
-            clockOut: cappedClockOut,
-            isException: true,
-            exceptionReason: `Automatically clocked out after being open ${AUTO_CLOCKOUT_CAP_MS / 3_600_000} hours.`,
+            clockOut,
+            isException: !cleanClose,
+            exceptionReason: newExceptionReason,
           },
         });
 
         const siblingSessions = await tx.timeSession.findMany({
           where: { timeEntryId: session.timeEntryId },
-          select: { clockIn: true, clockOut: true },
+          select: { clockIn: true, clockOut: true, isException: true },
         });
         const totalMinutes = computeTotalMinutes(siblingSessions);
+        const hasException = siblingSessions.some((s) => s.isException);
+        const entryStatus = hasException ? "AWAITING_APPROVAL" : "APPROVED";
 
         await tx.timeEntry.update({
           where: { id: session.timeEntryId },
-          data: { totalMinutes, status: "AWAITING_APPROVAL" },
+          data: { totalMinutes, status: entryStatus },
         });
 
         await tx.timeEntryAuditEvent.create({
@@ -94,16 +125,26 @@ export async function autoCloseStaleClockIns(): Promise<AutoClockoutResult> {
             timeEntryId: session.timeEntryId,
             action: "AUTO_CLOCK_OUT",
             fieldName: "clockOut",
-            newValue: cappedClockOut.toISOString(),
-            comment: `Automatically clocked out after being open ${AUTO_CLOCKOUT_CAP_MS / 3_600_000} hours — flagged for review.`,
+            newValue: clockOut.toISOString(),
+            comment: cleanClose ? `${autoCloseNote} Nothing else about the day was flagged, so no review needed.` : `${autoCloseNote} Flagged for review.`,
           },
         });
+
+        if (entryStatus === "APPROVED") {
+          await tx.timeEntryAuditEvent.create({
+            data: {
+              timeEntryId: session.timeEntryId,
+              action: "TIMESHEET_AUTO_APPROVED",
+              comment: "Automatically approved — every punch matched an already-approved shift, on time, with nothing flagged.",
+            },
+          });
+        }
 
         closed.push({
           sessionId: session.id,
           timeEntryId: session.timeEntryId,
           clockIn: session.clockIn.toISOString(),
-          clockOut: cappedClockOut.toISOString(),
+          clockOut: clockOut.toISOString(),
         });
       } catch (err) {
         failed.push({ sessionId: session.id, error: err instanceof Error ? err.message : String(err) });
