@@ -173,10 +173,14 @@ export async function applyClockAction(actor: CurrentEmployee, action: ClockActi
     // on time, with nothing flagged. `isException` already carries that signal for an ordinary
     // clock-in (no shift / outside the window), and autoCloseStaleClockIns (src/lib/
     // auto-clockout.ts) now sets it too for a forgotten clock-out it had to force-close — so one
-    // check here covers every reason this day might still need a look. A correction submitted
-    // afterward (submitEmployeeCorrection) is a separate path that sets AWAITING_APPROVAL
-    // directly and never goes through this function, so it's unaffected and still always
-    // reviewed by hand.
+    // check here covers every reason this day might still need a look. (Oct 2026: a clean
+    // auto-close — the forgotten clock-out landed right at the end of its own scheduled shift,
+    // nothing else about the day flagged — now reaches APPROVED on its own the same way, inside
+    // autoCloseStaleClockIns itself, rather than waiting for a next clock-in/out through this
+    // function to notice; this function's own check is what still covers everything else.) A
+    // correction submitted afterward (submitEmployeeCorrection) is a separate path that sets
+    // AWAITING_APPROVAL directly and never goes through this function, so it's unaffected and
+    // still always reviewed by hand.
     const hasException = sessions.some((s) => s.isException);
     const clockOutStatus = hasException ? "AWAITING_APPROVAL" : "APPROVED";
 
