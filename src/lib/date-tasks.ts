@@ -358,8 +358,13 @@ export async function startDateTask(actor: CurrentEmployee, taskId: string): Pro
  *  whoever gets notified is exactly whoever can actually act on it. Mirrors
  *  resolveAvailabilityReviewerIds's shape (src/lib/availability.ts) minus its one extra source —
  *  there's no standing-reviewer flag for tasks the way isAvailabilityReviewer exists for
- *  availability. */
-async function resolveTaskReviewerIds(tx: PrismaClient, employeeId: string): Promise<string[]> {
+ *  availability.
+ *
+ *  Exported (Oct 2026, round two — CB: "I don't want them to forget" — admins only ever got this
+ *  ONE notification, at submit time, with nothing following up if it just sat there) so
+ *  src/lib/date-task-reminders.ts's own cron job can notify the exact same people a second time
+ *  if nobody's acted on it yet, without duplicating this lookup. */
+export async function resolveTaskReviewerIds(tx: PrismaClient, employeeId: string): Promise<string[]> {
   const submitter = await tx.employee.findUnique({ where: { id: employeeId }, select: { supervisorId: true } });
   const admins = await tx.employee.findMany({
     where: { role: { in: ["SUPER_ADMIN", "HR_ADMIN"] }, deactivatedAt: null },
