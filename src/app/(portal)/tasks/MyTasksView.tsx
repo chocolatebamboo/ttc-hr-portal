@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { DateTaskDTO } from "@/types";
 import DateTaskRow from "@/components/DateTaskRow";
-import { ChecklistIcon } from "@/components/icons";
+import { ChecklistIcon, ChevronDownIcon } from "@/components/icons";
 import { formatSlotDate } from "@/lib/availability-format";
 import { getWeek, formatWeekRange, weekOffsetForDate } from "@/lib/week";
 
@@ -70,6 +70,14 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
   const [reviewTasks, setReviewTasks] = useState<DateTaskDTO[]>([]);
   const [reviewLoadState, setReviewLoadState] = useState<LoadState>("loading");
 
+  // Oct 2026, round two (CB: "it should say completed tasks in the tasks page... and it update
+  // there"): same closed-by-default Completed group DateTasksSection's Home widget already has,
+  // now also here — a reviewer's own recent approvals, since once a task is approved it drops out
+  // of the Awaiting review query entirely and would otherwise just vanish from this tab.
+  const [completedReview, setCompletedReview] = useState<DateTaskDTO[]>([]);
+  const [completedReviewLoadState, setCompletedReviewLoadState] = useState<LoadState>("loading");
+  const [completedOpen, setCompletedOpen] = useState(false);
+
   async function load() {
     setLoadState("loading");
     try {
@@ -102,10 +110,26 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employeeId]);
 
+  async function loadCompletedReview() {
+    if (!canReview) return;
+    setCompletedReviewLoadState("loading");
+    try {
+      const res = await fetch("/api/date-tasks/recently-approved");
+      if (!res.ok) throw new Error();
+      const data: { tasks: DateTaskDTO[] } = await res.json();
+      setCompletedReview(data.tasks);
+      setCompletedReviewLoadState("ready");
+    } catch {
+      setCompletedReviewLoadState("error");
+    }
+  }
+
   useEffect(() => {
     if (!canReview) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadReview();
+    loadCompletedReview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canReview]);
 
   useEffect(() => {
@@ -118,6 +142,20 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
     }
   }, []);
 
+  // Oct 2026 (CB's Team tasks widget on Home now links its own "View N more" straight into this
+  // tab via `?tab=review`, same deep-link-via-query-param shape the `date` param just above
+  // already established): only takes effect when this viewer actually canReview — a regular
+  // team member has no "review" tab to land on, so the default "mine" tab stays put for them.
+  useEffect(() => {
+    if (!canReview) return;
+    const wantsReview = new URLSearchParams(window.location.search).get("tab") === "review";
+    if (wantsReview) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setTab("review");
+      window.history.replaceState(null, "", "/tasks");
+    }
+  }, [canReview]);
+
   useEffect(() => {
     if (!focusDate || loadState !== "ready" || hasFocused.current) return;
     if (!tasks.some((t) => t.taskDate === focusDate)) return;
@@ -129,6 +167,11 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
     const timer = window.setTimeout(() => setHighlightDate(null), 2500);
     return () => window.clearTimeout(timer);
   }, [focusDate, loadState, tasks]);
+
+  function loadReviewAll() {
+    loadReview();
+    loadCompletedReview();
+  }
 
   const week = getWeek(offset);
   const weekTasks = [...tasks.filter((t) => t.taskDate >= week.start && t.taskDate <= week.end)].sort((a, b) =>
@@ -293,8 +336,36 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
           {reviewLoadState === "ready" && reviewTasks.length > 0 && (
             <div className="space-y-2.5">
               {reviewTasks.map((t) => (
-                <DateTaskRow key={t.id} task={t} viewerId={employeeId} canReview showDate showEmployee onChanged={loadReview} />
+                <DateTaskRow key={t.id} task={t} viewerId={employeeId} canReview showDate showEmployee onChanged={loadReviewAll} />
               ))}
+            </div>
+          )}
+
+          {/* Oct 2026, round two (CB: "it should say completed tasks in the tasks page... and it
+              update there"): closed by default, same reasoning as the Home widget's own
+              Completed group — once approved, a task is no longer the thing needing this
+              reviewer's attention, so it stays out of the way until asked for. */}
+          {completedReviewLoadState === "ready" && completedReview.length > 0 && (
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={() => setCompletedOpen((v) => !v)}
+                aria-expanded={completedOpen}
+                className="w-full flex items-center justify-between gap-2 rounded-xl border border-border bg-black/[0.02] px-3.5 py-2.5 text-sm font-medium text-muted hover:bg-black/[0.04] transition-colors"
+              >
+                <span className="flex items-center gap-1.5">
+                  <ChecklistIcon className="h-3.5 w-3.5" />
+                  Completed <span className="text-foreground font-semibold">({completedReview.length})</span>
+                </span>
+                <ChevronDownIcon className={`h-3.5 w-3.5 transition-transform ${completedOpen ? "rotate-180" : ""}`} />
+              </button>
+              {completedOpen && (
+                <div className="space-y-2.5 mt-2.5">
+                  {completedReview.map((t) => (
+                    <DateTaskRow key={t.id} task={t} viewerId={employeeId} canReview={false} showDate showEmployee onChanged={loadReviewAll} />
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </>
