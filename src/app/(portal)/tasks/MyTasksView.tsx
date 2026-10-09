@@ -71,6 +71,21 @@ function priorityRank(t: DateTaskDTO): number {
  * requiring an unbounded scroll or several week-by-week clicks to find it. "Awaiting review"'s
  * own tab badge count stays unscoped (every outstanding task, not just this period's) so it
  * keeps working as a true backlog indicator even while viewing an empty period.
+ *
+ * Oct 2026, round five (CB, looking at her own admin view next to Haile's team-member preview:
+ * "it should be very similar for the team members... I like how it says awaiting review or my
+ * tasks... it has that view"): a regular team member (canReview false) now gets the same
+ * two-tab shape as a reviewer, just scoped to their own tasks instead of the whole team's — "My
+ * tasks" is everything NOT currently sitting in someone else's queue (assigned, in progress,
+ * returned, or already approved), "Awaiting review" is the subset of their own `weekTasks`
+ * they've already turned in and are waiting to hear back on. No second fetch or second period
+ * for this case (unlike the reviewer's own `reviewOffset`): both tabs are just a status split
+ * of the one `weekTasks` this page already loads for "My tasks," sharing the one
+ * `offset`/switcher, since for a single person's own tasks "what needs action" and "what's
+ * awaiting review" are two views onto the exact same list rather than two different queries.
+ * `myAwaitingReviewCount` mirrors the reviewer tab's own unscoped badge (every outstanding
+ * submission, not just this period's) for the same reason that one stayed unscoped — see its
+ * doc comment just above.
  */
 export default function MyTasksView({ employeeId, canReview }: { employeeId: string; canReview: boolean }) {
   const [tab, setTab] = useState<"mine" | "review">("mine");
@@ -197,6 +212,13 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
   const weekTasks = [...tasks.filter((t) => t.taskDate >= period.start && t.taskDate <= period.end)].sort((a, b) =>
     a.taskDate === b.taskDate ? priorityRank(a) - priorityRank(b) : a.taskDate < b.taskDate ? -1 : 1
   );
+  // Round five — the non-reviewer split of weekTasks above into the same two buckets a reviewer
+  // already sees, just scoped to this one person's own tasks. See this component's own doc
+  // comment for why these are a client-side filter of weekTasks rather than a second fetch.
+  const myActionTasks = weekTasks.filter((t) => t.status !== "AWAITING_REVIEW");
+  const myAwaitingTasks = weekTasks.filter((t) => t.status === "AWAITING_REVIEW");
+  const myAwaitingReviewCount = tasks.filter((t) => t.status === "AWAITING_REVIEW").length;
+  const mineTasks = canReview ? weekTasks : myActionTasks;
   // The banner only shows while the deep-linked date's own period is actually on screen — paging
   // away from it (offset changes) retires the banner on its own, no separate dismiss-vs-navigate
   // bookkeeping needed.
@@ -213,35 +235,46 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
       <div className="mb-5">
         <h1 className="page-title text-2xl">My Tasks</h1>
         <p className="text-sm text-muted mt-0.5">
-          {tab === "mine" ? "Everything assigned to you, one pay period at a time." : "Every outstanding task across your team, by pay period."}
+          {tab === "mine"
+            ? "Everything assigned to you, one pay period at a time."
+            : canReview
+              ? "Every outstanding task across your team, by pay period."
+              : "Tasks you've turned in and are waiting to hear back on, by pay period."}
         </p>
       </div>
 
-      {/* Oct 2026 (CB: "I should be able to approve as well on the tasks page as well"): admin/
-          supervisor only — a regular team member never sees this row at all, same page as
-          before. */}
-      {canReview && (
-        <div className="flex gap-1.5 bg-black/[0.04] rounded-full p-1 mb-4 w-fit">
-          <button
-            type="button"
-            onClick={() => setTab("mine")}
-            className={`text-sm font-semibold rounded-full px-4 py-1.5 transition-colors ${
-              tab === "mine" ? "bg-surface text-accent-ink shadow-sm" : "text-muted hover:text-foreground"
-            }`}
-          >
-            My tasks
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab("review")}
-            className={`text-sm font-semibold rounded-full px-4 py-1.5 transition-colors ${
-              tab === "review" ? "bg-surface text-accent-ink shadow-sm" : "text-muted hover:text-foreground"
-            }`}
-          >
-            Awaiting review{reviewLoadState === "ready" && reviewTasks.length > 0 ? ` (${reviewTasks.length})` : ""}
-          </button>
-        </div>
-      )}
+      {/* Oct 2026, round five (CB: "it should be very similar for the team members... I like how
+          it says awaiting review or my tasks"): this row used to be admin/supervisor only — a
+          regular team member saw no tabs at all, just the one flat list below. Now everyone gets
+          the same two tabs; only the second tab's meaning and count differ by canReview (see
+          this component's own doc comment). */}
+      <div className="flex gap-1.5 bg-black/[0.04] rounded-full p-1 mb-4 w-fit">
+        <button
+          type="button"
+          onClick={() => setTab("mine")}
+          className={`text-sm font-semibold rounded-full px-4 py-1.5 transition-colors ${
+            tab === "mine" ? "bg-surface text-accent-ink shadow-sm" : "text-muted hover:text-foreground"
+          }`}
+        >
+          My tasks
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("review")}
+          className={`text-sm font-semibold rounded-full px-4 py-1.5 transition-colors ${
+            tab === "review" ? "bg-surface text-accent-ink shadow-sm" : "text-muted hover:text-foreground"
+          }`}
+        >
+          Awaiting review
+          {canReview
+            ? reviewLoadState === "ready" && reviewTasks.length > 0
+              ? ` (${reviewTasks.length})`
+              : ""
+            : loadState === "ready" && myAwaitingReviewCount > 0
+              ? ` (${myAwaitingReviewCount})`
+              : ""}
+        </button>
+      </div>
 
       {tab === "mine" && (
       <>
@@ -286,14 +319,16 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
             </div>
           </div>
 
-          {weekTasks.length === 0 ? (
+          {mineTasks.length === 0 ? (
             <div className="rounded-xl border border-border bg-surface p-8 text-center text-sm text-muted flex flex-col items-center gap-2">
               <ChecklistIcon className="h-8 w-8 text-muted/60" />
-              Nothing assigned for this period.
+              {canReview || myAwaitingTasks.length === 0
+                ? "Nothing assigned for this period."
+                : "Nothing needs your action this period — check Awaiting review."}
             </div>
           ) : (
             <div className="space-y-2.5">
-              {weekTasks.map((t) => (
+              {mineTasks.map((t) => (
                 <div
                   key={t.id}
                   data-task-date={t.taskDate}
@@ -311,7 +346,7 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
       </>
       )}
 
-      {tab === "review" && (
+      {tab === "review" && canReview && (
         <>
           {reviewLoadState === "loading" && (
             <div className="space-y-2">
@@ -386,6 +421,49 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
                 </div>
               )}
             </div>
+          )}
+        </>
+      )}
+
+      {/* Round five — the non-reviewer "Awaiting review" tab: this person's own weekTasks,
+          already loaded for "My tasks" above, just narrowed to AWAITING_REVIEW. Shares that
+          tab's `offset`/switcher rather than a second one (see this component's own doc
+          comment), since there's no second query here to page independently. */}
+      {tab === "review" && !canReview && (
+        <>
+          {loadState === "loading" && (
+            <div className="space-y-2">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="h-24 rounded-2xl bg-black/[0.04] animate-pulse" />
+              ))}
+            </div>
+          )}
+
+          {loadState === "error" && (
+            <div className="rounded-xl border border-border bg-surface p-6 text-sm text-accent">
+              Unable to load your tasks. Please try again or contact HR.
+            </div>
+          )}
+
+          {loadState === "ready" && (
+            <>
+              <div className="mb-4">
+                <PayrollPeriodSwitcher offset={offset} onOffsetChange={setOffset} />
+              </div>
+
+              {myAwaitingTasks.length === 0 ? (
+                <div className="rounded-xl border border-border bg-surface p-8 text-center text-sm text-muted flex flex-col items-center gap-2">
+                  <ChecklistIcon className="h-8 w-8 text-muted/60" />
+                  Nothing of yours is waiting on a review this period.
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {myAwaitingTasks.map((t) => (
+                    <DateTaskRow key={t.id} task={t} viewerId={employeeId} canReview={false} showDate onChanged={load} />
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </>
       )}
