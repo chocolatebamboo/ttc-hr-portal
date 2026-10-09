@@ -35,8 +35,10 @@ const POLL_MS = 45_000;
 // types whose recipient is the admin/supervisor reviewing someone ELSE's submission, not the
 // submission's own employee looking at their own schedule/availability/tasks:
 // SHIFT_REQUEST_RECEIVED (added Phase 2), AVAILABILITY_SUBMITTED (added Oct 2026, same
-// reasoning), and DATE_TASK_SUBMITTED (added Oct 2026, same reasoning again — DateTasksPanel,
-// where a reviewer actually approves/returns a submitted task, lives on the Team Schedule page).
+// reasoning), and DATE_TASK_SUBMITTED/DATE_TASK_REVIEW_REMINDER (added Oct 2026, same reasoning
+// again — DateTasksPanel, where a reviewer actually approves/returns a submitted task, lives on
+// the Team Schedule page; the review-reminder notification points a reviewer at the exact same
+// place the original submit notification already does).
 function targetHref(n: NotificationDTO): string {
   if (n.targetType === "Shift") {
     return n.type === "SHIFT_REQUEST_RECEIVED" ? "/team/schedule" : "/schedule";
@@ -46,7 +48,7 @@ function targetHref(n: NotificationDTO): string {
   }
   if (n.targetType === "PtoRequest") return "/time-off";
   if (n.targetType === "DateTask") {
-    return n.type === "DATE_TASK_SUBMITTED" ? "/team/schedule" : "/dashboard";
+    return n.type === "DATE_TASK_SUBMITTED" || n.type === "DATE_TASK_REVIEW_REMINDER" ? "/team/schedule" : "/dashboard";
   }
   // CB, Oct 2026, tapping an announcement notification: "when I click on the notification...
   // it should take you to [it]." Carries the specific announcement's id as a query param —
@@ -89,6 +91,7 @@ const TYPE_TONE: Record<NotificationType, "positive" | "negative" | "neutral"> =
   MESSAGE_RECEIVED: "neutral",
   AVAILABILITY_SUBMITTED: "neutral",
   DATE_TASK_SUBMITTED: "neutral",
+  DATE_TASK_REVIEW_REMINDER: "neutral",
 };
 
 function Dot({ tone }: { tone: "positive" | "negative" | "neutral" }) {
