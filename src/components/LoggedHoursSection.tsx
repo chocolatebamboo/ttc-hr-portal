@@ -5,23 +5,11 @@ import type { CorrectionValues } from "@/components/TimesheetTable";
 import StatusPill from "@/components/StatusPill";
 import SwipeReveal from "@/components/SwipeReveal";
 import { TrashIcon } from "@/components/icons";
-import { formatSlotDateShort } from "@/lib/availability-format";
 import { combineDateAndTime, formatClockTime, formatMinutes, toTimeInputValue } from "@/lib/time";
+import { getPayrollPeriod, getCurrentPayrollPeriodOffset, formatWeekRange } from "@/lib/week";
 import type { TimeEntryDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error" | "empty";
-
-/** How far back "recent" reaches for this summary — plenty of room for a Returned entry to
- *  still be reachable for correction, without asking the server for a whole employment history
- *  every time this section loads. Same window My Time used before it was folded into
- *  Availability. */
-const RECENT_DAYS = 90;
-
-function dateKeyDaysAgo(daysAgo: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - daysAgo);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 /**
  * "Logged hours" — the actual-worked-hours summary that used to be My Time's whole page
@@ -37,27 +25,43 @@ function dateKeyDaysAgo(daysAgo: number): string {
  * `showHeading`: same "the toggle button above is already this section's heading" convention
  * MyAvailabilityPreview and TimeOffRequests already use on this same page — Availability's own
  * accordion header is the real heading when this renders there, so it's passed false. The
- * "Total, last N days" row at the bottom always shows regardless, since that's a real summary
- * rather than a label.
+ * "Total, this pay period" row at the bottom always shows regardless, since that's a real
+ * summary rather than a label.
  *
  * Redesign (CB, Sept 2026, approved mockup): "I need logged hours to kinda look like" the blue
  * "This Week" pill + "By day" list on dashboard/week/page.tsx. Added a matching hero pill above
  * the entries list — same big-number, solid-color "widget" face TimeClockCard's hero variant and
- * the This Week page both use — summarizing this section's own RECENT_DAYS window. Deliberately
- * NOT the This Week widget's literal rolling 7 days: this section has always summarized
- * RECENT_DAYS (90), and CB confirmed keeping that wider window rather than narrowing it to match
- * This Week exactly. Everything below the hero — the entry rows, status pills, swipe/trash
- * delete, Returned's "Edit & resubmit" — is unchanged; only the hero above it and the spacing
- * around it are new.
+ * the This Week page both use. Everything below the hero — the entry rows, status pills, swipe/
+ * trash delete, Returned's "Edit & resubmit" — is unchanged; only the hero above it and the
+ * spacing around it are new.
+ *
+ * Round two (CB, Oct 2026, pointing at this hero while it still read "Total, last 90 days"): "I
+ * need this to be reflecting the two-week report, not 90 days... I should be able to toggle
+ * between the different... two-week reports... and have the date update live right there." A
+ * rolling 90-day window never lined up with anything Shawn or Daijour could act on — it wasn't
+ * even a window that matched a single pay period. This now shows ONE real pay period at a time
+ * (getPayrollPeriod, src/lib/week.ts — the exact same boundary math the Reports page's own
+ * "2-Week Report" preset uses, so the two never disagree on where a period starts and ends), with
+ * a switcher pill right above the hero CB was pointing at (same rounded-pill, round-arrow-button
+ * chrome as TeamAvailabilityWeekPanel's own week nav) stepping periodOffset between them. Every
+ * number driven by it — the switcher's own range label, the hero's range/total/entry count, and
+ * the entries list below — updates the moment periodOffset changes, no reload.
  */
 export default function LoggedHoursSection({ showHeading = true }: { showHeading?: boolean }) {
   // CB, Sept 2026: "it should only show the times that we selected... a summary of what we
   // selected" — not a calendar grid and not even a fixed week of rows with blank placeholders
-  // for days nothing happened. Just the entries that actually exist, most recent first, over a
-  // rolling recent window — same "just the real submissions, no empty slots" shape as
+  // for days nothing happened. Just the entries that actually exist, most recent first, within
+  // the selected pay period — same "just the real submissions, no empty slots" shape as
   // MyAvailabilityPreview and the Time Off list elsewhere on this page.
   const [entries, setEntries] = useState<TimeEntryDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
+  // See this component's own doc comment above — relative to getPayrollPeriod's own 0 (the
+  // most recently CLOSED period), negative steps back into past periods, positive steps forward.
+  // Opens on whatever period actually contains today (getCurrentPayrollPeriodOffset — usually 1,
+  // since 0 is deliberately the last CLOSED one), and the "Next period" button won't go past that
+  // same offset — there's nothing to show beyond the period someone's actively logging into.
+  const [periodOffset, setPeriodOffset] = useState(getCurrentPayrollPeriodOffset);
+  const currentOffset = getCurrentPayrollPeriodOffset();
   const [busyEntryId, setBusyEntryId] = useState<string | null>(null);
   const [correctionError, setCorrectionError] = useState<string | undefined>();
   // Which entry (if any) a delete is currently in flight for — see deleteEntry below.
@@ -69,11 +73,10 @@ export default function LoggedHoursSection({ showHeading = true }: { showHeading
   const [deleteError, setDeleteError] = useState<string | undefined>();
   const [deleteErrorEntryId, setDeleteErrorEntryId] = useState<string | null>(null);
 
-  async function load() {
+  async function load(offset: number) {
     setLoadState("loading");
     try {
-      const start = dateKeyDaysAgo(RECENT_DAYS);
-      const end = dateKeyDaysAgo(0);
+      const { start, end } = getPayrollPeriod(offset);
       const res = await fetch(`/api/time/timesheet?start=${start}&end=${end}`);
       if (!res.ok) throw new Error("Failed to load timesheet");
       const data = await res.json();
@@ -86,8 +89,8 @@ export default function LoggedHoursSection({ showHeading = true }: { showHeading
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-  }, []);
+    load(periodOffset);
+  }, [periodOffset]);
 
   async function submitCorrection(entryId: string, sessions: CorrectionValues) {
     setBusyEntryId(entryId);
@@ -105,7 +108,7 @@ export default function LoggedHoursSection({ showHeading = true }: { showHeading
         setCorrectionError(data.error ?? "Unable to submit your correction. Please try again.");
         return;
       }
-      await load();
+      await load(periodOffset);
     } catch {
       setCorrectionError("Unable to reach the server. Check your connection and try again.");
     } finally {
@@ -148,15 +151,56 @@ export default function LoggedHoursSection({ showHeading = true }: { showHeading
   const totalMinutes = entries.reduce((sum, e) => sum + (e.totalMinutes ?? 0), 0);
   // CB, Oct 2026: pointing at this hero next to AvailabilityView's own "Logged hours" tile
   // (which shows the current week's total) — "is the four hours pertaining to... that
-  // particular week? ... we need to specify that." This hero was always a separate, wider
-  // RECENT_DAYS window off the same hours, but never said its own date range either, so the two
-  // numbers looked unreconcilable side by side. dateKeyDaysAgo is the same helper load() already
-  // uses for the actual query, so this always matches what was fetched.
-  const rangeLabel = `${formatSlotDateShort(dateKeyDaysAgo(RECENT_DAYS))}–${formatSlotDateShort(dateKeyDaysAgo(0))}`;
+  // particular week? ... we need to specify that." getPayrollPeriod is the same helper load()
+  // already uses for the actual query, so this always matches what was fetched.
+  const period = getPayrollPeriod(periodOffset);
+  const rangeLabel = formatWeekRange(period.start, period.end);
 
   return (
     <div>
       {showHeading && <h2 className="text-sm font-medium text-muted mb-2">Logged hours</h2>}
+
+      {/* Round two (CB, Oct 2026): the pay-period switcher — same rounded-pill, round-arrow-
+          button chrome TeamAvailabilityWeekPanel's own week nav already uses, so stepping
+          between periods reads the same way it does everywhere else in the app. Rendered above
+          every loadState branch (not just "ready") so it's still usable, and "Current" still
+          offers a way back, even on a period with nothing logged yet. */}
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <span className="text-xs font-medium text-muted">Pay period</span>
+        <div className="flex items-center gap-1.5 rounded-xl border border-border bg-surface px-2 py-1.5">
+          <button
+            type="button"
+            onClick={() => setPeriodOffset((o) => o - 1)}
+            aria-label="Previous pay period"
+            className="h-6 w-6 shrink-0 rounded-full border border-border flex items-center justify-center text-xs text-muted hover:text-foreground hover:bg-black/[0.03]"
+          >
+            ‹
+          </button>
+          <span className="text-xs font-semibold min-w-[108px] text-center tabular-nums">{rangeLabel}</span>
+          {periodOffset === currentOffset ? (
+            <span className="text-[10px] font-semibold text-accent-ink bg-accent/10 rounded-full px-2 py-0.5 shrink-0">
+              Current
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setPeriodOffset(currentOffset)}
+              className="text-[10px] font-semibold text-accent-ink hover:underline shrink-0"
+            >
+              Current
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setPeriodOffset((o) => o + 1)}
+            disabled={periodOffset >= currentOffset}
+            aria-label="Next pay period"
+            className="h-6 w-6 shrink-0 rounded-full border border-border flex items-center justify-center text-xs text-muted hover:text-foreground hover:bg-black/[0.03] disabled:opacity-30 disabled:pointer-events-none"
+          >
+            ›
+          </button>
+        </div>
+      </div>
 
       {loadState === "loading" && (
         <div className="rounded-xl border border-border bg-surface p-6 animate-pulse h-64" />
@@ -170,19 +214,19 @@ export default function LoggedHoursSection({ showHeading = true }: { showHeading
 
       {loadState === "empty" && (
         <div className="rounded-xl border border-border bg-surface p-6 text-sm text-muted">
-          No hours logged in the last {RECENT_DAYS} days.
+          No hours logged for this pay period ({rangeLabel}).
         </div>
       )}
 
       {loadState === "ready" && (
         <>
           {/* Redesign (CB, Sept 2026, approved mockup): same big-number, solid-color "widget"
-              face as the This Week page's own hero pill (dashboard/week/page.tsx) — see this
-              component's own doc comment above for why this stays scoped to RECENT_DAYS rather
-              than a literal rolling week. */}
+              face as the This Week page's own hero pill (dashboard/week/page.tsx). Round two
+              (CB, Oct 2026): scoped to the switcher's selected pay period instead of a rolling
+              90-day window — see this component's own doc comment above. */}
           <div className="rounded-3xl p-6 text-white shadow-lg mb-4" style={{ background: "var(--ttc-blue)" }}>
             <p className="text-xs uppercase tracking-wide text-white/70 mb-1">
-              Total, last {RECENT_DAYS} days &middot; {rangeLabel}
+              Pay period &middot; {rangeLabel}
             </p>
             <p className="text-5xl font-bold tabular-nums leading-none tracking-tight">{formatMinutes(totalMinutes)}</p>
             <p className="text-sm font-medium text-white/75 mt-2">
@@ -239,7 +283,7 @@ export default function LoggedHoursSection({ showHeading = true }: { showHeading
               );
             })}
             <div className="px-4 py-3 flex items-center justify-between bg-black/[0.02] text-sm font-medium">
-              <span>Total, last {RECENT_DAYS} days</span>
+              <span>Total, this pay period</span>
               <span className="tabular-nums">{formatMinutes(totalMinutes)}</span>
             </div>
           </div>
