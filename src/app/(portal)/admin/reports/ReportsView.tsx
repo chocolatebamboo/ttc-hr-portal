@@ -30,14 +30,37 @@ function thisWeekRange(): { start: string; end: string } {
 /** Round four (CB, Oct 2026): "a 'last 2 weeks' button... matching Shawn's biweekly payroll
  *  pull cadence" — the 14 days ending today, not a calendar-aligned pair of weeks, since what
  *  matters here is matching whenever Shawn actually runs payroll, not the calendar's own week
- *  boundaries. */
+ *  boundaries.
+ *
+ *  Round seven (CB, Oct 2026, the day before a period actually rolled over: "I just want to make
+ *  sure that when we see the two week report that it's reflective of the last one" — a direct
+ *  code check confirmed the gap: this used to just be "the 14 days ending whenever you click
+ *  Generate," so running it even a day or two after a period closed would silently drift onto a
+ *  mix of the old and new periods instead of staying on the one that actually just closed). Now
+ *  anchored to TTC's real biweekly payroll calendar instead of today's own date.
+ *  PAYROLL_PERIOD_END_ANCHOR is one confirmed period's last day (Thu, Oct 9 2026 — CB: "tomorrow
+ *  is Friday... the payroll is every two weeks on a Friday... it's going to restart pretty much
+ *  tomorrow," i.e. the period ending Oct 9 closes and the next one starts Oct 10); every other
+ *  period end, past or future, falls exactly a whole number of 14-day blocks from that one date.
+ *  This finds the most recently CLOSED period — the latest period-end that isn't after today —
+ *  so "2-Week Report" keeps showing Sep 26–Oct 9 all the way through Oct 10–23 being in progress,
+ *  and only flips over to Oct 10–23 once THAT period itself closes, no matter what day Sean or
+ *  Daijour actually happens to click the button. */
+const PAYROLL_PERIOD_END_ANCHOR = "2026-10-09";
+const PAYROLL_PERIOD_DAYS = 14;
+
 function lastTwoWeeksRange(): { start: string; end: string } {
-  const end = todayDateKey();
-  const endDate = new Date(`${end}T00:00:00`);
+  const toKey = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const anchor = new Date(`${PAYROLL_PERIOD_END_ANCHOR}T00:00:00`);
+  const today = new Date(`${todayDateKey()}T00:00:00`);
+  const daysSinceAnchor = Math.round((today.getTime() - anchor.getTime()) / 86400000);
+  const periodsElapsed = Math.floor(daysSinceAnchor / PAYROLL_PERIOD_DAYS);
+  const endDate = new Date(anchor);
+  endDate.setDate(endDate.getDate() + periodsElapsed * PAYROLL_PERIOD_DAYS);
   const startDate = new Date(endDate);
-  startDate.setDate(startDate.getDate() - 13);
-  const start = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, "0")}-${String(startDate.getDate()).padStart(2, "0")}`;
-  return { start, end };
+  startDate.setDate(startDate.getDate() - (PAYROLL_PERIOD_DAYS - 1));
+  return { start: toKey(startDate), end: toKey(endDate) };
 }
 
 // Same local-copy convention every other consumer of "initials from a name" already follows in
@@ -131,6 +154,15 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
   // regularExpanded above): switching people or dates should never leave a stale open panel.
   const [switcherOpen, setSwitcherOpen] = useState(false);
 
+  // Round seven (CB: "I should be able to toggle, like maybe there's a drop down... to switch in
+  // between like this week or this month... if I wanted to change the two week report pill"):
+  // the period preset pill used to be a plain read-only label — this makes it a dropdown, same
+  // open/close pattern as switcherOpen just above, so she can jump straight to This Week/This
+  // Month/2-Week Report from inside the single-employee card instead of leaving it to use the
+  // preset buttons further up the page. Reset to closed on every generate() for the same reason
+  // switcherOpen is.
+  const [periodMenuOpen, setPeriodMenuOpen] = useState(false);
+
   async function generate(s: string, e: string, empId: string) {
     setLoadState("loading");
     setErrorMessage("");
@@ -138,6 +170,7 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
     setRegularEntries(null);
     setRegularError("");
     setSwitcherOpen(false);
+    setPeriodMenuOpen(false);
     try {
       const query = `?start=${s}&end=${e}${empId ? `&employeeId=${empId}` : ""}`;
       const res = await fetch(`/api/payroll/hours${query}`);
@@ -642,11 +675,60 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
                       </svg>
                     </button>
                   </div>
-                  {PERIOD_PRESET_LABEL[periodPreset] && (
-                    <span className="text-[11px] font-bold uppercase tracking-wide text-accent-ink bg-white rounded-full px-3 py-1">
-                      {PERIOD_PRESET_LABEL[periodPreset]}
-                    </span>
-                  )}
+                  {/* Round seven (CB): the pill itself is now the dropdown's own trigger — same
+                      "the label is the control" shape the name switcher right above already
+                      uses, rather than a separate menu button bolted on next to it. Shown even
+                      on a hand-picked "custom" range (previously blank) so there's always a way
+                      back into a preset from here. */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setPeriodMenuOpen((v) => !v)}
+                      aria-expanded={periodMenuOpen}
+                      className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-accent-ink bg-white rounded-full pl-3 pr-2 py-1"
+                    >
+                      {PERIOD_PRESET_LABEL[periodPreset] ?? "Choose period"}
+                      <svg
+                        width="11"
+                        height="11"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="3"
+                        aria-hidden="true"
+                        className={`shrink-0 transition-transform ${periodMenuOpen ? "rotate-180" : ""}`}
+                      >
+                        <path d="M6 9l6 6 6-6" />
+                      </svg>
+                    </button>
+                    {periodMenuOpen && (
+                      <div className="absolute right-0 top-full mt-1.5 bg-white rounded-xl shadow-lg overflow-hidden w-40 z-10">
+                        {(
+                          [
+                            { key: "week" as const, label: "This Week", run: useThisWeek },
+                            { key: "month" as const, label: "This Month", run: useThisMonth },
+                            { key: "twoWeeks" as const, label: "2-Week Report", run: useLastTwoWeeks },
+                          ]
+                        ).map((opt) => (
+                          <button
+                            key={opt.key}
+                            type="button"
+                            onClick={() => {
+                              opt.run();
+                              setPeriodMenuOpen(false);
+                            }}
+                            className={`w-full px-3.5 py-2 text-left text-sm border-t border-border first:border-t-0 ${
+                              periodPreset === opt.key
+                                ? "bg-accent/10 text-accent-ink font-semibold"
+                                : "text-foreground hover:bg-black/[0.02]"
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -706,7 +788,15 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
                           key={entry.id}
                           className={`flex items-center justify-between gap-3 py-2 text-xs ${i > 0 ? "border-t border-border" : ""}`}
                         >
-                          <span className="font-medium min-w-[88px] shrink-0">{formatShortDate(entry.workDate)}</span>
+                          {/* CB: "right now I'm seeing invalid date" — entry.workDate here is the
+                              full ISO datetime string the API returns, not a bare "YYYY-MM-DD"
+                              key; formatShortDate (above) builds a Date from `${dateKey}T00:00:00`,
+                              which only parses correctly off the sliced date. Every other
+                              .workDate consumer in this app already slices to the first 10
+                              characters before using it as a date key (TimesheetTable,
+                              TimesheetView, LoggedHoursSection, TimesheetCalendar, payroll.ts,
+                              attendance-admin.ts, shifts.ts) — this was the one outlier. */}
+                          <span className="font-medium min-w-[88px] shrink-0">{formatShortDate(entry.workDate.slice(0, 10))}</span>
                           <span className="text-muted flex-1 px-2">
                             {entry.sessions.map((s) => `${formatClockTime(s.clockIn)} – ${formatClockTime(s.clockOut)}`).join(", ")}
                           </span>
