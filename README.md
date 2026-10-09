@@ -284,6 +284,17 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   (null until sent — or skipped by preference — stamped once, never touched again) so a later
   run never double-sends. Runs from `POST /api/cron/notification-emails`, same 15-minute schedule
   and shared `CRON_SECRET` as the other reminder-style jobs.
+- **Task review reminders** — CB, Oct 2026, round two: "we get some reminders to approve their
+  tasks... I don't want them to forget." `DATE_TASK_SUBMITTED` (above) only ever fires once, right
+  when an employee submits a task — nothing followed up if it just sat there. `src/lib/date-task-
+  reminders.ts` closes that gap: once a task's been `AWAITING_REVIEW` for 24 hours, and once a day
+  again for as long as it keeps sitting there unreviewed, it re-notifies (and emails, same as every
+  other operational type) the exact same reviewers (admins plus that employee's own supervisor) the
+  original submit notification already went to, via the same `resolveTaskReviewerIds` lookup
+  (`src/lib/date-tasks.ts`). `DateTask.lastReviewReminderAt` tracks the last one sent so a task
+  that's just been approved or returned simply stops matching and the nagging stops on its own —
+  no separate "cancel the reminder" step needed. Runs from `POST /api/cron/date-task-reminders`,
+  same 15-minute schedule and shared `CRON_SECRET` as the other reminder-style jobs.
 - **Scheduled messages** — "Schedule message" (Sept 2026, part of the reply-chain redesign):
   composing a DM lets you pick a future date/time instead of sending right away
   (`src/lib/direct-messages.ts`'s `postMessage`/`sendDueScheduledMessages`). A scheduled message
@@ -296,7 +307,7 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   schedule and `CRON_SECRET`-protected shape as the three jobs above — a message scheduled for,
   say, 3:00 PM goes out sometime within that run's 15-minute window, not necessarily on the exact
   minute.
-- **What actually calls those six cron endpoints on a schedule** — a GitHub Actions workflow
+- **What actually calls those seven cron endpoints on a schedule** — a GitHub Actions workflow
   (`.github/workflows/reminder-emails.yml`), not a Render Cron Job: Render's Cron Jobs have no
   free tier, and this repo already lives on GitHub, so a scheduled Action reuses an account
   that already exists rather than adding a new paid resource. It needs a repository secret
