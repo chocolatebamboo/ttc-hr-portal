@@ -37,15 +37,23 @@ export function weekOffsetForDate(dateKey: string): number {
 
 /** TTC's real biweekly payroll calendar (Round four/seven, Oct 2026 — see ReportsView's own
  *  lastTwoWeeksRange, the original home of this logic, for the full story). PAYROLL_PERIOD_END_
- *  ANCHOR is one confirmed period's last day (Thu, Oct 9 2026 — CB: "tomorrow is Friday... the
- *  payroll is every two weeks on a Friday... it's going to restart pretty much tomorrow," i.e.
- *  the period ending Oct 9 closes and the next one starts Oct 10); every other period end, past
- *  or future, falls exactly a whole number of 14-day blocks from that one date. Pulled out to a
- *  shared home (Round eight, CB, on LoggedHoursSection's own "Total, last 90 days" card: "I need
- *  this to be reflecting the two-week report... toggle between the different two-week reports")
- *  so the Reports page's "2-Week Report" preset and the employee-facing Logged hours widget
- *  always agree on exactly where one period ends and the next begins. */
-export const PAYROLL_PERIOD_END_ANCHOR = "2026-10-09";
+ *  ANCHOR is one confirmed period's last day; every other period end, past or future, falls
+ *  exactly a whole number of 14-day blocks from that one date. Pulled out to a shared home
+ *  (Round eight, CB, on LoggedHoursSection's own "Total, last 90 days" card: "I need this to be
+ *  reflecting the two-week report... toggle between the different two-week reports") so the
+ *  Reports page's "2-Week Report" preset and the employee-facing Logged hours widget always
+ *  agree on exactly where one period ends and the next begins.
+ *
+ *  Round nine (CB, Oct 9 2026, the Friday this anchor itself names: "the next pay period starts
+ *  today... it's every two weeks... starting from today, that's the pay period"): this was first
+ *  written as "2026-10-09", on the mistaken belief that Oct 9 2026 was a Thursday closing out a
+ *  period — it's actually a Friday, and CB confirmed direct and unambiguous that Oct 9 itself is
+ *  a new period's FIRST day (Oct 9 – Oct 22), not a period's last day. Corrected to the Thursday
+ *  right before it, 2026-10-08, the true last day of the period that closed the day before this
+ *  anchor needed fixing — every period this drives (Reports' 2-Week Report, LoggedHoursSection,
+ *  My Tasks' pay-period paging) shifts by this same one day, past and future alike, since they
+ *  all read off this one constant rather than their own copies. */
+export const PAYROLL_PERIOD_END_ANCHOR = "2026-10-08";
 export const PAYROLL_PERIOD_DAYS = 14;
 
 /** The most recently CLOSED 14-day payroll period as of today, offset by `offsetPeriods` whole
