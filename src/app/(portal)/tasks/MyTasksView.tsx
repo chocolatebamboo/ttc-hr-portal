@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { DateTaskDTO } from "@/types";
 import DateTaskRow from "@/components/DateTaskRow";
+import PayrollPeriodSwitcher from "@/components/PayrollPeriodSwitcher";
 import { ChecklistIcon, ChevronDownIcon } from "@/components/icons";
 import { formatSlotDate } from "@/lib/availability-format";
-import { getWeek, formatWeekRange, weekOffsetForDate } from "@/lib/week";
+import { getPayrollPeriod, getCurrentPayrollPeriodOffset, payrollPeriodOffsetForDate } from "@/lib/week";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -35,40 +36,59 @@ function priorityRank(t: DateTaskDTO): number {
  * that yellow background... is kind of throwing me off" — then, after a first attempt that
  * stacked/collapsed whole weeks on one page: "I don't want to see like, oh, the next week or
  * last week and stuff like that... I kind of want to be able to toggle throughout the days"):
- * one week on screen at a time, the exact same prev/next/"This week" strip already used on Team
- * Availability (TeamAvailabilityWeekPanel) and reused here via the same getWeek/formatWeekRange
- * helpers (src/lib/week.ts) rather than a pattern invented just for this page. The old "Needs
- * your attention / In progress / Completed" stat tiles (counted across every task ever assigned)
- * are replaced by a small color legend — a running total across all time stopped being the point
- * once the page itself only ever shows one week's worth at a time; AWAITING_REVIEW's card color
- * is now green instead of amber (see DateTaskRow's own TASK_TONE / status-tone.ts's IN_REVIEW),
- * confirmed by CB: "I like how submit awaiting review is there."
+ * one window of time on screen at a time, prev/next arrows plus a badge for the current one (same
+ * shell TeamAvailabilityWeekPanel's own week nav uses) rather than everything stacked on one
+ * page. The old "Needs your attention / In progress / Completed" stat tiles (counted across
+ * every task ever assigned) are replaced by a small color legend — a running total across all
+ * time stopped being the point once the page itself only ever shows one window's worth at a
+ * time; AWAITING_REVIEW's card color is now green instead of amber (see DateTaskRow's own
+ * TASK_TONE / status-tone.ts's IN_REVIEW), confirmed by CB: "I like how submit awaiting review
+ * is there."
  *
  * The per-date "Tasks" link on Availability (AvailabilityCalendar.tsx) and My Schedule
- * (ScheduleView.tsx) still points at /tasks?date=<date>; weekOffsetForDate turns that date into
- * the week offset containing it, so landing here jumps straight to the right week (not
- * necessarily "this week") instead of a now-nonexistent full list, same "deep-link scrolls you
- * to it and briefly highlights it" shape as before — just scoped to a week instead of a page.
+ * (ScheduleView.tsx) still points at /tasks?date=<date>; this jumps straight to the window
+ * containing that date (not necessarily "now") instead of a now-nonexistent full list, same
+ * "deep-link scrolls you to it and briefly highlights it" shape as before — just scoped to one
+ * window instead of a page.
  *
  * Oct 2026, round three (CB: "I should be able to approve as well on the tasks page as well" —
  * until now the only place an admin/supervisor could actually approve a task was buried inside
  * that employee's own date on Availability/Schedule): a second tab, admin/supervisor only, for
  * every outstanding task across the team (listAllAwaitingReviewDateTasks via
  * /api/date-tasks/awaiting-review — org-wide for an admin, narrowed to just Daijour's own
- * reports for a SUPERVISOR). Deliberately a flat newest-first queue rather than the week-paged
- * view "My tasks" uses — a reviewer is clearing a backlog, not browsing a calendar.
+ * reports for a SUPERVISOR).
+ *
+ * Oct 2026, round four (CB, after reporting she couldn't find a specific team member's task —
+ * it turned out to exist, just submitted over two weeks earlier and so already outside both this
+ * page's one-week "My tasks" window AND entirely unbounded-but-undiscoverable in "Awaiting
+ * review"'s flat list: "I should be able to see all the tasks that's [under] review for that
+ * period of time... based off of those two week intervals"): both tabs now page by the same
+ * 2-week pay period getPayrollPeriod/PayrollPeriodSwitcher (src/lib/week.ts,
+ * src/components/PayrollPeriodSwitcher.tsx) use everywhere else in the app, instead of "My
+ * tasks"' old calendar-week window and "Awaiting review"'s old no-window-at-all flat queue —
+ * bucketed by each task's own taskDate (matching how "My tasks" already bucketed), so paging
+ * back one period surfaces a two-and-a-half-week-old submission exactly where it is instead of
+ * requiring an unbounded scroll or several week-by-week clicks to find it. "Awaiting review"'s
+ * own tab badge count stays unscoped (every outstanding task, not just this period's) so it
+ * keeps working as a true backlog indicator even while viewing an empty period.
  */
 export default function MyTasksView({ employeeId, canReview }: { employeeId: string; canReview: boolean }) {
   const [tab, setTab] = useState<"mine" | "review">("mine");
   const [tasks, setTasks] = useState<DateTaskDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
-  const [offset, setOffset] = useState(0);
+  // Round four — a getPayrollPeriod offset (see PayrollPeriodSwitcher's own doc comment), not a
+  // calendar-week offset the way this used to be. Opens on whichever period actually contains
+  // today, same reasoning as LoggedHoursSection's own switcher.
+  const [offset, setOffset] = useState(getCurrentPayrollPeriodOffset);
   const [focusDate, setFocusDate] = useState<string | null>(null);
   const [highlightDate, setHighlightDate] = useState<string | null>(null);
   const hasFocused = useRef(false);
 
   const [reviewTasks, setReviewTasks] = useState<DateTaskDTO[]>([]);
   const [reviewLoadState, setReviewLoadState] = useState<LoadState>("loading");
+  // Round four — same idea as `offset` above, just a separate offset so paging "My tasks" and
+  // "Awaiting review" don't move each other's window.
+  const [reviewOffset, setReviewOffset] = useState(getCurrentPayrollPeriodOffset);
 
   // Oct 2026, round two (CB: "it should say completed tasks in the tasks page... and it update
   // there"): same closed-by-default Completed group DateTasksSection's Home widget already has,
@@ -137,7 +157,7 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
     if (date) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setFocusDate(date);
-      setOffset(weekOffsetForDate(date));
+      setOffset(payrollPeriodOffsetForDate(date));
       window.history.replaceState(null, "", "/tasks");
     }
   }, []);
@@ -173,21 +193,27 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
     loadCompletedReview();
   }
 
-  const week = getWeek(offset);
-  const weekTasks = [...tasks.filter((t) => t.taskDate >= week.start && t.taskDate <= week.end)].sort((a, b) =>
+  const period = getPayrollPeriod(offset);
+  const weekTasks = [...tasks.filter((t) => t.taskDate >= period.start && t.taskDate <= period.end)].sort((a, b) =>
     a.taskDate === b.taskDate ? priorityRank(a) - priorityRank(b) : a.taskDate < b.taskDate ? -1 : 1
   );
-  // The banner only shows while the deep-linked date's own week is actually on screen — paging
+  // The banner only shows while the deep-linked date's own period is actually on screen — paging
   // away from it (offset changes) retires the banner on its own, no separate dismiss-vs-navigate
   // bookkeeping needed.
-  const showBanner = focusDate !== null && focusDate >= week.start && focusDate <= week.end;
+  const showBanner = focusDate !== null && focusDate >= period.start && focusDate <= period.end;
+
+  // Round four — reviewTasks itself is never date-bounded server-side (listAllAwaitingReviewDateTasks
+  // is a flat "everything outstanding" query), so the period scoping happens here, same as
+  // weekTasks above, keyed off each task's own taskDate.
+  const reviewPeriod = getPayrollPeriod(reviewOffset);
+  const periodReviewTasks = reviewTasks.filter((t) => t.taskDate >= reviewPeriod.start && t.taskDate <= reviewPeriod.end);
 
   return (
     <div className="max-w-3xl">
       <div className="mb-5">
         <h1 className="page-title text-2xl">My Tasks</h1>
         <p className="text-sm text-muted mt-0.5">
-          {tab === "mine" ? "Everything assigned to you, one week at a time." : "Every outstanding task across your team, oldest first."}
+          {tab === "mine" ? "Everything assigned to you, one pay period at a time." : "Every outstanding task across your team, by pay period."}
         </p>
       </div>
 
@@ -251,32 +277,7 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
           )}
 
           <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-            <div className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2">
-              <button
-                type="button"
-                onClick={() => setOffset((o) => o - 1)}
-                className="h-7 w-7 rounded-full border border-border flex items-center justify-center text-sm text-muted hover:text-foreground hover:bg-black/[0.03]"
-                aria-label="Previous week"
-              >
-                ‹
-              </button>
-              <span className="text-sm font-semibold min-w-[150px] text-center tabular-nums">
-                Week of {formatWeekRange(week.start, week.end)}
-              </span>
-              {offset === 0 && (
-                <span className="text-[11px] font-semibold text-accent-ink bg-accent/10 rounded-full px-2.5 py-0.5">
-                  This week
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={() => setOffset((o) => o + 1)}
-                className="h-7 w-7 rounded-full border border-border flex items-center justify-center text-sm text-muted hover:text-foreground hover:bg-black/[0.03]"
-                aria-label="Next week"
-              >
-                ›
-              </button>
-            </div>
+            <PayrollPeriodSwitcher offset={offset} onOffsetChange={setOffset} />
 
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-medium text-muted">
               <LegendSwatch color="#b45309" label="Needs your action" />
@@ -288,7 +289,7 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
           {weekTasks.length === 0 ? (
             <div className="rounded-xl border border-border bg-surface p-8 text-center text-sm text-muted flex flex-col items-center gap-2">
               <ChecklistIcon className="h-8 w-8 text-muted/60" />
-              Nothing assigned for this week.
+              Nothing assigned for this period.
             </div>
           ) : (
             <div className="space-y-2.5">
@@ -326,6 +327,17 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
             </div>
           )}
 
+          {reviewLoadState === "ready" && (
+            <div className="mb-4">
+              <PayrollPeriodSwitcher offset={reviewOffset} onOffsetChange={setReviewOffset} />
+            </div>
+          )}
+
+          {/* Round four: the unscoped "there's nothing outstanding anywhere" case reads
+              differently from "nothing in THIS period" — the first means the queue is actually
+              empty, the second means paging to a different period (most often Current, one tap
+              away on the switcher above) will find it. This exact distinction is what CB's own
+              report ("I'm not seeing the tasks for Haile") turned out to be. */}
           {reviewLoadState === "ready" && reviewTasks.length === 0 && (
             <div className="rounded-xl border border-border bg-surface p-8 text-center text-sm text-muted flex flex-col items-center gap-2">
               <ChecklistIcon className="h-8 w-8 text-muted/60" />
@@ -333,9 +345,16 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
             </div>
           )}
 
-          {reviewLoadState === "ready" && reviewTasks.length > 0 && (
+          {reviewLoadState === "ready" && reviewTasks.length > 0 && periodReviewTasks.length === 0 && (
+            <div className="rounded-xl border border-border bg-surface p-8 text-center text-sm text-muted flex flex-col items-center gap-2">
+              <ChecklistIcon className="h-8 w-8 text-muted/60" />
+              Nothing awaiting review in this period — try paging to a different one.
+            </div>
+          )}
+
+          {reviewLoadState === "ready" && periodReviewTasks.length > 0 && (
             <div className="space-y-2.5">
-              {reviewTasks.map((t) => (
+              {periodReviewTasks.map((t) => (
                 <DateTaskRow key={t.id} task={t} viewerId={employeeId} canReview showDate showEmployee onChanged={loadReviewAll} />
               ))}
             </div>
