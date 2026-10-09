@@ -38,7 +38,18 @@ function colorFor(id: string): string {
 /** One row inside the stat-tile menu — same visual shape as TeamScheduleGlance's own
  *  ShiftGlanceRow (avatar, name, job title, time, status pill), kept as its own local copy here
  *  rather than imported since ShiftGlanceRow isn't exported from that file (it's a same-page
- *  helper there, same as initialsOf/colorFor above). */
+ *  helper there, same as initialsOf/colorFor above).
+ *
+ * Bugfix (Oct 2026, CB, a team member's name reading as blank on the "Scheduled today"/"In
+ * progress" panel, the job title underneath it still showing fine): this panel (StatMenu, just
+ * below) is a plain white `bg-surface` card, but it renders in-flow *inside* the pink hero's own
+ * outer div, which sets `text-white` on itself for the big clock face and the two stat-tile
+ * labels. Every other bit of text in this row has its own explicit color (`text-muted` for the
+ * job title and the time, an explicit `text-white` on the avatar-initials span, which is
+ * correct there since that one really does sit on a colored circle) — this row's name line was
+ * the only one with no color of its own, so it quietly inherited that ancestor's white instead
+ * of the normal dark text, landing white-on-white inside the white card. `text-foreground`
+ * below pins it to the real body text color regardless of what any ancestor sets. */
 function MenuRow({ s, onNavigate }: { s: AdminShiftDTO; onNavigate: () => void }) {
   return (
     <Link
@@ -62,7 +73,7 @@ function MenuRow({ s, onNavigate }: { s: AdminShiftDTO; onNavigate: () => void }
         </span>
       )}
       <div className="min-w-0 flex-1">
-        <p className="text-[13.5px] font-semibold truncate leading-tight">{s.employeeName}</p>
+        <p className="text-[13.5px] font-semibold text-foreground truncate leading-tight">{s.employeeName}</p>
         <p className="text-[11.5px] text-muted truncate leading-tight">{s.employeeJobTitle}</p>
       </div>
       <div className="text-right shrink-0">
@@ -318,7 +329,7 @@ export default function AdminHomeHero({
           </div>
 
           {/* In-flow, not absolute — see StatMenu's own doc comment. Sits right between the
-              tiles and "Schedule someone," pushing that button (and everything below it) down
+              tiles and "Schedule someone," pushing that button (and everything after it) down
               instead of floating on top of it. */}
           {openFrom && (
             <div className="mb-5">
