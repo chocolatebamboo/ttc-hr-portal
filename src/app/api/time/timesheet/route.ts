@@ -30,7 +30,10 @@ export async function GET(request: NextRequest) {
           employeeId: targetEmployeeId,
           workDate: { gte: new Date(`${start}T00:00:00.000Z`), lte: new Date(`${end}T23:59:59.999Z`) },
         },
-        include: { sessions: { orderBy: { clockIn: "asc" } } },
+        // The shift relation is included here (and only here — see TimeSessionDTO's own doc
+        // comment) so the Timesheet page can show what was actually scheduled right next to what
+        // got recorded, not just flag a mismatch without saying what it was a mismatch against.
+        include: { sessions: { orderBy: { clockIn: "asc" }, include: { shift: { select: { startTime: true, endTime: true } } } } },
         orderBy: { workDate: "asc" },
       });
 
@@ -39,12 +42,17 @@ export async function GET(request: NextRequest) {
       // TimeEntry itself.
       return Promise.all(
         rows.map(async (row) => {
-          if (row.status !== "RETURNED") return { ...row, reviewComment: null };
+          const sessions = row.sessions.map(({ shift, ...session }) => ({
+            ...session,
+            scheduledStartTime: shift?.startTime ?? null,
+            scheduledEndTime: shift?.endTime ?? null,
+          }));
+          if (row.status !== "RETURNED") return { ...row, sessions, reviewComment: null };
           const lastReturn = await tx.timeEntryAuditEvent.findFirst({
             where: { timeEntryId: row.id, action: "TIMESHEET_RETURNED" },
             orderBy: { createdAt: "desc" },
           });
-          return { ...row, reviewComment: lastReturn?.comment ?? null };
+          return { ...row, sessions, reviewComment: lastReturn?.comment ?? null };
         })
       );
     });
