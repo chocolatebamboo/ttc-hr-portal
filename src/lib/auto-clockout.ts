@@ -91,7 +91,9 @@ export async function autoCloseStaleClockIns(): Promise<AutoClockoutResult> {
 
         const autoCloseNote = usedSchedule
           ? "Automatically clocked out at the end of their scheduled shift — forgot to clock out."
-          : `Automatically clocked out after being open ${AUTO_CLOCKOUT_CAP_MS / 3_600_000} hours — no scheduled shift to go by.`;
+          : shift
+            ? `Automatically clocked out after being open ${AUTO_CLOCKOUT_CAP_MS / 3_600_000} hours — their scheduled shift runs longer than that.`
+            : `Automatically clocked out after being open ${AUTO_CLOCKOUT_CAP_MS / 3_600_000} hours — no scheduled shift to go by.`;
         const newExceptionReason = cleanClose
           ? null
           : alreadyFlagged && session.exceptionReason
