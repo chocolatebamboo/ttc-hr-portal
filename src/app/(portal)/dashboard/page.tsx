@@ -176,12 +176,6 @@ export default async function DashboardPage() {
           dismissal now works. */}
       <DashboardNotifications className="animate-in animate-in-2 mt-4" initial={notificationsSummary} />
 
-      {/* Oct 2026 (CB: "those notifications of like task approval and stuff like that needs to
-          go up top" — moved from its old spot further down the mobile stack / desktop sidebar to
-          sit right under the banners above, same top-of-page prominence, on both mobile and
-          desktop, before announcements or anything else). */}
-      <DateTasksSection className="animate-in animate-in-2 mt-4" employeeId={employee.id} />
-
       {/* Mobile: bold color-block layout (CB's Sept 2026 aesthetic ask, reference screenshots
           in chat). Desktop below kept its own two-column layout rather than copying this
           single-column style — see that block's own comment for how section order was brought
@@ -195,6 +189,19 @@ export default async function DashboardPage() {
             should not be there forever" is a separate, already-shipped default-expiration change,
             not a layout change. */}
         <AnnouncementsSection className="animate-in animate-in-1" initial={announcements} />
+
+        {/* Oct 2026, round two (CB: "make sure that the announcements is always on the top...
+            announcements and then the task and then the thing, like as far as the hierarchy
+            goes"): moved from above Announcements to right after it — same top-of-page
+            prominence as before, just one slot lower in the stack. canReview (same
+            canSeeAdminHomeDashboard gate every other admin-only Home fetch below already uses)
+            switches this into "Team tasks" mode — see DateTasksSection's own doc comment for
+            what that adds. */}
+        <DateTasksSection
+          className="animate-in animate-in-1"
+          employeeId={employee.id}
+          canReview={canSeeAdminHomeDashboard(employee)}
+        />
 
         <div className="animate-in animate-in-2">
           {canSeeAdminHomeDashboard(employee) ? (
@@ -283,6 +290,15 @@ export default async function DashboardPage() {
           stays out of this column entirely rather than moving somewhere else in it; the mobile
           block above keeps its own copy unchanged (variant="mobile"), this is desktop-only. */}
       <AnnouncementsSection className="hidden md:block animate-in animate-in-1 mt-5" initial={announcements} />
+
+      {/* Same reorder as the mobile block above (Announcements, then Team tasks, then the rest)
+          — desktop never had this widget at all before (see this file's own prior comment
+          history), so this is its first appearance here, not just a move. */}
+      <DateTasksSection
+        className="hidden md:block animate-in animate-in-1 mt-5"
+        employeeId={employee.id}
+        canReview={canSeeAdminHomeDashboard(employee)}
+      />
 
       <div className="hidden md:grid grid-cols-1 lg:grid-cols-3 gap-5 mt-5">
         <div className="lg:col-span-2 space-y-5">
