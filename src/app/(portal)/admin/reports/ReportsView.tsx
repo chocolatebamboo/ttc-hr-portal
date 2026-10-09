@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getWeek, formatWeekRange } from "@/lib/week";
+import { getWeek, formatWeekRange, getPayrollPeriod } from "@/lib/week";
 import { formatClockTime } from "@/lib/time";
 import ActivityHistoryView from "./ActivityHistoryView";
 import type { PayrollHoursReportDTO, TimeEntryDTO } from "@/types";
@@ -45,22 +45,14 @@ function thisWeekRange(): { start: string; end: string } {
  *  This finds the most recently CLOSED period — the latest period-end that isn't after today —
  *  so "2-Week Report" keeps showing Sep 26–Oct 9 all the way through Oct 10–23 being in progress,
  *  and only flips over to Oct 10–23 once THAT period itself closes, no matter what day Sean or
- *  Daijour actually happens to click the button. */
-const PAYROLL_PERIOD_END_ANCHOR = "2026-10-09";
-const PAYROLL_PERIOD_DAYS = 14;
-
+ *  Daijour actually happens to click the button.
+ *
+ *  Round eight (CB, Oct 2026, on LoggedHoursSection's own pay-period card): this period math is
+ *  now the shared getPayrollPeriod (src/lib/week.ts) so the Reports page and the employee-facing
+ *  Logged hours widget can't drift apart on where one period ends and the next begins — this is
+ *  just that same lookup at offset 0 (the current/most-recently-closed period). */
 function lastTwoWeeksRange(): { start: string; end: string } {
-  const toKey = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  const anchor = new Date(`${PAYROLL_PERIOD_END_ANCHOR}T00:00:00`);
-  const today = new Date(`${todayDateKey()}T00:00:00`);
-  const daysSinceAnchor = Math.round((today.getTime() - anchor.getTime()) / 86400000);
-  const periodsElapsed = Math.floor(daysSinceAnchor / PAYROLL_PERIOD_DAYS);
-  const endDate = new Date(anchor);
-  endDate.setDate(endDate.getDate() + periodsElapsed * PAYROLL_PERIOD_DAYS);
-  const startDate = new Date(endDate);
-  startDate.setDate(startDate.getDate() - (PAYROLL_PERIOD_DAYS - 1));
-  return { start: toKey(startDate), end: toKey(endDate) };
+  return getPayrollPeriod(0);
 }
 
 // Same local-copy convention every other consumer of "initials from a name" already follows in
