@@ -24,7 +24,12 @@ name: Reminder emails
 #     every in-app Notification (src/lib/notifications.ts's writeNotification — shift/availability/
 #     PTO/task/announcement/message events) that hasn't been emailed yet, per that recipient's own
 #     My Profile > Notifications preferences for the two Oct 2026 types.)
-# All six are idempotent/self-limiting server-side (dedup tracking for the reminder and
+#   - POST /api/cron/date-task-reminders (src/lib/date-task-reminders.ts — CB, Oct 2026, round
+#     two: "we get some reminders to approve their tasks... I don't want them to forget." The
+#     follow-up to DATE_TASK_SUBMITTED's one-time submit notification: once a task's sat in
+#     AWAITING_REVIEW for 24 hours, and once a day again for as long as it keeps sitting there,
+#     re-notifies the same reviewers.)
+# All seven are idempotent/self-limiting server-side (dedup tracking for the reminder and
 # notification-email jobs, auto-clockout only ever touches a session that's already past its cap
 # so a late or doubled-up run can't force-close something early, and scheduled-messages only ever
 # flips a row that's still unsent past its own due time) and tolerate a few minutes of scheduling
@@ -74,4 +79,8 @@ jobs:
       - name: Notification emails
         run: |
           curl -sS -X POST https://ttc-hr-portal.onrender.com/api/cron/notification-emails \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+      - name: Date task review reminders
+        run: |
+          curl -sS -X POST https://ttc-hr-portal.onrender.com/api/cron/date-task-reminders \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
