@@ -43,10 +43,63 @@ function escapePdfText(value: string): string {
     .replace(/[“”]/g, '"')
     .replace(/–/g, "\x96")
     .replace(/—/g, "\x97")
+    .replace(/…/g, "\x85")
     .replace(/\\/g, "\\\\")
     .replace(/\(/g, "\\(")
     .replace(/\)/g, "\\)")
     .replace(/[^\x20-\xff]/g, "?");
+}
+
+// Helvetica/Helvetica-Bold glyph widths (Adobe's own standard-14 AFM metrics, 1000 units per
+// em) for the printable ASCII range, plus the handful of extra WinAnsi codepoints
+// escapePdfText above actually emits (– — … ·) — curly quotes get normalized to straight ones
+// before any of this runs, so they never reach here as the actual curly glyphs. Round ten (CB,
+// on a downloaded Payroll Hours report, a long Job Title running straight into the Regular-
+// hours number next to it: "the words are kind of jumbled up on the PDF... if titles are too
+// long"): this file has no access to a real font's metrics otherwise, being a dependency-free
+// writer (see this file's own top-of-file doc comment on why) — measureText/truncateToWidth
+// below use this table to find out how wide a string will actually render, so a column that's
+// too narrow for its content can truncate with an ellipsis instead of silently overlapping
+// whatever's drawn next to it.
+const HELV_WIDTHS: Record<number, number> = {
+  0x20: 278, 0x21: 278, 0x22: 355, 0x23: 556, 0x24: 556, 0x25: 889, 0x26: 667, 0x27: 191,
+  0x28: 333, 0x29: 333, 0x2a: 389, 0x2b: 584, 0x2c: 278, 0x2d: 333, 0x2e: 278, 0x2f: 278,
+  0x30: 556, 0x31: 556, 0x32: 556, 0x33: 556, 0x34: 556, 0x35: 556, 0x36: 556, 0x37: 556,
+  0x38: 556, 0x39: 556, 0x3a: 278, 0x3b: 278, 0x3c: 584, 0x3d: 584, 0x3e: 584, 0x3f: 556,
+  0x40: 1015, 0x41: 667, 0x42: 667, 0x43: 722, 0x44: 722, 0x45: 667, 0x46: 611, 0x47: 778,
+  0x48: 722, 0x49: 278, 0x4a: 500, 0x4b: 667, 0x4c: 556, 0x4d: 833, 0x4e: 722, 0x4f: 778,
+  0x50: 667, 0x51: 778, 0x52: 722, 0x53: 667, 0x54: 611, 0x55: 722, 0x56: 667, 0x57: 944,
+  0x58: 667, 0x59: 667, 0x5a: 611, 0x5b: 278, 0x5c: 278, 0x5d: 278, 0x5e: 469, 0x5f: 556,
+  0x60: 333, 0x61: 556, 0x62: 556, 0x63: 500, 0x64: 556, 0x65: 556, 0x66: 278, 0x67: 556,
+  0x68: 556, 0x69: 222, 0x6a: 222, 0x6b: 500, 0x6c: 222, 0x6d: 833, 0x6e: 556, 0x6f: 556,
+  0x70: 556, 0x71: 556, 0x72: 333, 0x73: 500, 0x74: 278, 0x75: 556, 0x76: 500, 0x77: 722,
+  0x78: 500, 0x79: 500, 0x7a: 500, 0x7b: 334, 0x7c: 260, 0x7d: 334, 0x7e: 584,
+  0x85: 1000, 0x96: 556, 0x97: 1000, 0xb7: 400,
+};
+const HELV_BOLD_WIDTHS: Record<number, number> = {
+  0x20: 278, 0x21: 333, 0x22: 474, 0x23: 556, 0x24: 556, 0x25: 889, 0x26: 722, 0x27: 238,
+  0x28: 333, 0x29: 333, 0x2a: 389, 0x2b: 584, 0x2c: 278, 0x2d: 333, 0x2e: 278, 0x2f: 278,
+  0x30: 556, 0x31: 556, 0x32: 556, 0x33: 556, 0x34: 556, 0x35: 556, 0x36: 556, 0x37: 556,
+  0x38: 556, 0x39: 556, 0x3a: 333, 0x3b: 333, 0x3c: 584, 0x3d: 584, 0x3e: 584, 0x3f: 611,
+  0x40: 975, 0x41: 722, 0x42: 722, 0x43: 722, 0x44: 722, 0x45: 667, 0x46: 611, 0x47: 778,
+  0x48: 722, 0x49: 278, 0x4a: 556, 0x4b: 722, 0x4c: 611, 0x4d: 833, 0x4e: 722, 0x4f: 778,
+  0x50: 667, 0x51: 778, 0x52: 722, 0x53: 667, 0x54: 611, 0x55: 722, 0x56: 667, 0x57: 944,
+  0x58: 667, 0x59: 667, 0x5a: 611, 0x5b: 333, 0x5c: 278, 0x5d: 333, 0x5e: 584, 0x5f: 556,
+  0x60: 333, 0x61: 556, 0x62: 611, 0x63: 556, 0x64: 611, 0x65: 556, 0x66: 333, 0x67: 611,
+  0x68: 611, 0x69: 278, 0x6a: 278, 0x6b: 556, 0x6c: 278, 0x6d: 889, 0x6e: 611, 0x6f: 611,
+  0x70: 611, 0x71: 611, 0x72: 389, 0x73: 556, 0x74: 333, 0x75: 611, 0x76: 556, 0x77: 778,
+  0x78: 556, 0x79: 556, 0x7a: 500, 0x7b: 389, 0x7c: 280, 0x7d: 389, 0x7e: 584,
+  0x85: 1000, 0x96: 556, 0x97: 1000, 0xb7: 400,
+};
+// Fallback for any byte outside both tables above (an accented Latin-1 letter in someone's
+// name, say) — close to Helvetica's own average lowercase width, good enough to keep
+// truncation conservative rather than exact down to the point for the rare character it
+// doesn't have real metrics for.
+const DEFAULT_GLYPH_WIDTH = 556;
+
+function glyphWidth(code: number, bold: boolean): number {
+  const table = bold ? HELV_BOLD_WIDTHS : HELV_WIDTHS;
+  return table[code] ?? DEFAULT_GLYPH_WIDTH;
 }
 
 export class PdfDocument {
@@ -67,16 +120,62 @@ export class PdfDocument {
     this.pages.push(this.current);
   }
 
-  text(x: number, y: number, value: string, opts?: { bold?: boolean; size?: number; color?: PdfColor }) {
+  /** `maxWidth`, when given, shortens `value` (via truncateToWidth below) to fit before it's
+   *  drawn — opt-in per call since most text() calls in this app are short, known-safe labels
+   *  that don't need the extra measurement work. */
+  text(x: number, y: number, value: string, opts?: { bold?: boolean; size?: number; color?: PdfColor; maxWidth?: number }) {
+    const rendered = opts?.maxWidth != null ? this.truncateToWidth(value, opts.maxWidth, opts) : value;
     this.current.push({
       kind: "text",
       x,
       y,
-      value: escapePdfText(value),
+      value: escapePdfText(rendered),
       font: opts?.bold ? "F2" : "F1",
       size: opts?.size ?? 10,
       color: opts?.color ?? [0.125, 0.102, 0.133],
     });
+  }
+
+  /** Width, in points, that `value` will actually render at. Measures the exact bytes
+   *  escapePdfText will emit (so a curly quote, an em dash, an ellipsis each measure as what
+   *  they actually become on the page, not as the original JS character), summed against
+   *  Helvetica's own glyph metrics (HELV_WIDTHS/HELV_BOLD_WIDTHS above). */
+  measureText(value: string, opts?: { bold?: boolean; size?: number }): number {
+    const size = opts?.size ?? 10;
+    const escaped = escapePdfText(value);
+    let units = 0;
+    for (let i = 0; i < escaped.length; i++) {
+      const ch = escaped[i];
+      // escapePdfText backslash-escapes ( ) and \ themselves with a leading backslash for the
+      // PDF string literal's own syntax — that leading backslash isn't a glyph that gets drawn,
+      // so it contributes no width of its own; the character right after it is the real glyph.
+      if (ch === "\\" && i + 1 < escaped.length && "()\\".includes(escaped[i + 1])) continue;
+      units += glyphWidth(escaped.charCodeAt(i), !!opts?.bold);
+    }
+    return (units / 1000) * size;
+  }
+
+  /** Shortens `value` to fit within `maxWidth` points at the given font/size, trimming from the
+   *  end and appending an ellipsis — returns `value` unchanged when it already fits. Binary-
+   *  searches the longest prefix that fits rather than walking character by character, since a
+   *  very long value (an unusually long name, say) would otherwise cost one measureText call per
+   *  character removed. */
+  truncateToWidth(value: string, maxWidth: number, opts?: { bold?: boolean; size?: number }): string {
+    if (this.measureText(value, opts) <= maxWidth) return value;
+    const ellipsis = "…";
+    if (this.measureText(ellipsis, opts) > maxWidth) return ellipsis;
+    let lo = 0;
+    let hi = value.length;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      const candidate = value.slice(0, mid).trimEnd() + ellipsis;
+      if (this.measureText(candidate, opts) <= maxWidth) {
+        lo = mid;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return lo === 0 ? ellipsis : value.slice(0, lo).trimEnd() + ellipsis;
   }
 
   line(x1: number, y: number, x2: number, opts?: { color?: PdfColor; width?: number }) {
