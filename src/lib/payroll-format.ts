@@ -133,8 +133,19 @@ function renderTablePdf(doc: PdfDocument, report: PayrollHoursReportDTO): void {
       y = doc.margin;
       drawHeaderRow();
     }
-    for (const col of COLUMNS) {
-      doc.text(left + col.x, y, cellText(row, col.key), { size: 8.5, color: FOREGROUND });
+    for (let i = 0; i < COLUMNS.length; i++) {
+      const col = COLUMNS[i];
+      // Round ten (CB, on a downloaded report, a job title running straight into the Regular
+      // hours number next to it: "the words are kind of jumbled up on the PDF... if titles are
+      // too long"): Team Member and Job Title are the only two free-text columns here — every
+      // other column is a toFixed(2) number from cellText, always short and safe — so only
+      // these two ever risk running past their own column into whatever's drawn immediately to
+      // their right. Capped to the gap before the next column (minus a small gutter), truncated
+      // with an ellipsis via doc.text's own maxWidth rather than letting a long name or title
+      // silently collide with the numbers.
+      const isFreeText = col.key === "name" || col.key === "jobTitle";
+      const maxWidth = isFreeText ? COLUMNS[i + 1].x - col.x - 8 : undefined;
+      doc.text(left + col.x, y, cellText(row, col.key), { size: 8.5, color: FOREGROUND, maxWidth });
     }
     y += 18;
   }
@@ -160,10 +171,17 @@ function renderSingleEmployeePdf(doc: PdfDocument, report: PayrollHoursReportDTO
   const bannerTop = y;
   const bannerHeight = 56;
   doc.rect(left, bannerTop, width, bannerHeight, { fill: TTC_PINK_INK });
-  doc.text(left + 16, bannerTop + 24, row.name, { bold: true, size: 15, color: WHITE });
+  // Round ten (CB, on the table layout's own job-title column overlapping its neighbor: "the
+  // words are kind of jumbled up on the PDF... if titles are too long"): same risk applies here
+  // — an unusually long name or job title could run into the Period box pinned to the banner's
+  // own right edge. Capped to the space actually free to its left, same ellipsis truncation as
+  // the table rows use (doc.text's own maxWidth).
+  const bannerTextMaxWidth = right - 16 - 150 - (left + 16) - 12;
+  doc.text(left + 16, bannerTop + 24, row.name, { bold: true, size: 15, color: WHITE, maxWidth: bannerTextMaxWidth });
   doc.text(left + 16, bannerTop + 42, `${row.employeeCode} · ${row.jobTitle}`, {
     size: 9.5,
     color: WHITE,
+    maxWidth: bannerTextMaxWidth,
   });
   doc.text(right - 16 - 150, bannerTop + 24, "Period", { size: 8, color: WHITE });
   doc.text(right - 16 - 150, bannerTop + 40, formatWeekRange(report.startDate, report.endDate), {
