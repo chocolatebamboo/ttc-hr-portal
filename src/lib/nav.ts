@@ -178,13 +178,10 @@ export function navForRole(role: Role): { primary: NavItem[]; extra: NavItem[] }
 }
 
 /**
- * The mobile bottom tab bar's four fixed slots — one set per permission level (correction
- * brief #7, "Mobile navigation by permission level"): regular team members get
- * Home / Availability / My Messages / More; staff (SUPER_ADMIN/HR_ADMIN/SUPERVISOR) get
- * Home / Availability / Reports / More instead — "Administrative users can still reach Messages
- * through the appropriate interface/More area/chat entry points even if Messages is not one of
- * their four primary navigation items" (My Messages still appears in their own More list; see
- * src/app/(portal)/more/page.tsx).
+ * The mobile bottom tab bar's slots — one set per permission level (correction brief #7,
+ * "Mobile navigation by permission level"): regular team members get a four-item bar, Home /
+ * Availability / My Messages / More. Staff (SUPER_ADMIN/HR_ADMIN/SUPERVISOR) get a five-item
+ * bar instead: Home / Availability / Reports / Messages / More.
  *
  * Used to be SUPER_ADMIN/HR_ADMIN only: this doc comment originally explained that on the
  * grounds that /admin/reports itself was "still gated to isAdmin() only today," so pointing a
@@ -193,15 +190,30 @@ export function navForRole(role: Role): { primary: NavItem[]; extra: NavItem[] }
  * their own team) since Correction brief #8, same as SUPERVISOR_NAV above already assumed; this
  * function was just never updated to match when that landed. Found and fixed Oct 2026 (CB: "did
  * you make sure that Daijour's role... is looking like the admin").
+ *
+ * Round 2 (CB, Oct 2026, from a live screenshot of the Home dashboard with the bottom bar
+ * circled: "For admin I wanna add like the messages in like within this menu... so that we have
+ * quick access to it"): staff never had a quick-access Messages tab here — only reachable via
+ * More — unlike every other role, which already had My Messages as one of its four slots. Adds
+ * Messages as a fifth slot for staff rather than replacing Reports (approved via mockup), so
+ * BottomNav.tsx is no longer truly "capped at four" for this role — its flex layout (flex-1 per
+ * item, no fixed grid-cols-4) already accommodates a fifth item without any markup change.
  */
 export function bottomNavForRole(role: Role): NavItem[] {
   const isStaffRole = role === "SUPER_ADMIN" || role === "HR_ADMIN" || role === "SUPERVISOR";
+  if (isStaffRole) {
+    return [
+      { label: "Home", href: "/dashboard", icon: HomeIcon },
+      { label: "Availability", href: "/availability", icon: CalendarIcon },
+      { label: "Reports", href: "/admin/reports", icon: ChartIcon },
+      { label: "Messages", href: "/messages", icon: ChatIcon },
+      { label: "More", href: "/more", icon: MoreIcon },
+    ];
+  }
   return [
     { label: "Home", href: "/dashboard", icon: HomeIcon },
     { label: "Availability", href: "/availability", icon: CalendarIcon },
-    isStaffRole
-      ? { label: "Reports", href: "/admin/reports", icon: ChartIcon }
-      : { label: "My Messages", href: "/messages", icon: ChatIcon },
+    { label: "My Messages", href: "/messages", icon: ChatIcon },
     { label: "More", href: "/more", icon: MoreIcon },
   ];
 }
