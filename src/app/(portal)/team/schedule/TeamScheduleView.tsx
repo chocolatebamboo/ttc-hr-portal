@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import ShiftStatusPill from "@/components/ShiftStatusPill";
 import DateTasksPanel from "@/components/DateTasksPanel";
-import { ChecklistIcon } from "@/components/icons";
+import { ChecklistIcon, ChevronDownIcon } from "@/components/icons";
 import { formatSlotDate, formatTime12h } from "@/lib/availability-format";
 import { getWeek, formatWeekRange } from "@/lib/week";
 import type { AdminShiftDTO, AssignmentOptionsDTO, DateTaskDTO, DirectReportDTO, ShiftStatus } from "@/types";
@@ -127,6 +127,14 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
   // to one shift — same employeeId+taskDate filter DateTasksPanel itself already applies
   // client-side against its own per-employee fetch.
   const [taskCounts, setTaskCounts] = useState<Record<string, number>>({});
+  // Round 4 (CB, Oct 2026, from a live screenshot of a 5-shift week: "make sure we're... [in] the
+  // collapsed state... because I don't want it to look too cluttered"): each person's card in the
+  // grouped (all-team-members) view now opens collapsed, same reasoning — and the same
+  // collapsed-by-default Set<employeeId> pattern — as Team Tasks' own per-person cards
+  // (src/app/(portal)/admin/tasks/TeamTasksView.tsx). The single-employee view (one person
+  // already deliberately filtered to) is untouched; collapsing there would just hide the one
+  // thing that view exists to show.
+  const [expandedEmployees, setExpandedEmployees] = useState<Set<string>>(new Set());
 
   const [employeeFilter, setEmployeeFilter] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("");
@@ -312,6 +320,15 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
       };
     });
   }, [prioritized, employeeFilter]);
+
+  function toggleEmployeeExpanded(employeeId: string) {
+    setExpandedEmployees((prev) => {
+      const next = new Set(prev);
+      if (next.has(employeeId)) next.delete(employeeId);
+      else next.add(employeeId);
+      return next;
+    });
+  }
 
   async function handleCreate(input: { employeeId: string; date: string; startTime: string; endTime: string; note: string }) {
     setActionError(null);
@@ -882,36 +899,49 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
           // real job title, same correction already made to the single-employee banner), then
           // their shifts as the same compact divided rows the single-employee view uses.
           <div className="space-y-4">
-            {groupedByPerson.map((group) => (
-              <div key={group.employeeId} className="bg-surface border border-border rounded-xl overflow-hidden">
-                <div className="flex items-center gap-3 px-5 py-3.5 bg-black/[0.02] border-b border-border">
-                  {group.avatarUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element -- public storage URL
-                    <img src={group.avatarUrl} alt="" className="h-9 w-9 rounded-full object-cover border border-border shrink-0" />
-                  ) : (
-                    <span
-                      className="h-9 w-9 rounded-full shrink-0 flex items-center justify-center text-white text-xs font-semibold"
-                      style={{ background: "linear-gradient(135deg, var(--ttc-pink-ink), var(--ttc-pink))" }}
-                    >
-                      {initialsOf(group.name) || "?"}
-                    </span>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="font-serif font-bold text-[15px] truncate">{group.name}</p>
-                    <p className="text-xs text-muted truncate">{group.jobTitle}</p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-xs font-semibold text-foreground">
-                      {group.shifts.length} {group.shifts.length === 1 ? "shift" : "shifts"}
-                    </p>
-                    {group.missedCount > 0 && (
-                      <p className="text-[11px] text-rose-800">{group.missedCount} no clock-in</p>
+            {groupedByPerson.map((group) => {
+              const isExpanded = expandedEmployees.has(group.employeeId);
+              return (
+                <div key={group.employeeId} className="bg-surface border border-border rounded-xl overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => toggleEmployeeExpanded(group.employeeId)}
+                    aria-expanded={isExpanded}
+                    className="w-full flex items-center gap-3 px-5 py-3.5 bg-black/[0.02] border-b border-border text-left hover:bg-black/[0.04] transition-colors"
+                  >
+                    {group.avatarUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- public storage URL
+                      <img src={group.avatarUrl} alt="" className="h-9 w-9 rounded-full object-cover border border-border shrink-0" />
+                    ) : (
+                      <span
+                        className="h-9 w-9 rounded-full shrink-0 flex items-center justify-center text-white text-xs font-semibold"
+                        style={{ background: "linear-gradient(135deg, var(--ttc-pink-ink), var(--ttc-pink))" }}
+                      >
+                        {initialsOf(group.name) || "?"}
+                      </span>
                     )}
-                  </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-serif font-bold text-[15px] truncate">{group.name}</p>
+                      <p className="text-xs text-muted truncate">{group.jobTitle}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-xs font-semibold text-foreground">
+                        {group.shifts.length} {group.shifts.length === 1 ? "shift" : "shifts"}
+                      </p>
+                      {group.missedCount > 0 && (
+                        <p className="text-[11px] text-rose-800">{group.missedCount} no clock-in</p>
+                      )}
+                    </div>
+                    <ChevronDownIcon
+                      className={`h-3.5 w-3.5 text-muted shrink-0 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                    />
+                  </button>
+                  {isExpanded && (
+                    <div className="divide-y divide-border">{group.shifts.map((s) => renderShiftRow(s))}</div>
+                  )}
                 </div>
-                <div className="divide-y divide-border">{group.shifts.map((s) => renderShiftRow(s))}</div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : null}
         </>
