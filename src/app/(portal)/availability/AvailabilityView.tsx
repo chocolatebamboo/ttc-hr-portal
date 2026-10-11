@@ -657,15 +657,20 @@ export default function AvailabilityView({
               </div>
             )}
             {/* CB, Sept 2026: "I don't want it to take over... even if it's a little bit
-                shorter... I still want to be able to see the month and the days." A fixed,
-                modest, self-scrolling panel rather than claiming the rest of the page's height —
-                the month grid and day-tap popup all still work exactly as before, just inside a
-                bounded box. */}
+                shorter... I still want to be able to see the month and the days." Originally a
+                fixed max-height: 28rem with its own overflow-y-auto, sized for the old version's
+                10-month scrolling list.
+                Round 3 (CB, Oct 2026, after approving the one-month-at-a-time redesign, then
+                immediately following up to make sure the date-tap panel "is showing the full...
+                and I don't have to like scroll in order for me to even get to there"): that
+                28rem cap is gone. AvailabilityCalendar now only ever renders one month's grid
+                plus (when a date's tapped) the panel right below it — already compact on its
+                own, with nothing like the old 10-month list's height to need taming — so this
+                card just sizes to that content and the page's own normal scroll handles
+                anything beyond the fold, the same reasoning as the panel's own now-uncapped
+                height (see AvailabilityCalendar.tsx's Panel component). */}
             {loadState === "ready" && (
-              <div
-                className="rounded-2xl border border-border bg-surface p-3 overflow-y-auto"
-                style={{ maxHeight: "28rem" }}
-              >
+              <div className="rounded-2xl border border-border bg-surface p-3">
                 <AvailabilityCalendar
                   controls={{
                     employeeId,
