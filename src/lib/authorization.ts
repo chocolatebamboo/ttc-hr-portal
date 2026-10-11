@@ -105,6 +105,27 @@ export function assertCanAccessTeamAvailability(actor: CurrentEmployee): void {
 }
 
 /**
+ * Team Tasks admin page (src/app/(portal)/admin/tasks) — CB, Oct 2026: "a sub dropdown menu on
+ * my tasks... for like the admin's team member tasks... so we could see the team members
+ * task... holistic with all the different team members." Same three-role "staff" cut
+ * canAccessAttendance/canAccessReports already draw, given its own name here per this file's
+ * own established convention (see canAccessReports's doc comment on why a logically-identical
+ * check still gets its own name per capability). Safe for the same reason those are: the data
+ * function this gates (listTeamDateTasksForPeriod in src/lib/date-tasks.ts) narrows what a
+ * non-admin actually sees down to their own direct reports — isAdmin(actor) ? {} :
+ * { supervisorId: actor.id }, the same shape listAdminAttendance/listAdminShifts/
+ * listAllAwaitingReviewDateTasks already use — not a blanket grant of company-wide data to a
+ * Supervisor.
+ */
+export function canAccessTeamTasks(actor: CurrentEmployee): boolean {
+  return isAdmin(actor) || actor.role === "SUPERVISOR";
+}
+
+export function assertCanAccessTeamTasks(actor: CurrentEmployee): void {
+  if (!canAccessTeamTasks(actor)) throw new ForbiddenError();
+}
+
+/**
  * Phase 5c (CB, Sept 2026): "an option to add an internal comment" on a direct message,
  * confirmed scope "hidden from the team member." Same three-role "staff" cut canAccessReports
  * already draws (isAdmin() plus SUPERVISOR) — given its own name here since internal DM notes
