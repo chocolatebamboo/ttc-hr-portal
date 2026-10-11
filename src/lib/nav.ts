@@ -6,6 +6,7 @@ import {
   FolderIcon,
   GraduationCapIcon,
   CheckCircleIcon,
+  ChecklistIcon,
   UsersIcon,
   MegaphoneIcon,
   UserCircleIcon,
@@ -99,6 +100,15 @@ export const SUPERVISOR_NAV: NavItem[] = [
       { label: "Team Schedule", href: "/team/schedule", icon: CalendarIcon },
     ],
   },
+  // Oct 2026 (CB: "a sub drop-down menu on my tasks... for like the admin's team member
+  // tasks... so we could see the team members task... holistic with all the different team
+  // members" — approved as its own standalone page, not a toggle inside My Tasks): opened to
+  // Supervisor too, same "give him Attendance... for his own team" precedent just above —
+  // listTeamDateTasksForPeriod (src/lib/date-tasks.ts) narrows a Supervisor down to their own
+  // direct reports on its own. ChecklistIcon rather than My Tasks' own CheckCircleIcon (see
+  // EMPLOYEE_NAV's own comment on why Onboarding/My Tasks got visually distinct icons) — this is
+  // a different page, not a second link to the same one.
+  { label: "Team Tasks", href: "/admin/tasks", icon: ChecklistIcon },
   // Found missing Oct 2026 (CB: "did you make sure that Daijour's role... is looking like the
   // admin"): /admin/reports/page.tsx has granted a Supervisor this page, scoped to their own team
   // (canAccessReports), ever since Correction brief #8 — but this sidebar list was never updated
@@ -118,6 +128,15 @@ export const SUPERVISOR_NAV: NavItem[] = [
 // re-added.
 export const ADMIN_NAV: NavItem[] = [
   { label: "Team Members", href: "/admin/employees", icon: IdCardIcon },
+  // Oct 2026 (CB: "a sub drop-down menu on my tasks... for like the admin's team member
+  // tasks... so we could see the team members task... holistic with all the different team
+  // members with all the different tasks" — approved via mockup as its own standalone page,
+  // placed here, next to Team Members/Reports, per CB's own choice between that and a toggle
+  // inside My Tasks). See src/lib/date-tasks.ts's listTeamDateTasksForPeriod for the data side
+  // and src/app/(portal)/admin/tasks for the page itself. ChecklistIcon rather than My Tasks'
+  // own CheckCircleIcon — see EMPLOYEE_NAV's own comment on why Onboarding/My Tasks got
+  // visually distinct icons; this is a different page, not a second link to the same one.
+  { label: "Team Tasks", href: "/admin/tasks", icon: ChecklistIcon },
   // Restructured (CB, Oct 2026, on the mockup's Availability board: "team availability need to
   // be the main page and the remaining pages under it like attendance, pto management and team
   // schedule needs to be like subpages in a way so it reads cleanly"): Attendance, PTO
