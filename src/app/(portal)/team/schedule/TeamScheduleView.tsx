@@ -47,6 +47,40 @@ function weekOffsetForDate(dateKey: string): number {
   return Math.floor(diffDays / 7);
 }
 
+/** Round 3 (CB, Oct 2026, from the live page: "whoever is upcoming... whoever is closest to
+ *  clock in, they will be the one to prioritize... they will go at the top... that profile... we
+ *  make sure we prioritize that"): a shift that's already resolved one way or another (it
+ *  happened, it was cancelled, it was handed to someone else, or nobody clocked in) is settled —
+ *  there's nothing left to watch for. Everything else (UPCOMING, IN_PROGRESS, and a pending
+ *  CHANGE_REQUESTED/CANCELLATION_REQUESTED, which is still a live shift awaiting a decision) is
+ *  still "coming," so it's what this page is actually for keeping an eye on. Reads
+ *  `displayStatus`, not the raw stored `status`, so a shift that quietly became MISSED overnight
+ *  (deriveShiftDisplayStatus) drops out of the prioritized group the same way an explicitly
+ *  CANCELLED one does — it's just as settled, even though nobody made that call directly. */
+function isSettledShift(s: AdminShiftDTO): boolean {
+  return (
+    s.displayStatus === "COMPLETED" ||
+    s.displayStatus === "CANCELLED" ||
+    s.displayStatus === "REASSIGNED" ||
+    s.displayStatus === "MISSED"
+  );
+}
+
+/** CB's own words for this, above: not a full re-ranking of every status against every other
+ *  (her "doesn't necessarily have to be every single one") — just a single still-coming/settled
+ *  split, soonest start time first within each half. That's also plain chronological order, so a
+ *  settled group reads exactly as it always has; only the "still coming" shifts actually move. */
+function shiftSortKey(s: AdminShiftDTO): [number, string] {
+  return [isSettledShift(s) ? 1 : 0, `${s.date}T${s.startTime}`];
+}
+
+function byShiftPriority(a: AdminShiftDTO, b: AdminShiftDTO): number {
+  const [rankA, keyA] = shiftSortKey(a);
+  const [rankB, keyB] = shiftSortKey(b);
+  if (rankA !== rankB) return rankA - rankB;
+  return keyA < keyB ? -1 : keyA > keyB ? 1 : 0;
+}
+
 /**
  * Team Schedule — phase 1 of the scheduling workflow rebuild (client spec, Sept 2026): the
  * supervisor/admin-facing counterpart to My Schedule, plus the two actions that actually create
@@ -184,6 +218,13 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
     });
   }, [shifts, employeeFilter, departmentFilter, statusFilter, week]);
 
+  // Round 3 (CB, Oct 2026 — see byShiftPriority's own doc comment above): still-coming shifts
+  // first, soonest first, settled ones after in their normal date order. Used for every actual
+  // render below (the single-employee row list, and groupedByPerson's own build) — `filtered`
+  // itself stays in the API's plain date order for the computations above that don't care about
+  // display order (singleEmployeeInfo, the taskCounts fetch, isGroupedView).
+  const prioritized = useMemo(() => [...filtered].sort(byShiftPriority), [filtered]);
+
   // Backs the Tasks toggle's wording (renderShiftRow below) — one fetch per visible employee
   // rather than one per shift, same "small enough that a second endpoint isn't worth it"
   // reasoning DateTasksPanel's own doc comment already gives for this exact endpoint. Re-runs
@@ -242,11 +283,17 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
   // list. Group order follows first appearance in `filtered` (already date-ordered from the
   // API), same as the approved mockup.
   const isGroupedView = employeeFilter === "" && filtered.length > 0;
+  // Built from `prioritized`, not `filtered`: a person's own shifts land in their card already
+  // still-coming-first (byShiftPriority), and — since `order` below is just first appearance in
+  // that same sorted list — whichever person's own soonest still-coming shift comes earliest
+  // across the whole team is exactly whose card appears first. A person with nothing still
+  // coming this week only shows up once the settled half of the list is reached, same as CB
+  // asked for ("whoever is closest to clock in... they will go at the top... that profile").
   const groupedByPerson = useMemo(() => {
     if (employeeFilter !== "") return [];
     const order: string[] = [];
     const byEmployee = new Map<string, AdminShiftDTO[]>();
-    for (const s of filtered) {
+    for (const s of prioritized) {
       if (!byEmployee.has(s.employeeId)) {
         byEmployee.set(s.employeeId, []);
         order.push(s.employeeId);
@@ -264,7 +311,7 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
         missedCount: group.filter((s) => s.displayStatus === "MISSED").length,
       };
     });
-  }, [filtered, employeeFilter]);
+  }, [prioritized, employeeFilter]);
 
   async function handleCreate(input: { employeeId: string; date: string; startTime: string; endTime: string; note: string }) {
     setActionError(null);
@@ -826,7 +873,7 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
           )}
         {isSingleEmployeeView ? (
           <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
-            {filtered.map((s) => renderShiftRow(s))}
+            {prioritized.map((s) => renderShiftRow(s))}
           </div>
         ) : isGroupedView ? (
           // Round 2 (CB, Oct 2026, on the mockup: "I don't like how it's showing up the same
