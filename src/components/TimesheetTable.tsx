@@ -36,12 +36,21 @@ interface SessionRow {
 
 /** Every calendar day in the week, filled in from `entries` where an entry exists. A past or
  *  today day with no entry is real and worth noticing (StatusPill's "Not Logged"); a day later
- *  this week that hasn't happened yet never gets that pill at all — see TimesheetRow's own
+ *  this week that hasn't happened yet never gets that pill at all — see TimesheetDayCard's own
  *  `isFuture` check below (CB, Oct 2026, pointing at a week showing "Missing Entry" on dates
  *  still days away: "missing entry almost seems like you're saying there's something wrong").
  *  Pass `review` for a supervisor/HR review table with Approve/Return actions on rows
  *  Awaiting Approval. Pass `correction` for the employee's own view, which additionally
- *  lets them edit and resubmit a Returned day. Omit both for a plain read-only table. */
+ *  lets them edit and resubmit a Returned day. Omit both for a plain read-only table.
+ *
+ *  Round 3 (CB, Oct 2026, from a screenshot of this exact view with the Actions column cut off
+ *  at the phone's edge: "I don't wanna act like scroll on the side just for me to see certain
+ *  things I need to read cleanly"): this was a single wide `<table>` that only fit a phone
+ *  screen by scrolling sideways, hiding Date on one edge and Actions on the other. It's now a
+ *  stack of one card per day — the same four columns' worth of information, just read top to
+ *  bottom instead of left to right, with Approve/Return (or Edit & resubmit) living inside each
+ *  day's own card instead of a cramped last column. Weekly total moves from a table footer to
+ *  its own dark summary bar below the stack, matching the approved mockup. */
 export default function TimesheetTable({
   days,
   entries,
@@ -57,45 +66,27 @@ export default function TimesheetTable({
   const weeklyMinutes = entries.reduce((sum, e) => sum + (e.totalMinutes ?? 0), 0);
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-border">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="bg-black/[0.02] text-left text-xs uppercase tracking-wide text-muted/70">
-            <th className="px-4 py-2.5 font-medium">Date</th>
-            <th className="px-4 py-2.5 font-medium">Sessions</th>
-            <th className="px-4 py-2.5 font-medium">Hours</th>
-            <th className="px-4 py-2.5 font-medium">Status</th>
-            {(review || correction) && <th className="px-4 py-2.5 font-medium">Actions</th>}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-          {days.map((day) => {
-            const entry = byDate.get(day);
-            const label = new Date(`${day}T00:00:00`).toLocaleDateString(undefined, {
-              weekday: "short",
-              month: "short",
-              day: "numeric",
-            });
-            return (
-              <TimesheetRow key={day} day={day} label={label} entry={entry} review={review} correction={correction} />
-            );
-          })}
-        </tbody>
-        <tfoot>
-          <tr className="border-t border-border bg-black/[0.02] font-medium">
-            <td className="px-4 py-2.5" colSpan={2}>
-              Weekly total
-            </td>
-            <td className="px-4 py-2.5 tabular-nums">{formatMinutes(weeklyMinutes)}</td>
-            <td colSpan={review || correction ? 2 : 1} />
-          </tr>
-        </tfoot>
-      </table>
+    <div className="flex flex-col gap-2">
+      {days.map((day) => {
+        const entry = byDate.get(day);
+        const label = new Date(`${day}T00:00:00`).toLocaleDateString(undefined, {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+        });
+        return (
+          <TimesheetDayCard key={day} day={day} label={label} entry={entry} review={review} correction={correction} />
+        );
+      })}
+      <div className="flex items-center justify-between rounded-2xl bg-neutral-900 text-white px-4 py-3 mt-1">
+        <span className="text-sm font-semibold">Weekly total</span>
+        <span className="tabular-nums text-sm font-bold">{formatMinutes(weeklyMinutes)}</span>
+      </div>
     </div>
   );
 }
 
-function TimesheetRow({
+function TimesheetDayCard({
   day,
   label,
   entry,
@@ -113,7 +104,6 @@ function TimesheetRow({
   const [editing, setEditing] = useState(false);
   const [rows, setRows] = useState<SessionRow[]>([]);
 
-  const colSpan = review || correction ? 5 : 4;
   const isReviewBusy = review?.busyEntryId === entry?.id;
   const isCorrectionBusy = correction?.busyEntryId === entry?.id;
   const isActionable = review && entry?.status === "AWAITING_APPROVAL";
@@ -147,15 +137,27 @@ function TimesheetRow({
   }
 
   return (
-    <>
-      <tr>
-        <td className="px-4 py-2.5 whitespace-nowrap align-top">{label}</td>
-        <td className="px-4 py-2.5 align-top">
+    <div
+      className={`rounded-2xl border bg-surface p-3.5 ${
+        isActionable || isCorrectable ? "border-accent/35" : "border-border"
+      }`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-semibold">{label}</span>
+        {isFuture ? (
+          <span className="text-xs text-muted">Upcoming</span>
+        ) : (
+          <StatusPill status={entry?.status ?? "MISSING_ENTRY"} />
+        )}
+      </div>
+
+      <div className="flex items-start justify-between gap-3 mt-2">
+        <div className="flex-1 min-w-0">
           {entry && entry.sessions.length > 0 ? (
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               {entry.sessions.map((s) => (
                 <div key={s.id}>
-                  <div className="tabular-nums whitespace-nowrap text-xs">
+                  <div className="tabular-nums text-xs text-foreground">
                     {formatClockTime(s.clockIn)} – {s.clockOut ? formatClockTime(s.clockOut) : "in progress"}
                   </div>
                   {/* CB, Oct 2026, on a flagged/auto-clocked-out day: "we should be able to see
@@ -167,7 +169,7 @@ function TimesheetRow({
                       so a reviewer can always see the schedule right next to the recorded time
                       instead of only being told something didn't match. */}
                   {s.scheduledStartTime && s.scheduledEndTime && (
-                    <div className="text-[11px] text-muted whitespace-nowrap">
+                    <div className="text-[11px] text-muted">
                       Scheduled {formatTime12h(s.scheduledStartTime)} – {formatTime12h(s.scheduledEndTime)}
                     </div>
                   )}
@@ -176,7 +178,7 @@ function TimesheetRow({
                       employee's own view and the supervisor/HR review view, since this table
                       serves both. */}
                   {s.isException && (
-                    <div className="flex items-start gap-1 text-xs text-amber-700 whitespace-normal">
+                    <div className="flex items-start gap-1 text-xs text-amber-700">
                       <WarningIcon className="h-3.5 w-3.5 mt-0.5 shrink-0" />
                       <span>Flagged{s.exceptionReason ? `: ${s.exceptionReason}` : ""}</span>
                     </div>
@@ -185,152 +187,120 @@ function TimesheetRow({
               ))}
             </div>
           ) : (
-            <span className="text-muted">—</span>
+            <span className="text-sm text-muted">—</span>
           )}
-        </td>
-        <td className="px-4 py-2.5 tabular-nums align-top">{formatMinutes(entry?.totalMinutes ?? null)}</td>
-        <td className="px-4 py-2.5 align-top">
-          {isFuture ? (
-            <span className="text-muted">Upcoming</span>
-          ) : (
-            <StatusPill status={entry?.status ?? "MISSING_ENTRY"} />
-          )}
-        </td>
-        {review && (
-          <td className="px-4 py-2.5 align-top">
-            {isActionable ? (
-              <div className="flex flex-col gap-1 items-start">
-                <button
-                  onClick={() => entry && review.onApprove(entry.id)}
-                  disabled={isReviewBusy}
-                  className="btn-primary text-xs px-3 py-1 whitespace-nowrap w-full justify-center"
-                >
-                  Approve
-                </button>
-                <button
-                  onClick={() => setReturning((r) => !r)}
-                  disabled={isReviewBusy}
-                  className="btn-neutral text-xs px-3 py-1 whitespace-nowrap w-full justify-center"
-                >
-                  Return
-                </button>
-              </div>
-            ) : (
-              <span className="text-xs text-muted">—</span>
-            )}
-          </td>
-        )}
-        {correction && (
-          <td className="px-4 py-2.5 align-top">
-            {isCorrectable ? (
-              <button
-                onClick={() => (editing ? setEditing(false) : startEditing())}
-                disabled={isCorrectionBusy}
-                className="btn-neutral text-xs px-3 py-1.5"
-              >
-                {editing ? "Cancel" : "Edit & resubmit"}
-              </button>
-            ) : (
-              <span className="text-xs text-muted">—</span>
-            )}
-          </td>
-        )}
-      </tr>
+        </div>
+        <span className="tabular-nums text-sm font-semibold shrink-0">
+          {formatMinutes(entry?.totalMinutes ?? null)}
+        </span>
+      </div>
 
       {entry?.status === "RETURNED" && entry.reviewComment && (
-        <tr>
-          <td colSpan={colSpan} className="px-4 pb-2.5 -mt-1">
-            <p className="text-xs text-accent">Returned: {entry.reviewComment}</p>
-          </td>
-        </tr>
+        <p className="text-xs text-accent mt-2">Returned: {entry.reviewComment}</p>
+      )}
+
+      {review && isActionable && (
+        <div className="flex gap-2 mt-3">
+          <button
+            onClick={() => entry && review.onApprove(entry.id)}
+            disabled={isReviewBusy}
+            className="btn-primary text-xs px-3 py-1.5 flex-1 justify-center"
+          >
+            Approve
+          </button>
+          <button
+            onClick={() => setReturning((r) => !r)}
+            disabled={isReviewBusy}
+            className="btn-neutral text-xs px-3 py-1.5 flex-1 justify-center"
+          >
+            Return
+          </button>
+        </div>
       )}
 
       {returning && entry && (
-        <tr>
-          <td colSpan={colSpan} className="px-4 pb-3">
-            <div className="flex flex-col sm:flex-row gap-2 bg-black/[0.02] rounded-lg p-3">
-              <textarea
-                value={comment}
-                onChange={(e) => setComment(e.target.value)}
-                placeholder="Explain what needs correcting…"
-                rows={2}
-                className="flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
-              />
-              <div className="flex gap-2 sm:flex-col">
-                <button
-                  onClick={() => {
-                    if (!comment.trim()) return;
-                    review!.onReturn(entry.id, comment.trim());
-                    setReturning(false);
-                    setComment("");
-                  }}
-                  disabled={!comment.trim() || isReviewBusy}
-                  className="btn-primary text-xs px-3 py-1.5"
-                >
-                  Send back
-                </button>
-                <button
-                  onClick={() => setReturning(false)}
-                  className="btn-neutral text-xs px-3 py-1.5"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </td>
-        </tr>
+        <div className="flex flex-col gap-2 bg-black/[0.02] rounded-lg p-3 mt-2">
+          <textarea
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="Explain what needs correcting…"
+            rows={2}
+            className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                if (!comment.trim()) return;
+                review!.onReturn(entry.id, comment.trim());
+                setReturning(false);
+                setComment("");
+              }}
+              disabled={!comment.trim() || isReviewBusy}
+              className="btn-primary text-xs px-3 py-1.5 flex-1 justify-center"
+            >
+              Send back
+            </button>
+            <button
+              onClick={() => setReturning(false)}
+              className="btn-neutral text-xs px-3 py-1.5 flex-1 justify-center"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {correction && isCorrectable && (
+        <div className="mt-3">
+          <button
+            onClick={() => (editing ? setEditing(false) : startEditing())}
+            disabled={isCorrectionBusy}
+            className="btn-neutral text-xs px-3 py-1.5"
+          >
+            {editing ? "Cancel" : "Edit & resubmit"}
+          </button>
+        </div>
       )}
 
       {editing && entry && (
-        <tr>
-          <td colSpan={colSpan} className="px-4 pb-3">
-            <div className="bg-black/[0.02] rounded-lg p-3 space-y-3">
-              <div className="space-y-2">
-                {rows.map((row, i) => (
-                  <div key={i} className="flex items-end gap-2">
-                    <TimeField label="Clock in" value={row.clockIn} onChange={(v) => updateRow(i, "clockIn", v)} />
-                    <TimeField label="Clock out" value={row.clockOut} onChange={(v) => updateRow(i, "clockOut", v)} />
-                    {rows.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => setRows((r) => r.filter((_, j) => j !== i))}
-                        aria-label="Remove this session"
-                        className="h-8 w-8 shrink-0 rounded-full border border-border bg-surface hover:bg-black/[0.03] text-sm leading-none"
-                      >
-                        ×
-                      </button>
-                    )}
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => setRows((r) => [...r, { clockIn: "", clockOut: "" }])}
-                  className="text-xs text-accent-ink font-medium hover:underline"
-                >
-                  + Add another session
-                </button>
+        <div className="bg-black/[0.02] rounded-lg p-3 space-y-3 mt-3">
+          <div className="space-y-2">
+            {rows.map((row, i) => (
+              <div key={i} className="flex items-end gap-2">
+                <TimeField label="Clock in" value={row.clockIn} onChange={(v) => updateRow(i, "clockIn", v)} />
+                <TimeField label="Clock out" value={row.clockOut} onChange={(v) => updateRow(i, "clockOut", v)} />
+                {rows.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setRows((r) => r.filter((_, j) => j !== i))}
+                    aria-label="Remove this session"
+                    className="h-8 w-8 shrink-0 rounded-full border border-border bg-surface hover:bg-black/[0.03] text-sm leading-none"
+                  >
+                    ×
+                  </button>
+                )}
               </div>
-              {correction?.error && <p className="text-xs text-accent">{correction.error}</p>}
-              <div className="flex gap-2">
-                <button
-                  onClick={submitCorrection}
-                  disabled={isCorrectionBusy}
-                  className="btn-primary text-xs px-3 py-1.5"
-                >
-                  {isCorrectionBusy ? "Submitting…" : "Resubmit for approval"}
-                </button>
-                <button
-                  onClick={() => setEditing(false)}
-                  className="btn-neutral text-xs px-3 py-1.5"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </td>
-        </tr>
+            ))}
+            <button
+              type="button"
+              onClick={() => setRows((r) => [...r, { clockIn: "", clockOut: "" }])}
+              className="text-xs text-accent-ink font-medium hover:underline"
+            >
+              + Add another session
+            </button>
+          </div>
+          {correction?.error && <p className="text-xs text-accent">{correction.error}</p>}
+          <div className="flex gap-2">
+            <button onClick={submitCorrection} disabled={isCorrectionBusy} className="btn-primary text-xs px-3 py-1.5">
+              {isCorrectionBusy ? "Submitting…" : "Resubmit for approval"}
+            </button>
+            <button onClick={() => setEditing(false)} className="btn-neutral text-xs px-3 py-1.5">
+              Cancel
+            </button>
+          </div>
+        </div>
       )}
-    </>
+    </div>
   );
 }
 
