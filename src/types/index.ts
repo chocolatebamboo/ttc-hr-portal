@@ -741,6 +741,23 @@ export interface DateTaskCommentDTO {
   createdAt: string; // ISO
 }
 
+/** One team member's row on the new Team Tasks admin page (src/app/(portal)/admin/tasks) — CB,
+ *  Oct 2026: "a sub dropdown menu on my tasks... for like the admin's team member tasks... so we
+ *  could see the team members task... holistic with all the different team members." Same
+ *  admin-sees-everyone/supervisor-sees-own-reports roster AdminAttendanceRowDTO already uses
+ *  (see listAdminAttendance in src/lib/attendance-admin.ts), carrying that same jobTitle/
+ *  avatarUrl pair so the page's per-person card header matches every other "one row per team
+ *  member" list in this app. `tasks` is that one person's own DateTask rows for the period on
+ *  screen, already filtered/ordered server-side — empty means genuinely nothing assigned for
+ *  that period, not a client-side filter away from showing something. */
+export interface TeamDateTasksRowDTO {
+  employeeId: string;
+  name: string;
+  jobTitle: string;
+  avatarUrl: string | null;
+  tasks: DateTaskDTO[];
+}
+
 export type DocumentCategory =
   | "EMPLOYEE_HANDBOOK"
   | "HR_POLICY"
