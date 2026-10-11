@@ -1,12 +1,18 @@
 import type { PrismaClient } from "@prisma/client";
 import { withRlsContext } from "@/lib/db";
-import { assertCanAccessEmployeeRecords, assertCanAssignTasks, isAdmin, ForbiddenError } from "@/lib/authorization";
-import { getSignedDownloadUrl, uploadDateTaskFile } from "@/lib/storage";
+import {
+  assertCanAccessEmployeeRecords,
+  assertCanAssignTasks,
+  canAccessTeamTasks,
+  isAdmin,
+  ForbiddenError,
+} from "@/lib/authorization";
+import { getAvatarPublicUrl, getSignedDownloadUrl, uploadDateTaskFile } from "@/lib/storage";
 import { writeAuditLog } from "@/lib/audit-log";
 import { writeNotification } from "@/lib/notifications";
 import { readDateDecisions, autoConfirmShiftForApprovedDate } from "@/lib/availability";
 import { postMessage } from "@/lib/direct-messages";
-import type { AvailabilitySlot, CurrentEmployee, DateTaskCommentDTO, DateTaskDTO } from "@/types";
+import type { AvailabilitySlot, CurrentEmployee, DateTaskCommentDTO, DateTaskDTO, TeamDateTasksRowDTO } from "@/types";
 
 /**
  * Correction brief (Sept 2026, "Correction & Refinement Brief" #2): "Redesign this area into an
@@ -193,6 +199,90 @@ export async function listRecentlyApprovedDateTasks(actor: CurrentEmployee): Pro
       take: 20,
     });
     return rows.map(toDTO);
+  });
+}
+
+/** Needs-action first, then already-in-motion/handed-off, then a settled Approved last — same
+ *  ordering MyTasksView's own local priorityRank uses for a single person's task list, applied
+ *  here per-employee so each Team Tasks card reads in the same "what needs attention" order
+ *  whoever opens the My Tasks page sees for their own tasks. */
+function taskPriorityRank(t: DateTaskDTO): number {
+  if (t.status === "ASSIGNED" || t.status === "RETURNED") return 0;
+  if (t.status === "IN_PROGRESS" || t.status === "AWAITING_REVIEW") return 1;
+  return 2;
+}
+
+/** One row per active team member for the new Team Tasks admin page (src/app/(portal)/admin/
+ *  tasks) — CB, Oct 2026: "a sub dropdown menu on my tasks... for like the admin's team member
+ *  tasks... so we could see the team members task... holistic with all the different team
+ *  members with all the different tasks." Until now a task only ever showed up scattered one
+ *  date at a time (DateTasksPanel) or, for a reviewer, as a flat AWAITING_REVIEW-only queue
+ *  (listAllAwaitingReviewDateTasks) — this is the first place every status, for every team
+ *  member, for one period, comes back together in one query.
+ *
+ *  Same roster query (and same admin-sees-everyone/supervisor-sees-own-reports scoping) as
+ *  listAdminAttendance in src/lib/attendance-admin.ts, so the page's per-person card header
+ *  matches every other "one row per team member" list in this app; same `taskDate` range
+ *  filter shape listAdminAttendance applies to TimeEntry.workDate, applied here to DateTask.
+ *  taskDate instead, and deliberately NOT filtered by status — unlike
+ *  listAllAwaitingReviewDateTasks, which only ever shows AWAITING_REVIEW, CB specifically wants
+ *  "holistic... all the different tasks," so Assigned/In Progress/Awaiting Review/Approved/
+ *  Returned all come back together and the page's own filter chips split them client-side.
+ *  Employees with zero tasks in the period still get a row (an empty `tasks` array) — "all
+ *  caught up" is a real, useful answer, not something to hide by leaving them out. */
+export async function listTeamDateTasksForPeriod(
+  actor: CurrentEmployee,
+  start: string,
+  end: string
+): Promise<TeamDateTasksRowDTO[]> {
+  if (!canAccessTeamTasks(actor)) throw new ForbiddenError();
+
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const employees = await tx.employee.findMany({
+      where: {
+        deactivatedAt: null,
+        ...(isAdmin(actor) ? {} : { supervisorId: actor.id }),
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        preferredName: true,
+        jobTitle: true,
+        avatarStorageKey: true,
+      },
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+    });
+
+    const rows: TaskRow[] = await tx.dateTask.findMany({
+      where: {
+        employeeId: { in: employees.map((e) => e.id) },
+        taskDate: { gte: start, lte: end },
+      },
+      include: TASK_INCLUDE,
+      orderBy: [{ taskDate: "asc" }, { createdAt: "asc" }],
+    });
+
+    const tasksByEmployee = new Map<string, DateTaskDTO[]>();
+    for (const row of rows) {
+      const dto = toDTO(row);
+      const existing = tasksByEmployee.get(row.employeeId);
+      if (existing) existing.push(dto);
+      else tasksByEmployee.set(row.employeeId, [dto]);
+    }
+
+    return employees.map((e) => {
+      const tasks = (tasksByEmployee.get(e.id) ?? []).sort((a, b) =>
+        a.taskDate === b.taskDate ? taskPriorityRank(a) - taskPriorityRank(b) : a.taskDate < b.taskDate ? -1 : 1
+      );
+      return {
+        employeeId: e.id,
+        name: `${e.preferredName || e.firstName} ${e.lastName}`,
+        jobTitle: e.jobTitle,
+        avatarUrl: e.avatarStorageKey ? getAvatarPublicUrl(e.avatarStorageKey) : null,
+        tasks,
+      };
+    });
   });
 }
 
