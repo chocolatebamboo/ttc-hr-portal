@@ -552,7 +552,19 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
                 ← All team members
               </button>
               <div
-                className="rounded-2xl overflow-hidden shadow-sm mb-4 p-5"
+                // Round ten (CB, on this card's own "2-WEEK REPORT" preset dropdown: "I'm
+                // noticing that the drop-down here isn't responding well"): the toggle itself was
+                // fine — the real bug was this card's own `overflow-hidden`, kept here on the
+                // mistaken assumption the gradient `background` below needed it clipped to the
+                // rounded corners. It never did (a `background` always honors `border-radius` on
+                // its own element, with or without `overflow`); what that `overflow-hidden`
+                // actually did was clip the period-preset dropdown's own absolutely-positioned
+                // menu (below, `top-full`) the moment it opened near this card's bottom edge,
+                // hiding everything past "This Week" — exactly CB's screenshot. Dropped so the
+                // menu can render in full; it floats over the table beneath on open (z-10) the
+                // same way any dropdown menu does, and the card's rounded corners and gradient
+                // are unaffected.
+                className="rounded-2xl shadow-sm mb-4 p-5"
                 style={{ background: "linear-gradient(135deg, var(--ttc-pink-ink), var(--ttc-pink))" }}
               >
                 <div className="flex items-center gap-3.5">
