@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import AvailabilityStatusPill from "@/components/AvailabilityStatusPill";
-import JumpToTodayButton from "@/components/JumpToTodayButton";
 import SwipeReveal from "@/components/SwipeReveal";
 import { ChecklistIcon, ChevronDownIcon, TrashIcon } from "@/components/icons";
 import { formatSlotDate, formatTime12h } from "@/lib/availability-format";
@@ -272,29 +271,40 @@ export { useAvailabilityPanel };
  * from TeamAvailabilitySection/AvailabilityAdminView, not here) — the draft in progress, if
  * any, isn't lost; closing that detail panel returns to it.
  *
- * Renders past-to-future top-to-bottom (CB, Sept 2026, restructuring this page's layout: "When
- * somebody opens Availability on September 6, 2026, September should be the main starting
- * point. From there they scroll down into October, November, December, etc. and can scroll up
- * to August, July, etc.") — deliberately the OPPOSITE order from how this component originally
- * shipped (future above, current month as the last item, no past at all), and also the opposite
- * of My Time's own calendar, which intentionally keeps "scroll up for future, down for past."
- * Left My Time as-is since this request was specifically about Availability's layout; the two
- * calendars no longer share a scroll direction, but they never shared past-month behavior
- * either (My Time paginates lazily; this one loads its whole ±window eagerly).
+ * Shows one month at a time (Round 3, CB, Oct 2026, garbled voice-to-text while looking at the
+ * old version's stacked list of 10 months with overlapping sticky month labels: "I wanna kind
+ * of just be able to toggle between the different months and I should be able to change the
+ * months by clicking on the month and like kinda scrolling there instead of having to like
+ * scroll down because right now the functionality or the responsiveness is kind of clunky").
+ * This REPLACES the earlier past-to-future scrolling column this component originally shipped
+ * with — `offset` (0 = this month) now picks a single month via the exact same getMonth()
+ * helper that scrolling version already used to build its list, just one call instead of
+ * MAX_FUTURE_OFFSET - PAST_OFFSET + 1 of them. Left/right arrows step `offset` by one, same
+ * look and same tap as the pay-period week nav on the Timesheet tab (ReviewTimesheetView,
+ * TimesheetView) — CB specifically asked for that same pattern ("similar to like how we had on
+ * the availability... how we could see the different weeks of like the pay period weeks").
+ * Tapping the month name itself still opens a dropdown of every month in the same
+ * PAST_OFFSET..MAX_FUTURE_OFFSET range for jumping further than one step at a time, current
+ * month tagged "Today." Confirmed over a plain single-step-only nav specifically because CB
+ * also wanted to "kind of see holistically everything like the full month to choose from."
  *
  * Redesign follow-up (Sept 2026), CB, on this calendar's date-tap experience versus the "This
  * week" strip's own: "when we go to the full calendar and we click one of the dates, it's not
  * having that same experience when we click on a date... I need you to make sure that is
  * fixed." This calendar used to render its own two-region desktop layout (a scrolling month
  * column beside a non-scrolling detail sidebar) plus a floating bottom sheet on mobile — a
- * treatment built back when this was a full standalone page. Since the redesign it's ONLY ever
- * embedded inside AvailabilityView's own compact, already-bounded "Full calendar" card (see
- * that file's own doc comment), so that two-region/sheet treatment no longer served a real
- * layout need — it just meant tapping a date here opened a differently-positioned panel than
- * tapping one in the strip a few inches above it. This now always renders a single stacked
- * column, and Panel itself (see its own doc comment below) no longer branches on a presentation
- * variant at all — so wherever you tap a date on this page, the exact same panel opens the exact
- * same way, right underneath what you tapped.
+ * treatment built back when this was a full standalone page. Since that redesign it's ONLY ever
+ * embedded inside AvailabilityView's own "Full calendar" card (see that file's own doc
+ * comment), so that two-region/sheet treatment no longer served a real layout need. Panel
+ * itself (see its own doc comment below) doesn't branch on a presentation variant at all — so
+ * wherever you tap a date on this page, the exact same panel opens the exact same way, right
+ * underneath what you tapped. Round 3 (CB, Oct 2026, from a live screenshot of the admin's
+ * Availability page) went further still: with ten months stacked in one scrolling column, the
+ * panel rendered once at the very bottom of ALL of them rather than next to whichever month was
+ * actually on screen, so tapping a date while scrolled to an earlier month could drop the panel
+ * many months further down — effectively invisible without scrolling past everything still
+ * left in the list. Showing one month at a time (above) removes this class of bug outright:
+ * there's only ever one month's worth of content for the panel to render below.
  *
  * A DENIED submission's detail isn't a dead end (CB, Sept 2026: "it's like it's not giving you
  * the option to even adjust... almost like a permanent statement") — its "Submit different
@@ -315,87 +325,38 @@ export { useAvailabilityPanel };
 export default function AvailabilityCalendar({ controls }: { controls: AvailabilityCalendarControls }) {
   const { submissions } = controls;
 
-  // Ascending offset order (PAST_OFFSET .. MAX_FUTURE_OFFSET) so the array is already in
-  // top-to-bottom render order with no reordering logic needed — past months first, current
-  // month in the middle, future months last. See this component's doc comment above for why
-  // this is the opposite of My Time's own month ordering.
-  const [months] = useState<Month[]>(() =>
-    Array.from({ length: MAX_FUTURE_OFFSET - PAST_OFFSET + 1 }, (_, i) => getMonth(PAST_OFFSET + i))
+  // Round 3 (CB, Oct 2026) — see this component's own doc comment above. `offset` (0 = this
+  // month) replaces the old eagerly-loaded PAST_OFFSET..MAX_FUTURE_OFFSET array of every month
+  // at once: only the one month currently being looked at is ever built, via the same getMonth()
+  // helper the scrolling version already used.
+  const [offset, setOffset] = useState(0);
+  const month = useMemo(() => getMonth(offset), [offset]);
+
+  // The month-name button's own dropdown, for jumping further than one step — every month in
+  // the same range the old scrolling list covered, built once since getMonth() is cheap and pure.
+  const pickerMonths = useMemo(
+    () => Array.from({ length: MAX_FUTURE_OFFSET - PAST_OFFSET + 1 }, (_, i) => ({ offset: PAST_OFFSET + i, month: getMonth(PAST_OFFSET + i) })),
+    []
   );
-  const currentMonthRef = useRef<HTMLDivElement | null>(null);
-  // Tracks whichever requestAnimationFrame is pending from the scroll effect below, so its
-  // cleanup can cancel a not-yet-fired one on unmount instead of leaking it.
-  const rafRef = useRef<number | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement | null>(null);
 
-  // CB, round five (pointing at an Airbnb-style host calendar reference video): "it auto
-  // updates with the... respective date or month at the top" while scrolling — a sticky header
-  // (rendered below, just above the month list) that always names whichever month is currently
-  // scrolled to the top of view, the same way that reference calendar's own header behaves.
-  // Every month wrapper below registers itself here by its own `month.start` key so the
-  // IntersectionObserver effect can watch all of them at once, not just the current one.
-  const monthRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const [currentLabel, setCurrentLabel] = useState(() => getMonth(0).label);
-
-  useEffect(() => {
-    // A thin horizontal band near the very top of the viewport — rootMargin's negative top
-    // pushes it down past the sticky header's own height, and the large negative bottom keeps
-    // it thin, so "which month is intersecting this band" reads as "which month is scrolled to
-    // the top" rather than "which month is merely anywhere on screen." root: null (the
-    // viewport) works correctly here even for the desktop layout's own internally-scrolling
-    // column — a target's bounding rect already reflects any scrollable ancestor's scroll
-    // offset, so intersection with the viewport still tracks scroll position inside that column.
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries.filter((e) => e.isIntersecting);
-        if (visible.length === 0) return;
-        const topMost = visible.reduce((best, e) => (e.boundingClientRect.top < best.boundingClientRect.top ? e : best));
-        const label = topMost.target.getAttribute("data-month-label");
-        if (label) setCurrentLabel(label);
-      },
-      { rootMargin: "-8px 0px -82% 0px", threshold: 0 }
-    );
-    monthRefs.current.forEach((el) => observer.observe(el));
-    return () => observer.disconnect();
-  }, [months]);
-
-  // Same "land on today" behavior as TimesheetCalendar, including the same fix for the same
-  // real bug: Next.js's own App Router scroll-restoration runs its scroll-to-top AFTER this
-  // component's own mount effect (a parent's plain useEffect can still undo a child's
-  // useLayoutEffect on the very same navigation, since passive effects across the whole tree
-  // commit after every layout effect has), so a plain mount-time scrollIntoView isn't reliably
-  // the last word. The two rAF callbacks re-assert the same scroll a couple of frames later,
-  // after the browser has actually painted — by then every effect from this commit (ours and
-  // the router's) has run, so nothing scrolls out from under it again. pageshow/
-  // visibilitychange separately cover the PWA-background/bfcache-reopen case, where this
-  // component never remounts at all.
-  // Hoisted out of the effect below (rather than a local function inside it) so the
-  // JumpToTodayButton's onClick can reuse the exact same scroll call.
-  function scrollToCurrentMonth() {
-    currentMonthRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
+  function goToOffset(next: number) {
+    setOffset(Math.max(PAST_OFFSET, Math.min(MAX_FUTURE_OFFSET, next)));
+    setPickerOpen(false);
   }
 
-  useLayoutEffect(() => {
-    scrollToCurrentMonth();
-    const raf1 = requestAnimationFrame(() => {
-      const raf2 = requestAnimationFrame(scrollToCurrentMonth);
-      rafRef.current = raf2;
-    });
-    rafRef.current = raf1;
-
-    function onPageShow() {
-      scrollToCurrentMonth();
+  // Closes the dropdown on an outside tap/click — same "tap away to dismiss" behavior as any
+  // other popover in this app, just hand-rolled here since this one isn't built on a shared
+  // dropdown primitive.
+  useEffect(() => {
+    if (!pickerOpen) return;
+    function onPointerDown(e: PointerEvent) {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) setPickerOpen(false);
     }
-    function onVisibilityChange() {
-      if (document.visibilityState === "visible") scrollToCurrentMonth();
-    }
-    window.addEventListener("pageshow", onPageShow);
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => {
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-      window.removeEventListener("pageshow", onPageShow);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-    };
-  }, []);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [pickerOpen]);
 
   const panel = useAvailabilityPanel({
     submissions,
@@ -422,51 +383,73 @@ export default function AvailabilityCalendar({ controls }: { controls: Availabil
   return (
     // A single stacked column at every width — see this component's own doc comment above for
     // why the old md:flex-row two-region desktop split was dropped. AvailabilityView's own
-    // "Full calendar" card already owns the one real scroll region here (a fixed max-height with
-    // overflow-y-auto around this whole component), so this just needs to flow normally inside
-    // it — no independent scrolling column of its own to manage.
+    // "Full calendar" card wraps this in a plain, unbounded block now (Round 3 — see that
+    // file's own doc comment), so this just needs to flow normally inside it.
     <div className="flex flex-col gap-4">
-      {/* scrollbar-hide (CB, Sept 2026, back when this column scrolled independently): "I don't
-          want that... where the scroll bar is" — kept even though the scrolling itself moved up
-          to AvailabilityView's wrapper, since a long month list can still occasionally exceed
-          that wrapper on very old/narrow browsers where scrollbar-gutter behaves differently;
-          harmless either way. */}
-      <div className="space-y-6 scrollbar-hide">
-        {/* CB, round five: the auto-updating month header from her Airbnb-calendar reference
-            video — tapping it, like that reference's own chevron, jumps straight back to today. */}
+      {/* Round 3 month nav (CB, Oct 2026) — left/right arrows step one month at a time, same
+          look and tap as the pay-period week nav on the Timesheet tab (ReviewTimesheetView,
+          TimesheetView); tapping the month name itself opens a dropdown for jumping further
+          than one step. Replaces the old sticky auto-updating header + 10-month scrolling
+          column entirely — see this component's own doc comment above. */}
+      <div className="flex items-center justify-center gap-3.5">
         <button
           type="button"
-          onClick={scrollToCurrentMonth}
-          className="sticky top-0 z-10 -mx-1 mb-1 flex items-center gap-1 bg-background/95 backdrop-blur px-1 py-2 text-left"
+          onClick={() => goToOffset(offset - 1)}
+          disabled={offset <= PAST_OFFSET}
+          aria-label="Previous month"
+          className="btn-neutral h-8 w-8 text-sm shrink-0"
         >
-          <span className="font-serif font-bold text-xl">{currentLabel}</span>
-          <ChevronDownIcon className="h-4 w-4 text-muted" />
+          ←
         </button>
-        <p className="text-center text-xs text-muted/60 py-2">
-          Tap the dates you&apos;re available — you can plan up to {MAX_FUTURE_OFFSET} months ahead.
-        </p>
-        {months.map((month, i) => {
-          const offset = PAST_OFFSET + i;
-          return (
-            <div
-              key={month.start}
-              ref={(el) => {
-                if (offset === 0) currentMonthRef.current = el;
-                if (el) monthRefs.current.set(month.start, el);
-                else monthRefs.current.delete(month.start);
-              }}
-              data-month-label={month.label}
-            >
-              <MonthSection month={month} byDate={byDate} draft={draft} today={today} onDayClick={handleDayClick} />
+        <div className="relative" ref={pickerRef}>
+          <button
+            type="button"
+            onClick={() => setPickerOpen((o) => !o)}
+            aria-expanded={pickerOpen}
+            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 min-w-[160px] justify-center hover:bg-black/[0.04]"
+          >
+            <span className="font-serif font-bold text-xl">{month.label}</span>
+            <ChevronDownIcon className={`h-4 w-4 text-muted transition-transform ${pickerOpen ? "rotate-180" : ""}`} />
+          </button>
+          {pickerOpen && (
+            <div className="absolute left-1/2 top-full z-20 mt-1 w-56 -translate-x-1/2 max-h-60 overflow-y-auto rounded-2xl border border-border bg-surface p-1.5 shadow-lg">
+              {pickerMonths.map(({ offset: o, month: m }) => (
+                <button
+                  key={m.start}
+                  type="button"
+                  onClick={() => goToOffset(o)}
+                  className={`w-full flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-sm text-left ${
+                    o === offset ? "bg-accent-ink text-white font-semibold" : "hover:bg-black/[0.04]"
+                  }`}
+                >
+                  {m.label}
+                  {o === 0 && (
+                    <span
+                      className={`text-[10px] font-semibold uppercase tracking-wide ${o === offset ? "text-white/75" : "text-muted"}`}
+                    >
+                      Today
+                    </span>
+                  )}
+                </button>
+              ))}
             </div>
-          );
-        })}
-        <p className="text-center text-xs text-muted/60 py-2">That&apos;s as far as planning goes for now.</p>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() => goToOffset(offset + 1)}
+          disabled={offset >= MAX_FUTURE_OFFSET}
+          aria-label="Next month"
+          className="btn-neutral h-8 w-8 text-sm shrink-0"
+        >
+          →
+        </button>
       </div>
+      <p className="text-center text-xs text-muted/60 -mt-2">
+        Tap a date to select it — you can plan up to {MAX_FUTURE_OFFSET} months ahead.
+      </p>
 
-      {/* Same "don't get lost" affordance as My Time's calendar (CB, Sept 2026) — hidden while
-          the draft/detail panel is open on a phone, since it occupies the same corner. */}
-      <JumpToTodayButton targetRef={currentMonthRef} onJump={scrollToCurrentMonth} hidden={showPanel} />
+      <MonthSection month={month} byDate={byDate} draft={draft} today={today} onDayClick={handleDayClick} />
 
       {showPanel && (
         <Panel
@@ -687,10 +670,18 @@ export function Panel({
       // this same plain block, there's only ever one presentation, so the branch — and the prop
       // — are gone rather than left as dead code nobody will remember to keep in sync. Rendered
       // by a caller that already owns its own card (either AvailabilityView's "This week" strip,
-      // or its "Full calendar" section), so this just needs to be a normal block in that flow,
-      // capped and scrollable only if its own content (many selected dates, a long task list)
-      // actually runs long.
-      className="bg-neutral-900 text-white rounded-2xl p-4 max-h-[26rem] overflow-y-auto"
+      // or its "Full calendar" section), so this just needs to be a normal block in that flow.
+      //
+      // Round 2 (CB, Oct 2026, from a live screenshot of the "This week" strip's own panel with
+      // "Submit this date for approval" visibly cut off by the card's bottom edge): this used to
+      // additionally be capped at max-h-[26rem] (416px) with overflow-y-auto — a single drafted
+      // date's content (intro line, time-off row, date box, note box, Submit button) sits right
+      // around that same 416px, so the Submit button landed exactly on the clipped edge with no
+      // visible scrollbar on mobile to reveal it. No cap anymore: this panel now simply sizes to
+      // its own content, however long that is, and whatever page or card it's embedded in
+      // handles the scrolling — see AvailabilityView.tsx's own "Full calendar" wrapper for the
+      // matching change on that side.
+      className="bg-neutral-900 text-white rounded-2xl p-4"
     >
       <div className="flex items-center justify-between gap-3 mb-3">
         <p className="text-sm font-medium">{headerLabel}</p>
