@@ -6,16 +6,22 @@ import { bottomNavForRole } from "@/lib/nav";
 import type { Role } from "@/types";
 
 /**
- * Mobile-only bottom tab bar — capped at four fixed, thumb-sized targets so nothing requires
- * horizontal scrolling to reach. "More" opens a plain list of everything else (role-aware)
- * rather than a nested menu, keeping every screen a single tap deep.
+ * Mobile-only bottom tab bar — thumb-sized targets laid out with flex-1 (not a fixed grid), so
+ * nothing requires horizontal scrolling to reach regardless of item count. "More" opens a plain
+ * list of everything else (role-aware) rather than a nested menu, keeping every screen a single
+ * tap deep.
  *
- * Correction brief #7 (Sept 2026), "Mobile navigation by permission level": the four items are
- * now role-aware (see bottomNavForRole in src/lib/nav.ts) instead of one fixed list for
- * everyone — regular team members get Home / Availability / My Messages / More, while
- * SUPER_ADMIN/HR_ADMIN get Reports in that third slot instead. "My Time" dropped out of this
- * bar entirely as part of the same brief's #6 (its functionality moved into Availability —
- * /time now just redirects there).
+ * Correction brief #7 (Sept 2026), "Mobile navigation by permission level": the items are
+ * role-aware (see bottomNavForRole in src/lib/nav.ts) instead of one fixed list for everyone —
+ * regular team members get a four-item bar, Home / Availability / My Messages / More. "My Time"
+ * dropped out of this bar entirely as part of the same brief's #6 (its functionality moved into
+ * Availability — /time now just redirects there).
+ *
+ * Round 2 (CB, Oct 2026, from a live screenshot of the Home dashboard with the bottom bar
+ * circled: "For admin I wanna add like the messages in like within this menu... so that we have
+ * quick access to it"): staff (SUPER_ADMIN/HR_ADMIN/SUPERVISOR) now get a five-item bar instead —
+ * Home / Availability / Reports / Messages / More — approved via mockup over the alternative of
+ * swapping Reports out. See bottomNavForRole's own doc comment for the full history.
  *
  * `needsOnboardingAttention` puts a small dot on "More" (not a dedicated Onboarding tab,
  * since Onboarding itself lives one tap deeper on the More screen — see more/page.tsx, which
