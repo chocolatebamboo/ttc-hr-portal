@@ -422,6 +422,40 @@ async function loadShiftRow(tx: PrismaClient, shiftId: string): Promise<ShiftRow
   return row;
 }
 
+/** The handful of fields the "Add to Calendar" feature (CB, Oct 2026) needs — see
+ *  src/lib/ics.ts for the actual .ics generation and
+ *  src/app/api/shifts/[shiftId]/ics/route.ts for where the two meet. */
+export interface ShiftCalendarInfo {
+  id: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  status: ShiftStatus;
+}
+
+/**
+ * Team member downloading a calendar event for one of their OWN shifts — same
+ * ownership-checked-inside-the-lib-function shape as requestShiftChange/requestShiftCancellation
+ * above, backed the same way by the shift_self_request RLS policy underneath it. Deliberately
+ * NOT restricted to status === "UPCOMING" here — that's only where ScheduleView's button shows
+ * up (matching the approved mockup), not a hard rule about which shifts are worth adding to a
+ * phone's calendar; a direct link to an already-answered shift (say, approved moments after the
+ * page loaded) should still just work rather than erroring.
+ */
+export async function getShiftForCalendar(actor: CurrentEmployee, shiftId: string): Promise<ShiftCalendarInfo> {
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const existing = await loadShiftRow(tx, shiftId);
+    if (existing.employeeId !== actor.id) throw new ForbiddenError();
+    return {
+      id: existing.id,
+      date: existing.date,
+      startTime: existing.startTime,
+      endTime: existing.endTime,
+      status: existing.status as ShiftStatus,
+    };
+  });
+}
+
 // Phase 2 (client spec, Sept 2026): "Once availability is approved and becomes a confirmed
 // shift, the Team Member must not be able to edit or delete it directly. Instead, provide:
 // Request Shift Change, Request Cancellation... The Supervisor or Admin can: Approve the
