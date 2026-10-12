@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import ShiftStatusPill from "@/components/ShiftStatusPill";
-import { ChecklistIcon } from "@/components/icons";
+import { ChecklistIcon, CalendarPlusIcon } from "@/components/icons";
 import { formatSlotDate, formatTime12h } from "@/lib/availability-format";
 import { getWeek, formatWeekRange } from "@/lib/week";
 import type { ShiftDTO, ShiftStatus } from "@/types";
@@ -149,7 +149,11 @@ export default function ScheduleView() {
  *  path around "the Team Member must not be able to edit or delete it directly." Only offered on
  *  a shift whose STORED status is UPCOMING (not the derived displayStatus — a shift already
  *  IN_PROGRESS or COMPLETED by the clock is still, underneath, an UPCOMING row eligible for a
- *  request right up until it's actually over; see deriveShiftDisplayStatus's own doc comment). */
+ *  request right up until it's actually over; see deriveShiftDisplayStatus's own doc comment).
+ *
+ *  "Add to Calendar" (CB, Oct 2026) sits in that same row, gated the same way — see
+ *  src/lib/ics.ts and src/app/api/shifts/[shiftId]/ics/route.ts for the actual .ics file this
+ *  links to. */
 function ShiftCard({
   shift,
   onChanged,
@@ -246,7 +250,19 @@ function ShiftCard({
       )}
 
       {canRequest && mode === "none" && (
-        <div className="flex items-center gap-3 mt-3">
+        <div className="flex items-center gap-3 mt-3 flex-wrap">
+          {/* "Add to Calendar" (CB, Oct 2026: "they could add it to their calendar like if they
+              have the iPhone"). A plain <a> straight at the .ics route, not a button + fetch —
+              iOS Safari's native "Add to Calendar" sheet only triggers off a real navigation to
+              a text/calendar response. Same canRequest/mode gating as the two links beside it:
+              only an UPCOMING shift with no in-progress request form has this available. */}
+          <a
+            href={`/api/shifts/${shift.id}/ics`}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-ink bg-brand/10 border border-brand/20 rounded-full pl-2 pr-2.5 py-1 hover:bg-brand/15"
+          >
+            <CalendarPlusIcon className="h-3.5 w-3.5" />
+            Add to Calendar
+          </a>
           <button
             type="button"
             onClick={() => setMode("change")}
