@@ -216,6 +216,10 @@ export interface MyProfileDTO {
   notifyClockOutEmail: boolean;
   notifyAnnouncementEmail: boolean;
   notifyMessageEmail: boolean;
+  /** Added Oct 2026 — the email counterpart to the in-app "submit your availability for next
+   *  week" banner (AvailabilityView.tsx's showCutoffReminder), which only ever reached someone
+   *  who had the Availability page open. Same shape as the four above. */
+  notifyAvailabilityCutoffEmail: boolean;
 }
 
 /** The fields My Profile actually lets you change — see enforce_employee_self_update() in
@@ -232,6 +236,7 @@ export interface UpdateMyProfileInput {
   notifyClockOutEmail?: boolean;
   notifyAnnouncementEmail?: boolean;
   notifyMessageEmail?: boolean;
+  notifyAvailabilityCutoffEmail?: boolean;
 }
 
 export interface DirectReportDTO {
