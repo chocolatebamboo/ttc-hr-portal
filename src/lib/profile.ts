@@ -33,6 +33,7 @@ const SELECT = {
   notifyClockOutEmail: true,
   notifyAnnouncementEmail: true,
   notifyMessageEmail: true,
+  notifyAvailabilityCutoffEmail: true,
   jobTitle: true,
   role: true,
   employmentStatus: true,
@@ -63,6 +64,7 @@ type SelectedEmployee = {
   notifyClockOutEmail: boolean;
   notifyAnnouncementEmail: boolean;
   notifyMessageEmail: boolean;
+  notifyAvailabilityCutoffEmail: boolean;
   jobTitle: string;
   role: string;
   employmentStatus: string;
@@ -92,6 +94,7 @@ function toDTO(e: SelectedEmployee): MyProfileDTO {
     notifyClockOutEmail: e.notifyClockOutEmail,
     notifyAnnouncementEmail: e.notifyAnnouncementEmail,
     notifyMessageEmail: e.notifyMessageEmail,
+    notifyAvailabilityCutoffEmail: e.notifyAvailabilityCutoffEmail,
     jobTitle: e.jobTitle,
     role: e.role as MyProfileDTO["role"],
     employmentStatus: e.employmentStatus as MyProfileDTO["employmentStatus"],
@@ -143,6 +146,7 @@ export async function updateMyProfile(
         notifyClockOutEmail: input.notifyClockOutEmail,
         notifyAnnouncementEmail: input.notifyAnnouncementEmail,
         notifyMessageEmail: input.notifyMessageEmail,
+        notifyAvailabilityCutoffEmail: input.notifyAvailabilityCutoffEmail,
       },
       select: SELECT,
     });
