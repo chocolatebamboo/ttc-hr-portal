@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import AvatarEditor from "@/components/AvatarEditor";
-import { ClockIcon, MegaphoneIcon, ChatIcon } from "@/components/icons";
+import { ClockIcon, MegaphoneIcon, ChatIcon, CalendarIcon } from "@/components/icons";
 import type { EmploymentStatus, MyProfileDTO, Role, UpdateMyProfileInput } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
@@ -56,6 +56,7 @@ type FormValues = {
   notifyClockOutEmail: boolean;
   notifyAnnouncementEmail: boolean;
   notifyMessageEmail: boolean;
+  notifyAvailabilityCutoffEmail: boolean;
 };
 
 function toFormValues(p: MyProfileDTO): FormValues {
@@ -71,6 +72,7 @@ function toFormValues(p: MyProfileDTO): FormValues {
     notifyClockOutEmail: p.notifyClockOutEmail,
     notifyAnnouncementEmail: p.notifyAnnouncementEmail,
     notifyMessageEmail: p.notifyMessageEmail,
+    notifyAvailabilityCutoffEmail: p.notifyAvailabilityCutoffEmail,
   };
 }
 
@@ -381,6 +383,14 @@ export default function ProfileView() {
                     description="When someone sends you a message in the Portal."
                     checked={form.notifyMessageEmail}
                     onChange={(v) => set("notifyMessageEmail", v)}
+                  />
+                  <NotificationRow
+                    icon={<CalendarIcon className="h-[17px] w-[17px] text-accent-ink" />}
+                    iconBg="bg-accent/10"
+                    label="Availability reminder"
+                    description="A nudge Thursday through Saturday if you haven't submitted next week's availability yet."
+                    checked={form.notifyAvailabilityCutoffEmail}
+                    onChange={(v) => set("notifyAvailabilityCutoffEmail", v)}
                   />
                 </div>
 
