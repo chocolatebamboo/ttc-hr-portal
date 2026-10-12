@@ -257,6 +257,15 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   actual timezone (unlike the clock-out jobs, which only measure elapsed duration), hardcoded to
   `America/New_York` (`ORG_TIMEZONE` in `src/lib/time.ts`) per CB confirming that's where TTC's
   shifts are.
+- **Add to Calendar** — My Schedule (CB, Oct 2026: "once it's approved they could get... like if
+  they have the iPhone and they could add it to their calendar"). Not a real push notification
+  (impossible from a website without an installed App Store app) — instead, each `UPCOMING`
+  shift's card gets an "Add to Calendar" button that downloads a one-event `.ics` file for that
+  single shift (`src/lib/ics.ts`'s `buildIcsEvent`, served from `GET
+  /api/shifts/[shiftId]/ics`). iOS Safari recognizes the `text/calendar` response and opens its
+  native "Add to Calendar" confirmation sheet directly; the same file works the same way on
+  Android and desktop calendar apps too. Self-only and one shift at a time, confirmed via
+  `AskUserQuestion` — no whole-week batch export.
 - **Availability cutoff reminders** — CB, Oct 2026, following up on the in-app "submit your
   availability for next week" banner (`AvailabilityView.tsx`'s `showCutoffReminder`, Thursday
   through Saturday, visible only to someone with the Availability page actually open): "we're
