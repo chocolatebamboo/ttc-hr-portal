@@ -1,0 +1,29 @@
+-- CB, Oct 2026: "we're supposed to send out that reminder to make their schedule on Sunday...
+-- I want to make sure that's working properly." The in-app "submit your availability for next
+-- week" banner (AvailabilityView.tsx's showCutoffReminder) only ever showed up Thursday through
+-- Saturday to someone who had the Availability page open — it never had an email counterpart
+-- the way the clock-in/clock-out reminders do, so anyone who didn't open the app never saw it
+-- at all. This migration adds the two columns the new email job (src/lib/availability-cutoff-
+-- reminders.ts) needs.
+--
+-- Informational only — already applied directly to the live Supabase database via
+-- mcp__Supabase__apply_migration (same reasoning as every prior phase's migration files: this
+-- project's Render build never runs `prisma migrate deploy`, only `prisma generate`).
+--
+-- notifyAvailabilityCutoffEmail: a fifth self-service preference boolean on Employee, same
+-- shape and same default-true reasoning as the four added by 20261002_notification_preferences.
+-- lastAvailabilityCutoffReminderWeek: the dedup column, but keyed by WEEK (the upcoming week's
+-- own Sunday date key, "YYYY-MM-DD") rather than a timestamp like every other reminder job's
+-- dedup column — there's no single per-week row anywhere in this schema to stamp a timestamp
+-- on, so this stores which week was last reminded about instead. See its own doc comment in
+-- prisma/schema.prisma for why that's enough: once the stored value matches the week currently
+-- being checked, the reminder already went out, and a new week naturally compares against a
+-- different value with no separate clearing step needed.
+--
+-- No RLS change needed: enforce_employee_self_update() (prisma/rls.sql) is a deny-list of
+-- admin-only columns, not an allow-list, so both new self-service/bookkeeping columns already
+-- pass through it untouched — same reasoning the original notification-preferences migration
+-- gives. The cron job itself writes through a SUPER_ADMIN SYSTEM_ACTOR, same as every other
+-- reminder job in this app, which is_admin() already covers for both columns either way.
+ALTER TABLE "Employee" ADD COLUMN "notifyAvailabilityCutoffEmail" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "Employee" ADD COLUMN "lastAvailabilityCutoffReminderWeek" TEXT;
