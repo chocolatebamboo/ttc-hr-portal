@@ -232,11 +232,12 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   two reminder endpoints above.
 - **Notification preferences** — My Profile > Notifications (CB, Oct 2026: "I kind of want a
   notifications tab... they could toggle on which notifications that they could have... by
-  default... email sent to them... whichever number attached to their profile or email"). Four
+  default... email sent to them... whichever number attached to their profile or email"). Five
   self-service toggles (`Employee.notifyClockInEmail/notifyClockOutEmail/
-  notifyAnnouncementEmail/notifyMessageEmail`, all default on) covering clock-in reminders,
-  clock-out reminders, announcements, and messages — each routes to the employee's own existing
-  `ttcEmail`, never a separate contact field. Phase A (email only, confirmed via
+  notifyAnnouncementEmail/notifyMessageEmail/notifyAvailabilityCutoffEmail`, all default on)
+  covering clock-in reminders, clock-out reminders, announcements, messages, and the
+  availability-cutoff reminder below — each routes to the employee's own existing `ttcEmail`,
+  never a separate contact field. Phase A (email only, confirmed via
   `AskUserQuestion`: "Email now, text later") — the Text-message option shown on that tab stays
   visible but inactive until Phase B wires up a real SMS provider (none set up yet), at which
   point it'll route to whichever phone number (`workPhone`/`personalPhone`) the employee already
@@ -256,6 +257,20 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   actual timezone (unlike the clock-out jobs, which only measure elapsed duration), hardcoded to
   `America/New_York` (`ORG_TIMEZONE` in `src/lib/time.ts`) per CB confirming that's where TTC's
   shifts are.
+- **Availability cutoff reminders** — CB, Oct 2026, following up on the in-app "submit your
+  availability for next week" banner (`AvailabilityView.tsx`'s `showCutoffReminder`, Thursday
+  through Saturday, visible only to someone with the Availability page actually open): "we're
+  supposed to send out that reminder to make their schedule on Sunday... I want to make sure
+  that's working properly." `src/lib/availability-cutoff-reminders.ts` is the email
+  counterpart — same Thursday-through-Saturday window (`ORG_TIMEZONE`, same reason the clock-in
+  reminder needs a real timezone) and the same "has this person submitted anything covering next
+  week yet" check, just run against every active employee rather than whoever's looking at the
+  page. One email per person per upcoming week (not a daily nag), skipped — but still marked, so
+  it isn't re-checked all week — for anyone who's turned `notifyAvailabilityCutoffEmail` off.
+  Dedup is `Employee.lastAvailabilityCutoffReminderWeek` (the upcoming week's own Sunday date
+  key) rather than a timestamp, since there's no single per-week row anywhere in this schema to
+  stamp one on. Runs from `POST /api/cron/availability-cutoff-reminders`, same 15-minute schedule
+  and shared `CRON_SECRET` as the other reminder-style jobs.
 - **Announcement notifications** — My Profile > Notifications (Oct 2026): posting an
   announcement notifies (and, per that recipient's preference, emails) everyone it's actually
   targeted at, once it's actually visible to them. `Announcement.publishDate` can be future-dated
@@ -307,7 +322,7 @@ Nothing here fakes functionality that isn't real; unbuilt sections say so in the
   schedule and `CRON_SECRET`-protected shape as the three jobs above — a message scheduled for,
   say, 3:00 PM goes out sometime within that run's 15-minute window, not necessarily on the exact
   minute.
-- **What actually calls those seven cron endpoints on a schedule** — a GitHub Actions workflow
+- **What actually calls those eight cron endpoints on a schedule** — a GitHub Actions workflow
   (`.github/workflows/reminder-emails.yml`), not a Render Cron Job: Render's Cron Jobs have no
   free tier, and this repo already lives on GitHub, so a scheduled Action reuses an account
   that already exists rather than adding a new paid resource. It needs a repository secret
@@ -432,267 +447,3 @@ npm install                        # also runs `prisma generate` via postinstall
 npm run db:migrate -- --name init  # uses MIGRATE_DATABASE_URL — see scripts/migrate.mjs
 # then re-run prisma/rls.sql in the Supabase SQL editor (step 2) against the fresh tables
 npm run dev
-```
-
-Use `npm run db:migrate -- --name <whatever>` any time the schema changes and you need a new
-migration; use `npm run db:deploy` (no `--name`, nothing interactive) to apply already-generated
-migrations somewhere non-interactive, like CI or a fresh clone. Don't run `npx prisma migrate ...`
-directly — without the `MIGRATE_DATABASE_URL` swap those scripts do, it runs as `app_user`, whose
-whole point (see `prisma/rls.sql`) is to have zero DDL privileges, so it'll fail.
-
-> A note on this repo's own build history: `prisma generate` fetches from a host that was
-> network-blocked in the sandboxed environment this was built in, so the Prisma client itself
-> couldn't be generated or fully type-checked there. Everything else — the full Next.js
-> build, ESLint, and all source files — was verified clean. Run `npm install && npm run build`
-> in a normal environment (or CI) as the first real smoke test before trusting this further.
-
-### 5. Brand tokens and design direction
-
-`src/app/globals.css` uses TTC's **exact** brand colors — sampled directly from
-`public/ttc-logo.png` (blue `#0169F0`, pink `#ED008C`), not placeholders. `--ttc-pink-ink`
-and `--ttc-blue-ink` are darkened variants used anywhere brand color sits behind small text
-(button labels, nav links), so contrast stays readable — the bright brand pink itself is
-reserved for large/bold text, borders, and icon accents, matching how TTC's own branded
-BambooHR instance uses it. The visual language (bold serif page titles, pill-shaped buttons,
-pink active nav state, centered-icon empty states) was modeled on a screen recording of that
-BambooHR instance the client provided, not copied wholesale — see `.page-title`, `.btn-primary`,
-`.btn-outline`, and `.btn-neutral` in `globals.css` for the shared building blocks every page
-should use rather than one-off button styling.
-
-The two fonts (Fraunces for page titles/the logo wordmark, IBM Plex Sans for everything else)
-are **self-hosted** via the `@fontsource` packages, imported in `src/app/layout.tsx` — not
-`next/font/google`. That started as a fix for this same sandbox constraint (no network access
-to fonts.googleapis.com meant every page title silently fell back to a generic system serif,
-which is what first read as "inconsistent fonts"), but it's the right call regardless: no
-external request at page-load time, so the app never depends on Google's fonts CDN being
-reachable or unblocked by whatever network a school or nonprofit's office happens to be on.
-
-### 6. The `hr.` subdomain
-
-In Wix (Settings → Domains → your connected domain → DNS Records), add a CNAME record for
-`hr` pointing at whatever your hosting provider (e.g. Vercel) gives you for a custom domain.
-This doesn't touch anything else about the public site.
-
-### 7. Pilot accounts
-
-Once the app is actually deployed and reachable at a real URL (not just `localhost`), edit
-`scripts/create-pilot-accounts.mjs` with the real names/emails of the pilot cohort (one
-HR/Super Admin, one Supervisor, two or three Team Members reporting to that Supervisor) and run
-`npm run pilot:create-accounts`. It creates real Supabase Auth accounts (each person gets an
-email invite to set their own password — the script never sees or sets a real password for
-anyone) and the matching `Employee` rows, wired with the org relationships the pilot workflows
-need. It's idempotent — safe to re-run if you add someone or fix a typo.
-
-Run this from a machine with normal internet access — it needs to reach the real Supabase Auth
-API directly. It can't be run from the sandboxed environment this app was built in, which has an
-allowlisted network that doesn't include the live project's own domain.
-
-See **`PILOT_TESTING.md`** for the actual per-role workflow checklist to run the pilot
-against — this is the step that's meant to catch what a solo mock-and-screenshot cycle can't:
-real email deliverability, real phones and browsers, and people who don't already know where
-every button is.
-
-### 8. Bootstrapping your first Super Admin
-
-The Team Members admin page (see "What's built so far" below) can't create the very first Super
-Admin — only an existing Super Admin can grant that role to someone else, and nobody can
-change their own role from that page (the self-lockout guard, working as intended). Until at
-least one Super Admin exists, that's a chicken-and-egg problem the UI can't solve on its own.
-
-`scripts/set-role.mjs` is the one-time escape hatch: run
-`node --env-file=.env.local scripts/set-role.mjs someone@talentedteenclub.org SUPER_ADMIN` from
-a machine with the real `.env.local` (same one `create-pilot-accounts.mjs` needs) to set any
-existing team member's role directly. Once one real Super Admin account exists, everyone else's
-role can be managed from the Team Members page instead.
-
-### 9. Enable Google sign-in (optional)
-
-The "Continue with Google" button on `/login` needs Google configured as an OAuth provider in
-this Supabase project — a one-time setup step in two dashboards this app can't reach on its
-own. Until it's done, the button is harmless: it just shows "Unable to start Google sign-in,"
-and email/password keeps working exactly as before.
-
-1. **Google Cloud Console** (needs a Google account — TTC's own, not a personal one, so
-   whoever leaves the org later doesn't take the OAuth client with them):
-   - Create a project (or reuse an existing TTC one) at
-     [console.cloud.google.com](https://console.cloud.google.com).
-   - **APIs & Services → OAuth consent screen**: set it up for "External" users (TTC staff
-     signing in with their own personal or work Google accounts don't need to be in your
-     Google Workspace, if you have one), fill in the app name ("TTC HR Portal") and support
-     email. Publishing status can stay in "Testing" while you're only using this internally,
-     but Google caps Testing mode at 100 users and test users must be added by email under
-     "Test users" — switch to "In production" once the pilot is past that, which for a basic
-     OAuth consent screen (no sensitive scopes requested) doesn't require Google's review.
-   - **APIs & Services → Credentials → Create Credentials → OAuth client ID**, application
-     type **Web application**. Under "Authorized redirect URIs," add your Supabase project's
-     callback URL — find the exact one in the Supabase dashboard step below (it's shown right
-     on the Google provider settings page); it looks like
-     `https://<your-project-ref>.supabase.co/auth/v1/callback`.
-   - Save the **Client ID** and **Client Secret** it gives you — the next step needs both.
-2. **Supabase dashboard**: Project Settings → Authentication → Sign In / Providers → **Google**.
-   Toggle it on, paste in the Client ID and Client Secret from step 1, save. That's the whole
-   Supabase-side step — this app's login page already calls
-   `supabase.auth.signInWithOAuth({ provider: "google" })`, so nothing else to configure there.
-3. Test it against a real invited account: add yourself (or reuse your existing admin account)
-   on the Team Members page with your real Google email if it isn't already, sign out, and click
-   "Continue with Google" on `/login` using that same email. It should land you straight on
-   the dashboard — Supabase links the Google sign-in to your existing invited account
-   automatically by matching the verified email, no separate step needed. Then try it with an
-   email that was never added as a team member — it should bounce back to `/login` with a clear
-   "ask HR" message instead of a broken dashboard.
-
-## Roadmap (Phase 1 build order)
-
-Matches the order in the project brief — each step is built and tested before the next
-starts:
-
-1. ~~Infrastructure~~ ✅
-2. ~~Data model + RLS~~ ✅
-3. ~~Auth + role-aware shell~~ ✅
-4. ~~Time & Attendance~~ ✅ (clock in/out, any number of sessions a day, timesheet, audit trail)
-5. ~~Supervisor timesheet approval~~ ✅ (My Team, review + approve/return, team member correction + resubmit)
-6. ~~PTO request + approval~~ ✅ (submit, cancel, supervisor approve/deny with a note)
-7. ~~Document center + acknowledgments~~ ✅ (upload, per-role visibility via RLS, view via
-   signed URL, acknowledge, archive, admin progress tracking, upload a new version)
-8. ~~Onboarding checklist~~ ✅ (guided one-step-at-a-time flow — locked/current/awaiting-
-   approval/completed sequencing, typed steps incl. document acknowledgment, HR/supervisor
-   approve-or-return, auto-tracked completion date)
-9. ~~Directory + announcements~~ ✅ (searchable company directory; HR posts company-wide,
-   department, or individual announcements with an optional expiration date)
-10. ~~Payroll hours export (CSV)~~ ✅ (approved regular + PTO hours per team member for a chosen
-    date range, previewed on the Reports page and downloadable as CSV; warns if anything in the
-    period is still awaiting approval)
-11. ~~Security + mobile test pass~~ ✅ (found and fixed a real pre-existing RLS bug — see
-    "Security notes" below — then ran ~20 cross-employee authorization tests against every
-    module plus a mobile-viewport pass on every page; nothing else found). **Re-verified
-    against the real live Supabase project once it was connected** (everything up to this
-    point had only ever been tested against JS mocks of Postgres, not a real database) — this
-    live pass found and fixed three more real defects, including one that would have hard-broken
-    every RLS policy in production. Full findings, table-by-table access matrix, and live test
-    results: **`SECURITY_VERIFICATION_REPORT.md`**.
-12. Pilot accounts (1 HR/Super Admin, 1 Supervisor, 2–3 Team Members) running the complete
-    workflows from the brief — **infrastructure ready, tooling ready, not yet run.** The live
-    Supabase project now exists and is fully migrated/secured (see item 11), but
-    `scripts/create-pilot-accounts.mjs` needs real network access to the Supabase Auth API to
-    send invite emails, which the sandboxed environment this app was built in doesn't have —
-    see "Getting set up" §7 / `PILOT_TESTING.md`. This is the one roadmap step that genuinely
-    needs a real machine and real people, not something buildable further in isolation.
-
-13. ~~HR-wide Attendance + PTO dashboards, bulk timesheet approval, document versioning~~ ✅
-    (`/admin/attendance`, `/admin/pto`, "Approve all awaiting" on the per-team-member review page,
-    "New version" on the Documents Manage tab — see "What's built so far" above for each).
-14. ~~Team Members admin page~~ ✅ (`/admin/employees` — add/edit/deactivate/reactivate, real
-    Supabase invite emails from the UI). This also gives item 12 above a second path that
-    doesn't need `scripts/create-pilot-accounts.mjs` run from a machine with real network
-    access — the deployed app itself (on Render, not this sandbox) can send the invite
-    directly, so adding the Supervisor/Team Member pilot testers can happen from the Team Members
-    page instead of the script, if that's easier.
-15. ~~Administrator Instructions~~ ✅ — see **`ADMINISTRATOR_INSTRUCTIONS.md`**, written now
-    that there's real UI to document against.
-16. ~~Administration (department management)~~ ✅ (`/admin/administration` — add/rename/delete
-    departments, with delete refused while anything still references one). Also adds
-    `scripts/set-role.mjs`, the one-off script that bootstraps the very first Super Admin
-    account — see "Getting set up" §8.
-
-Every item from the original project brief is now built. What's left is genuinely optional
-follow-on work, not a gap in Phase 1 scope — see "What's NOT built yet" above for the couple of
-small, deliberate omissions (a login-email-change flow, and org-wide settings nothing yet reads).
-
-## Security notes for whoever reviews this before launch
-
-- **A full live audit was run against the real Supabase project — see
-  `SECURITY_VERIFICATION_REPORT.md` for the complete table-by-table findings.** Everything
-  below this bullet was found and fixed earlier in the session, entirely against JS mocks of
-  Postgres, because no live database existed yet. Once the real project was connected, a second
-  pass tested every table, function, storage bucket, and grant against the actual live
-  database — not policy text, not mocks — and caught three more real defects that mock-based
-  testing structurally could not have found: (1) the RLS identity function compared a `text`
-  column to a `uuid` literal, which Postgres rejects outright — every policy would have
-  hard-failed on every request in production; (2) three tables (`Department`, `Announcement`,
-  `AnnouncementAudience`) had Row-Level Security disabled entirely, leaving them reachable
-  through Supabase's own auto-exposed REST API to anyone holding the public anon key; (3) a
-  `search_path` hardening change briefly broke the admin-check function, caught immediately by
-  testing live rather than trusting a clean advisor re-scan. All three are fixed and re-verified
-  live, along with a defense-in-depth pass revoking Supabase's default anon/authenticated table
-  grants (RLS already blocked them, but a grant-level block doesn't depend on RLS being correct).
-  `prisma/rls.sql` reflects every fix and was proven to match the live database by re-running
-  the entire file end-to-end with zero errors, not just by inspection.
-
-- **A real bug was found and fixed during the step 11 security pass, and it would have broken
-  login for everyone against a real database.** `getCurrentEmployee()` (`src/lib/auth.ts`) —
-  the function every single request uses to figure out who's asking — used to run its Employee
-  lookup through the bare `prisma` export instead of `withRlsContext()`. That's exactly the
-  "reviewable red flag" the bullet below warns about, and it's a chicken-and-egg case: at the
-  moment this function runs, the app doesn't know the caller's `employeeId` yet — resolving it
-  is the whole point of the query — so there was nothing to pass `withRlsContext()`. Postgres
-  RLS is forced on `Employee` regardless of whether session variables are set, and the old
-  `employee_select` policy's clauses (`is_admin()`, `id = current_employee_id()`,
-  `supervisorId = current_employee_id()`) all evaluate to `NULL`/false with no session variable
-  set — so this lookup would have silently returned zero rows for every user, every time,
-  against a real Postgres connection. It "worked" all session because every preview mock up to
-  this point replaced `getCurrentEmployee()` entirely rather than exercising its real body, so
-  nothing had exercised this path against real RLS semantics before now. The same bare-`prisma`
-  pattern was also present in `canAccessEmployeeRecords()`'s supervisor check
-  (`src/lib/authorization.ts`), which would have permanently blocked every supervisor from
-  their own reports' timesheets and PTO for the same reason.
-
-  Fixed two ways: (1) a new `current_auth_user_id()` SQL function plus a `userId` clause on
-  `employee_select` (`prisma/rls.sql`), and a new `withUserIdContext()` helper (`src/lib/db.ts`)
-  that sets `app.current_user_id` instead of `app.current_employee_id` — this is the one lookup
-  in the app that legitimately can't know its own identity in advance, so it gets its own
-  narrower bootstrap path scoped to exactly the caller's own row; (2) `canAccessEmployeeRecords()`
-  now uses `withRlsContext()` with the actor's already-known identity, like everywhere else.
-  Verified against both a standalone script modeling the exact Postgres session-variable/NULL
-  semantics and a live functional pass hitting the real route handlers.
-
-  While in there, also hardened a second, related weakness: the Directory's
-  `or "deactivatedAt" is null` clause (see the next bullet) had no identity dependency at all,
-  so it would have let *any* unscoped query — including a hypothetical future bug that skipped
-  authentication entirely — read every active employee's row. It's now
-  `or (current_employee_id() is not null and "deactivatedAt" is null)`, so the RLS layer stays a
-  real backstop rather than a no-op even for queries that were never supposed to run unscoped.
-
-- **The mobile pass (also step 11) found nothing else.** Every page was checked at a 390×844
-  viewport as each of four test identities (HR Admin, a supervisor, and two employees who are
-  not each other's reports). The one thing that looks like a bug at first glance — timesheet
-  tables getting visually cut off on narrow screens (My Time, and the supervisor's per-employee
-  review page) — is the same intentional `overflow-x-auto` horizontal-scroll pattern already
-  used elsewhere in the app (Reports, etc.), confirmed by checking `scrollWidth` vs.
-  `clientWidth` and scrolling the table rather than trusting a single screenshot.
-
-- **The authorization test matrix.** With the fix above in place, ran targeted cross-employee
-  tests against every module — Time & Attendance approval, PTO decisions, Document
-  confidentiality, Onboarding item toggling, Directory, Announcements, and every admin-only
-  route (Documents/Onboarding/Announcements "manage", Payroll Reports, roster/assignable
-  endpoints) — confirming the right 401/403/404/200 in each case. Notably: an employee can
-  still *read* their own submitted timesheet entry or PTO request (that's `employee_select`'s
-  self clause), but is correctly blocked from *approving* it — that's an app-layer role check
-  (`assertCanReviewTimesheet`), not RLS, and the test matrix exercises both layers rather than
-  assuming either one alone is sufficient.
-
-- **The Directory's RLS grant is intentionally broad, and that's a documented trade-off, not an
-  oversight.** Every other table's `_select` policy in `prisma/rls.sql` restricts both which
-  rows AND (implicitly, since nothing broader is ever queried) which use cases can see them. The
-  `Employee` table can't work that way once a directory exists — "see your coworker's name and
-  title" and "see your coworker's personal cell number and emergency contact" are different
-  employees calling the same table, and RLS only sees rows, not why the app is asking. So
-  `employee_select` grants row visibility to any active employee for any authenticated
-  employee, and the actual restriction — never returning personalPhone, personalEmail,
-  emergencyContact*, employeeCode, hireDate, or deactivatedAt to a directory request — is
-  enforced by `src/lib/directory.ts`'s own six-field Prisma `select`, which simply never asks
-  the database for anything else. This is the same pattern Documents and Onboarding already use
-  for admin-vs-employee DTOs (RLS says which rows, the query says which columns); Directory is
-  just the first place a single table needs both a wide row grant and a narrow column grant at
-  once. If you're adding a new query against `Employee`, this is the one table on which "I used
-  `withRlsContext`" is not sufficient by itself — check what you're selecting.
-- Every sensitive table has RLS enabled **and forced** (`prisma/rls.sql`) — table ownership
-  doesn't bypass it.
-- `withRlsContext()` (`src/lib/db.ts`) is how every authenticated query should run; it sets
-  the session variables the RLS policies check. A route that imports the bare `prisma`
-  export instead of using this helper is skipping the database-layer backstop — that's a
-  reviewable red flag, not a style choice.
-- Deactivation (`Employee.deactivatedAt`) is checked on every single request via
-  `getCurrentEmployee()` — there is no session-caching of role/status that could let a
-  deactivated employee keep working until their session naturally expires.
-- No SSNs, banking details, or payroll credentials anywhere in the schema — intentional,
-  per the brief's payroll-handoff boundary.
