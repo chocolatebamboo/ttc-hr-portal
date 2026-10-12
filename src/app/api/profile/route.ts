@@ -37,6 +37,8 @@ export async function PATCH(request: Request) {
       notifyAnnouncementEmail:
         typeof body.notifyAnnouncementEmail === "boolean" ? body.notifyAnnouncementEmail : undefined,
       notifyMessageEmail: typeof body.notifyMessageEmail === "boolean" ? body.notifyMessageEmail : undefined,
+      notifyAvailabilityCutoffEmail:
+        typeof body.notifyAvailabilityCutoffEmail === "boolean" ? body.notifyAvailabilityCutoffEmail : undefined,
     };
 
     const profile = await updateMyProfile(employee, input);
