@@ -123,6 +123,22 @@ model Employee {
   notifyClockOutEmail     Boolean @default(true)
   notifyAnnouncementEmail Boolean @default(true)
   notifyMessageEmail      Boolean @default(true)
+  // Added Oct 2026, CB: "we're supposed to send out that reminder to make their schedule on
+  // Sunday... I want to make sure that's working properly" — the "submit your availability for
+  // next week" nudge (AvailabilityView.tsx's showCutoffReminder) only ever existed as an in-app
+  // banner, visible Thursday through Saturday but only to someone who actually opened the
+  // Availability page; it never had an email counterpart the way clock-in/clock-out do. This is
+  // that fifth toggle, same default-on shape as the four above.
+  notifyAvailabilityCutoffEmail Boolean @default(true)
+
+  // Dedup for src/lib/availability-cutoff-reminders.ts — same one-shot-per-thing idea as
+  // Shift.clockInReminderSentAt/TimeSession.reminderSentAt just below, but keyed by WEEK instead
+  // of a timestamp: there's no single per-week row to stamp a timestamp onto, so this stores the
+  // date key ("YYYY-MM-DD", the upcoming week's own Sunday) of whichever week this person was
+  // last reminded about. Once it already matches the week currently being checked, the cron
+  // knows that reminder already went out and skips them — no separate clearing step needed,
+  // since next week's check compares against a different date key automatically.
+  lastAvailabilityCutoffReminderWeek String?
 
   deactivatedAt DateTime? // set the instant HR ends access; checked on every request
 
