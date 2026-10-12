@@ -30,6 +30,19 @@ export function CalendarIcon({ className = base }: IconProps) {
   );
 }
 
+/** CalendarIcon above, plus the small "+" that marks "add this" — "Add to Calendar" button on
+ *  ScheduleView's ShiftCard (CB, Oct 2026). A distinct icon rather than reusing CalendarIcon so
+ *  the plain calendar glyph used elsewhere (My Profile's notification row, nav) still means
+ *  just "calendar," not "add." */
+export function CalendarPlusIcon({ className = base }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
+      <rect x="3.5" y="5" width="17" height="15.5" rx="2" />
+      <path d="M3.5 9.5h17M8 3v3.5M16 3v3.5M12 13v4M10 15h4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function FolderIcon({ className = base }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
