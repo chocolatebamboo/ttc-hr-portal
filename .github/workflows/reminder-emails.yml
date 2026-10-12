@@ -29,7 +29,13 @@ name: Reminder emails
 #     follow-up to DATE_TASK_SUBMITTED's one-time submit notification: once a task's sat in
 #     AWAITING_REVIEW for 24 hours, and once a day again for as long as it keeps sitting there,
 #     re-notifies the same reviewers.)
-# All seven are idempotent/self-limiting server-side (dedup tracking for the reminder and
+#   - POST /api/cron/availability-cutoff-reminders (src/lib/availability-cutoff-reminders.ts —
+#     CB, Oct 2026: "we're supposed to send out that reminder to make their schedule on Sunday...
+#     I want to make sure that's working properly." The email counterpart to the in-app "submit
+#     your availability for next week" banner — that banner only ever reached someone who had the
+#     Availability page open Thursday through Saturday; this reaches everyone who hasn't
+#     submitted yet, whether they open the app or not.)
+# All eight are idempotent/self-limiting server-side (dedup tracking for the reminder and
 # notification-email jobs, auto-clockout only ever touches a session that's already past its cap
 # so a late or doubled-up run can't force-close something early, and scheduled-messages only ever
 # flips a row that's still unsent past its own due time) and tolerate a few minutes of scheduling
@@ -83,4 +89,8 @@ jobs:
       - name: Date task review reminders
         run: |
           curl -sS -X POST https://ttc-hr-portal.onrender.com/api/cron/date-task-reminders \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+      - name: Availability cutoff reminders
+        run: |
+          curl -sS -X POST https://ttc-hr-portal.onrender.com/api/cron/availability-cutoff-reminders \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
