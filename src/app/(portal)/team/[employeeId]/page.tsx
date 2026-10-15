@@ -53,7 +53,14 @@ export default async function ReviewEmployeePage(
   if (!target) notFound();
 
   return (
-    <div className="max-w-3xl">
+    // Round 4 (CB, Oct 2026, pointing at the empty right-hand space on this page at desktop
+    // width): this was max-w-3xl, which left the Timesheet tab's day list stranded in a narrow
+    // column with wasted space beside it on any wide screen. Widened to max-w-6xl — the same
+    // width the employee's own My Time page (TimesheetView.tsx) already uses — so
+    // ReviewTimesheetView's new desktop sidebar (see that file) has room to sit beside the day
+    // list instead of below it. The other three tabs (Time Off/Availability/Notes) don't assume
+    // any particular max width, so they just get more breathing room on wide screens too.
+    <div className="max-w-6xl">
       {/* Oct 2026 (CB: "it needs to say like back or something... it should function like it
           going back to the original place that we clicked"): see BackLink's own doc comment —
           this no longer assumes every visit started at /team. */}
