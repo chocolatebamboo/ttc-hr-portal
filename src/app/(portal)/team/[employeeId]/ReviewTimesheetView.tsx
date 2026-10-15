@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { getWeek, formatWeekRange, weekOffsetForDate } from "@/lib/week";
+import { todayDateKey } from "@/lib/time";
 import TimesheetTable from "@/components/TimesheetTable";
+import WeeklyTotalSidebar, { type WeekBucket } from "@/components/WeeklyTotalSidebar";
 import type { TimeEntryDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error" | "empty";
@@ -101,6 +103,26 @@ export default function ReviewTimesheetView({ employeeId }: { employeeId: string
 
   const awaitingCount = entries.filter((e) => e.status === "AWAITING_APPROVAL").length;
 
+  // Round 4 (CB, Oct 2026): the day-by-day breakdown shown in the desktop sidebar — see
+  // WeeklyTotalSidebar.tsx. Same byDate/weeklyMinutes logic TimesheetTable computes internally
+  // for its own (now hidden on this page) bottom bar, plus a per-status day count. A day later
+  // this week with no entry yet is "Upcoming," same as TimesheetTable's own isFuture check — it
+  // isn't counted as "Not logged" here either, for the same reason.
+  const entryByDate = new Map(entries.map((e) => [e.workDate.slice(0, 10), e]));
+  const weeklyMinutes = entries.reduce((sum, e) => sum + (e.totalMinutes ?? 0), 0);
+  const weekCounts: Partial<Record<WeekBucket, number>> = {};
+  const today = todayDateKey();
+  for (const day of week.days) {
+    const entry = entryByDate.get(day);
+    let bucket: WeekBucket | null = null;
+    if (entry?.status === "APPROVED") bucket = "approved";
+    else if (entry?.status === "AWAITING_APPROVAL") bucket = "awaiting";
+    else if (entry?.status === "RETURNED") bucket = "returned";
+    else if (entry?.status === "IN_PROGRESS") bucket = "inProgress";
+    else if (!entry && day <= today) bucket = "notLogged";
+    if (bucket) weekCounts[bucket] = (weekCounts[bucket] ?? 0) + 1;
+  }
+
   async function approveAllAwaiting() {
     const entryIds = entries.filter((e) => e.status === "AWAITING_APPROVAL").map((e) => e.id);
     if (entryIds.length === 0) return;
@@ -189,11 +211,23 @@ export default function ReviewTimesheetView({ employeeId }: { employeeId: string
       )}
 
       {(loadState === "ready" || loadState === "empty") && (
-        <TimesheetTable
-          days={week.days}
-          entries={entries}
-          review={{ onApprove: approve, onReturn: returnEntry, busyEntryId }}
-        />
+        // Round 4 (CB, Oct 2026): on desktop this splits into the day list plus a sticky
+        // "Weekly total" sidebar using the right-hand space that used to sit empty (the page's
+        // own max-w was widened for this — see page.tsx); below `lg` it stays a single column,
+        // same as before, with the sidebar's summary card simply falling below the day list.
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6 items-start">
+          <TimesheetTable
+            days={week.days}
+            entries={entries}
+            review={{ onApprove: approve, onReturn: returnEntry, busyEntryId }}
+            hideSummaryBar
+          />
+          <WeeklyTotalSidebar
+            weekLabel={formatWeekRange(week.start, week.end)}
+            totalMinutes={weeklyMinutes}
+            counts={weekCounts}
+          />
+        </div>
       )}
     </div>
   );
