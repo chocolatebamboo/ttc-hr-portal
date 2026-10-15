@@ -50,17 +50,29 @@ interface SessionRow {
  *  stack of one card per day — the same four columns' worth of information, just read top to
  *  bottom instead of left to right, with Approve/Return (or Edit & resubmit) living inside each
  *  day's own card instead of a cramped last column. Weekly total moves from a table footer to
- *  its own dark summary bar below the stack, matching the approved mockup. */
+ *  its own dark summary bar below the stack, matching the approved mockup.
+ *
+ *  Round 4 (CB, Oct 2026, pointing at the empty right-hand space on this exact review page at
+ *  desktop width, with the dark "Weekly total" bar circled at the bottom of a narrow column):
+ *  on the one page wide enough to afford it, that bar is replaced with a sticky sidebar card —
+ *  see WeeklyTotalSidebar.tsx, rendered by ReviewTimesheetView.tsx alongside this component.
+ *  Pass `hideSummaryBar` there so the two totals don't both show at once; every other caller
+ *  (the employee's own My Time page doesn't call this component at all, but anything else that
+ *  does) keeps the original bottom bar by default. */
 export default function TimesheetTable({
   days,
   entries,
   review,
   correction,
+  hideSummaryBar,
 }: {
   days: string[]; // ISO date strings, Mon..Sun
   entries: TimeEntryDTO[];
   review?: ReviewControls;
   correction?: CorrectionControls;
+  /** Suppress the built-in "Weekly total" bar below the day stack — for a caller that renders
+   *  its own weekly total elsewhere (ReviewTimesheetView's desktop sidebar). */
+  hideSummaryBar?: boolean;
 }) {
   const byDate = new Map(entries.map((e) => [e.workDate.slice(0, 10), e]));
   const weeklyMinutes = entries.reduce((sum, e) => sum + (e.totalMinutes ?? 0), 0);
@@ -78,10 +90,12 @@ export default function TimesheetTable({
           <TimesheetDayCard key={day} day={day} label={label} entry={entry} review={review} correction={correction} />
         );
       })}
-      <div className="flex items-center justify-between rounded-2xl bg-neutral-900 text-white px-4 py-3 mt-1">
-        <span className="text-sm font-semibold">Weekly total</span>
-        <span className="tabular-nums text-sm font-bold">{formatMinutes(weeklyMinutes)}</span>
-      </div>
+      {!hideSummaryBar && (
+        <div className="flex items-center justify-between rounded-2xl bg-neutral-900 text-white px-4 py-3 mt-1">
+          <span className="text-sm font-semibold">Weekly total</span>
+          <span className="tabular-nums text-sm font-bold">{formatMinutes(weeklyMinutes)}</span>
+        </div>
+      )}
     </div>
   );
 }
