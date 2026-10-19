@@ -322,20 +322,11 @@ export interface CorrectionSessionInput {
   clockOut: Date;
 }
 
-/**
- * Closes the loop a supervisor's Return opens: the employee edits their own returned day
- * (now a list of sessions, not four fixed fields) and resubmits it. Only reachable on the
- * employee's OWN entry, and only while its status is RETURNED — an approved or in-progress day
- * can't be quietly edited through this path. The whole session list is replaced in one shot
- * (delete-then-recreate) rather than diffed field-by-field, since sessions can be added or
- * removed, not just retimed; the audit trail still records a single before/after summary so the
- * correction is visible in the same audit trail as everything else, never a silent overwrite.
- */
-export async function submitEmployeeCorrection(
-  actor: CurrentEmployee,
-  entryId: string,
-  sessions: CorrectionSessionInput[]
-) {
+/** Shared by submitEmployeeCorrection and submitReviewerCorrection below — the same session-list
+ *  validation (non-empty, each session's clock out after its clock in, no overlaps once sorted),
+ *  pulled out so the two correction paths can't quietly drift apart on what counts as a valid
+ *  edit. Returns the sessions sorted by clockIn, same as each call site needs. */
+function assertValidSessions(sessions: CorrectionSessionInput[]): CorrectionSessionInput[] {
   if (sessions.length === 0) {
     throw new InvalidCorrectionError("At least one clock-in/clock-out pair is required.");
   }
@@ -350,6 +341,32 @@ export async function submitEmployeeCorrection(
       throw new InvalidCorrectionError("Sessions can't overlap each other.");
     }
   }
+  return sorted;
+}
+
+/** Shared by submitEmployeeCorrection and submitReviewerCorrection below — a single-string
+ *  before/after summary of a session list, for the audit trail. */
+function describeSessions(list: { clockIn: Date; clockOut: Date | null }[]): string {
+  return list.length === 0
+    ? "none"
+    : list.map((s) => `${s.clockIn.toISOString()}–${s.clockOut?.toISOString() ?? "open"}`).join(", ");
+}
+
+/**
+ * Closes the loop a supervisor's Return opens: the employee edits their own returned day
+ * (now a list of sessions, not four fixed fields) and resubmits it. Only reachable on the
+ * employee's OWN entry, and only while its status is RETURNED — an approved or in-progress day
+ * can't be quietly edited through this path. The whole session list is replaced in one shot
+ * (delete-then-recreate) rather than diffed field-by-field, since sessions can be added or
+ * removed, not just retimed; the audit trail still records a single before/after summary so the
+ * correction is visible in the same audit trail as everything else, never a silent overwrite.
+ */
+export async function submitEmployeeCorrection(
+  actor: CurrentEmployee,
+  entryId: string,
+  sessions: CorrectionSessionInput[]
+) {
+  const sorted = assertValidSessions(sessions);
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const entry = await tx.timeEntry.findUnique({ where: { id: entryId }, include: { sessions: true } });
@@ -360,14 +377,8 @@ export async function submitEmployeeCorrection(
       throw new InvalidCorrectionError('Only a "Returned" day can be corrected.');
     }
 
-    const describe = (list: { clockIn: Date; clockOut: Date | null }[]) =>
-      list.length === 0
-        ? "none"
-        : list
-            .map((s) => `${s.clockIn.toISOString()}–${s.clockOut?.toISOString() ?? "open"}`)
-            .join(", ");
-    const oldSummary = describe(entry.sessions);
-    const newSummary = describe(sorted);
+    const oldSummary = describeSessions(entry.sessions);
+    const newSummary = describeSessions(sorted);
 
     await tx.timeSession.deleteMany({ where: { timeEntryId: entryId } });
     await tx.timeSession.createMany({
@@ -387,6 +398,67 @@ export async function submitEmployeeCorrection(
         timeEntryId: entryId,
         action: "EMPLOYEE_CORRECTION_REQUESTED",
         actorId: actor.id,
+        fieldName: "sessions",
+        oldValue: oldSummary,
+        newValue: newSummary,
+      },
+    });
+
+    return updated;
+  });
+}
+
+/**
+ * Round 10 (CB, Oct 2026, pointing at Haile's flagged double-clock-in recorded as 0h 00m: "we
+ * should have the option to adjust the time and manually edit the time... but remember only
+ * Shawn and I am supposed to be able to have those types of capabilities"). The reviewer-side
+ * counterpart to submitEmployeeCorrection just above — same session-replace shape (validate,
+ * delete-then-recreate, before/after audit summary) — but for a DIFFERENT entry/status pairing:
+ * this acts on a flagged entry still AWAITING_APPROVAL (not one already RETURNED back to the
+ * employee), and it resolves the review in the same step rather than handing it back for a
+ * second look — the corrected times land straight on APPROVED, since the reviewer editing them
+ * IS the review. Authorization (actually Shawn or CB, and actually allowed to reach this
+ * employee's records) is the caller's job — see assertCanEditFlaggedTimeEntries in
+ * src/lib/authorization.ts — enforced again here via withRlsContext under the REVIEWER's own
+ * identity, same layered pattern reviewTimeEntry already uses.
+ */
+export async function submitReviewerCorrection(
+  reviewer: CurrentEmployee,
+  entryId: string,
+  sessions: CorrectionSessionInput[]
+) {
+  const sorted = assertValidSessions(sessions);
+
+  return withRlsContext({ employeeId: reviewer.id, role: reviewer.role }, async (tx) => {
+    const entry = await tx.timeEntry.findUnique({ where: { id: entryId }, include: { sessions: true } });
+    if (!entry) {
+      throw new InvalidCorrectionError("Time entry not found.");
+    }
+    if (entry.status !== "AWAITING_APPROVAL") {
+      throw new InvalidCorrectionError('Only a flagged ("Awaiting Approval") day can have its times edited this way.');
+    }
+
+    const oldSummary = describeSessions(entry.sessions);
+    const newSummary = describeSessions(sorted);
+
+    await tx.timeSession.deleteMany({ where: { timeEntryId: entryId } });
+    await tx.timeSession.createMany({
+      data: sorted.map((s) => ({ timeEntryId: entryId, clockIn: s.clockIn, clockOut: s.clockOut })),
+    });
+
+    const totalMinutes = computeTotalMinutes(sorted);
+
+    const updated = await tx.timeEntry.update({
+      where: { id: entryId },
+      data: { totalMinutes, status: "APPROVED" },
+      include: { sessions: { orderBy: { clockIn: "asc" } } },
+    });
+
+    await tx.timeEntryAuditEvent.create({
+      data: {
+        timeEntryId: entryId,
+        action: "HR_CORRECTION",
+        actorId: reviewer.id,
         fieldName: "sessions",
         oldValue: oldSummary,
         newValue: newSummary,
