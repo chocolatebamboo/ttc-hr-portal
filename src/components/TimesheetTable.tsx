@@ -12,6 +12,18 @@ export interface ReviewControls {
   onReturn: (entryId: string, comment: string) => void;
   /** The entry currently mid-request, so its own row shows a busy state (not the whole table). */
   busyEntryId: string | null;
+  /** Round 10 (CB, Oct 2026, pointing at a flagged double-clock-in recorded as 0h 00m: "we
+   *  should have the option to adjust the time and manually edit the time... but remember only
+   *  Shawn and I am supposed to be able to have those types of capabilities"). Optional — only
+   *  passed by a caller that already knows the current reviewer has canEditFlaggedTimeEntries
+   *  (see that field's own doc comment in src/types/index.ts); omitted entirely, nothing about
+   *  this table changes for anyone else. When present, a flagged (Awaiting Approval) day gets an
+   *  "Edit times" action alongside Approve/Return, reusing the same session-editing form the
+   *  employee's own Edit & resubmit already uses — see TimesheetDayCard's isReviewEditable. */
+  onEditTimes?: (entryId: string, sessions: CorrectionValues) => void;
+  /** Server-reported validation message from the last onEditTimes attempt — same shape as
+   *  CorrectionControls.error below. */
+  editError?: string;
 }
 
 /** A day's edited session list, as Dates ready to send to the API — see
@@ -122,6 +134,11 @@ function TimesheetDayCard({
   const isCorrectionBusy = correction?.busyEntryId === entry?.id;
   const isActionable = review && entry?.status === "AWAITING_APPROVAL";
   const isCorrectable = correction && entry?.status === "RETURNED";
+  // Round 10 (CB, Oct 2026): the reviewer-side "Edit times" capability — see ReviewControls'
+  // own doc comment on onEditTimes. Same AWAITING_APPROVAL gate as isActionable (Approve/Return)
+  // since this is only ever offered on the flagged day a reviewer is already looking at, not any
+  // entry regardless of status.
+  const isReviewEditable = review?.onEditTimes && entry?.status === "AWAITING_APPROVAL";
   // CB, Oct 2026: a week view always renders all 7 days up front, including days later this
   // same week that haven't happened yet — those showed "Missing Entry" right alongside genuinely
   // overdue past days, which read as a problem on a day nobody could have logged time for yet.
@@ -142,12 +159,22 @@ function TimesheetDayCard({
     setRows((r) => r.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
   }
 
-  function submitCorrection() {
-    if (!entry || !correction) return;
+  // Round 10 (CB, Oct 2026): generalized from the employee-only submitCorrection this used to
+  // be — same session-row-to-Date-pairs conversion either way, just handed to whichever action
+  // is actually present. correction.onSubmit (the employee's own "Resubmit for approval") takes
+  // priority when both happen to be passed, since nothing in this app currently passes both at
+  // once — this table only ever plays the employee-correction role OR the reviewer-edit role for
+  // a given caller, never both.
+  function submitSessionEdit() {
+    if (!entry) return;
     const sessions = rows
       .map((r) => ({ clockIn: combineDateAndTime(day, r.clockIn), clockOut: combineDateAndTime(day, r.clockOut) }))
       .filter((s): s is { clockIn: Date; clockOut: Date } => s.clockIn !== null && s.clockOut !== null);
-    correction.onSubmit(entry.id, sessions);
+    if (correction) {
+      correction.onSubmit(entry.id, sessions);
+    } else if (review?.onEditTimes) {
+      review.onEditTimes(entry.id, sessions);
+    }
   }
 
   return (
@@ -229,6 +256,18 @@ function TimesheetDayCard({
           >
             Return
           </button>
+          {/* Round 10 (CB, Oct 2026) — see ReviewControls' onEditTimes doc comment. Only CB and
+              Shawn ever have onEditTimes passed in at all, so this button simply doesn't exist
+              for anyone else. */}
+          {isReviewEditable && (
+            <button
+              onClick={() => (editing ? setEditing(false) : startEditing())}
+              disabled={isReviewBusy}
+              className="btn-neutral text-xs px-3 py-1.5 flex-1 justify-center"
+            >
+              {editing ? "Cancel" : "Edit times"}
+            </button>
+          )}
         </div>
       )}
 
@@ -303,10 +342,26 @@ function TimesheetDayCard({
               + Add another session
             </button>
           </div>
-          {correction?.error && <p className="text-xs text-accent">{correction.error}</p>}
+          {/* Round 10 (CB, Oct 2026): this form now serves two different actions depending on
+              which prop is present — the employee's own Edit & resubmit (correction), or a
+              reviewer's Edit times on a flagged day (review.onEditTimes) — see
+              submitSessionEdit's own doc comment just above. */}
+          {(correction?.error ?? review?.editError) && (
+            <p className="text-xs text-accent">{correction?.error ?? review?.editError}</p>
+          )}
           <div className="flex gap-2">
-            <button onClick={submitCorrection} disabled={isCorrectionBusy} className="btn-primary text-xs px-3 py-1.5">
-              {isCorrectionBusy ? "Submitting…" : "Resubmit for approval"}
+            <button
+              onClick={submitSessionEdit}
+              disabled={correction ? isCorrectionBusy : isReviewBusy}
+              className="btn-primary text-xs px-3 py-1.5"
+            >
+              {correction
+                ? isCorrectionBusy
+                  ? "Submitting…"
+                  : "Resubmit for approval"
+                : isReviewBusy
+                  ? "Saving…"
+                  : "Save corrected times"}
             </button>
             <button onClick={() => setEditing(false)} className="btn-neutral text-xs px-3 py-1.5">
               Cancel
