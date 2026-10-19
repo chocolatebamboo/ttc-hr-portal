@@ -53,6 +53,7 @@ export async function getCurrentEmployee(): Promise<CurrentEmployee | null> {
     avatarUrl: employee.avatarStorageKey ? getAvatarPublicUrl(employee.avatarStorageKey) : null,
     quickActionKeys: employee.quickActionKeys,
     clocksIn: employee.clocksIn,
+    canEditFlaggedTimeEntries: employee.canEditFlaggedTimeEntries,
   };
 }
 
