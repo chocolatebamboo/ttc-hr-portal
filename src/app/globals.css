@@ -197,6 +197,108 @@ body {
 }
 
 /*
+ * Report-ready celebration banner (DashboardNotifications.tsx) — CB, Oct 2026: "when the
+ * two-week report comes in on that Friday morning I want... something aesthetic and animated...
+ * like a celebration but still clean aesthetic." Four mockup rounds landed on a left-aligned
+ * card with a solid-seal checkmark badge that pops in with a soft ring, a brief one-time
+ * confetti burst, and two small sparkle glyphs near the seal. Purely decorative and
+ * non-explanatory, unlike the tap-hint animation above — reduced-motion viewers simply see the
+ * card already at its settled resting state, with the confetti/sparkle pieces removed entirely
+ * rather than left to render statically (a burst mid-flight frozen in place would look like a
+ * rendering bug, not a design choice).
+ */
+.report-ready-glow {
+  position: absolute;
+  right: -30px;
+  top: -40px;
+  width: 160px;
+  height: 160px;
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.14), transparent 70%);
+  pointer-events: none;
+}
+.report-ready-seal {
+  transform: scale(0) rotate(-20deg);
+  animation: report-ready-seal-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.15s forwards;
+}
+@keyframes report-ready-seal-pop {
+  to {
+    transform: scale(1) rotate(0deg);
+  }
+}
+.report-ready-seal-ring {
+  opacity: 0;
+  animation: report-ready-ring-fade 0.7s ease-out 0.35s forwards;
+}
+@keyframes report-ready-ring-fade {
+  to {
+    opacity: 1;
+  }
+}
+.report-ready-confetti-piece {
+  position: absolute;
+  top: 39px;
+  width: 7px;
+  height: 7px;
+  border-radius: 1.5px;
+  opacity: 0;
+  z-index: 1;
+  animation: report-ready-confetti-burst 1.3s cubic-bezier(0.2, 0.8, 0.3, 1) forwards;
+}
+@keyframes report-ready-confetti-burst {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) rotate(0deg) scale(0.6);
+  }
+  10% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: var(--report-ready-end) rotate(var(--report-ready-rot)) scale(1);
+  }
+}
+.report-ready-sparkle {
+  position: absolute;
+  z-index: 2;
+  opacity: 0;
+  animation: report-ready-sparkle-pop 1.4s ease-out 0.55s forwards;
+}
+@keyframes report-ready-sparkle-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.3) rotate(0deg);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1.05) rotate(10deg);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(0.95) rotate(-6deg);
+  }
+  100% {
+    opacity: 0.55;
+    transform: scale(0.85) rotate(0deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .report-ready-seal {
+    animation: none;
+    transform: scale(1) rotate(0deg);
+  }
+  .report-ready-seal-ring {
+    animation: none;
+    opacity: 1;
+  }
+  .report-ready-confetti-piece,
+  .report-ready-sparkle {
+    animation: none;
+    display: none;
+  }
+}
+
+/*
  * Shared component classes — kept in one place so every page's buttons, page titles and
  * empty states read as one system instead of each screen hand-rolling its own Tailwind
  * string. Pill-shaped buttons and bold serif page titles are the two most recognizable
