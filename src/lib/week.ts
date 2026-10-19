@@ -88,6 +88,23 @@ export function getCurrentPayrollPeriodOffset(): number {
   return 0;
 }
 
+/** The most recently CLOSED payroll period — distinct from getPayrollPeriod(0)'s "whichever
+ *  period today falls in" (see that function's own doc comment). Round twelve (CB, Oct 2026, on
+ *  the report-ready celebration card for the Home dashboard: "when the two week report comes in
+ *  on that Friday morning..."): on the Friday a period's own span actually ends, that period IS
+ *  closed already — there's no next-day lag, so this returns THAT period the moment today's date
+ *  reaches its end date. During the Sat/Sun gap right after (getPayrollPeriod(0) hasn't flipped
+ *  to the new period yet — see its own doc comment), the period that just ended is still the
+ *  most recently closed one, so this keeps returning it too. Only once the new period's own
+ *  Monday actually arrives (getPayrollPeriod(0) flips to it) does this fall back to
+ *  getPayrollPeriod(-1) — the period that closed last Friday — and it keeps returning that one
+ *  for the entire span of the new, still-open period, until IT closes in turn. */
+export function getClosedPayrollPeriod(): { start: string; end: string } {
+  const current = getPayrollPeriod(0);
+  const todayKey = toDateKey(new Date());
+  return todayKey >= current.end ? current : getPayrollPeriod(-1);
+}
+
 /** Inverse of getPayrollPeriod, same shape as weekOffsetForDate above but for pay periods
  *  instead of calendar weeks: given a date key, which getPayrollPeriod offset its own period is
  *  from today's (0 = today's own period — see getPayrollPeriod's own doc comment — negative
