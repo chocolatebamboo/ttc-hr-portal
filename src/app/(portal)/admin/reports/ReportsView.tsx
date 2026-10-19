@@ -1,58 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getWeek, formatWeekRange, getPayrollPeriod, PAYROLL_PERIOD_CYCLE_DAYS } from "@/lib/week";
+import { getPayrollPeriod, getCurrentPayrollPeriodOffset } from "@/lib/week";
 import { formatClockTime } from "@/lib/time";
+import PayrollPeriodSwitcher from "@/components/PayrollPeriodSwitcher";
 import ActivityHistoryView from "./ActivityHistoryView";
 import type { PayrollHoursReportDTO, TimeEntryDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error" | "empty";
 type EmployeeOption = { id: string; name: string };
-
-function firstOfMonth(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
-}
-
-function todayDateKey(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-/** "This week"/"This month" presets — CB's own framing for this report ("at the end of the
- *  week... a full report", "at the end of the month... tallies") is calendar-week/calendar-
- *  month, not an arbitrary range, so those are one click instead of two manual date pickers. */
-function thisWeekRange(): { start: string; end: string } {
-  const week = getWeek(0);
-  return { start: week.start, end: todayDateKey() < week.end ? todayDateKey() : week.end };
-}
-
-/** Round four (CB, Oct 2026): "a 'last 2 weeks' button... matching Shawn's biweekly payroll
- *  pull cadence" — the 14 days ending today, not a calendar-aligned pair of weeks, since what
- *  matters here is matching whenever Shawn actually runs payroll, not the calendar's own week
- *  boundaries.
- *
- *  Round seven (CB, Oct 2026, the day before a period actually rolled over: "I just want to make
- *  sure that when we see the two week report that it's reflective of the last one" — a direct
- *  code check confirmed the gap: this used to just be "the 14 days ending whenever you click
- *  Generate," so running it even a day or two after a period closed would silently drift onto a
- *  mix of the old and new periods instead of staying on the one that actually just closed). Now
- *  anchored to TTC's real biweekly payroll calendar instead of today's own date.
- *
- *  Round eight (CB, Oct 2026, on LoggedHoursSection's own pay-period card): this period math is
- *  now the shared getPayrollPeriod (src/lib/week.ts) so the Reports page and the employee-facing
- *  Logged hours widget can't drift apart on where one period ends and the next begins.
- *
- *  Round ten (CB, Oct 2026, pointing at this tab defaulting to Sep 25–Oct 8 while the period
- *  actually active was Oct 12–23): getPayrollPeriod's own semantics changed — see that function's
- *  doc comment in src/lib/week.ts for the full story — from "most recently CLOSED period" to
- *  "the period containing today." This call site is the one deliberately relying on that new
- *  meaning: offset 0 now always opens this tab on the period that's actually live right now,
- *  which is exactly the fix CB asked for ("I shouldn't have to... manually put in the dates of
- *  the payroll"). */
-function lastTwoWeeksRange(): { start: string; end: string } {
-  return getPayrollPeriod(0);
-}
 
 // Same local-copy convention every other consumer of "initials from a name" already follows in
 // this app (see TeamScheduleGlance.tsx's own doc comment on this exact choice) — used below for
@@ -92,27 +48,17 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
   // switcher between the pre-existing payroll-hours export and the new Activity History filter
   // below, rather than a separate nav entry for one more admin-only list.
   const [tab, setTab] = useState<Tab>("payroll");
-  // Round five (CB): "since the reports need to be every two weeks for payroll... how can we
-  // best present it... so she could easily have the two week report" — Sean and Daijour's own
-  // payroll pull is always this exact 14-day window, so Reports now opens straight into it
-  // instead of making them click "Last 2 weeks" themselves every time. "This month"/"This week"
-  // are still one click away for anyone who actually wants a different range.
-  const [start, setStart] = useState(lastTwoWeeksRange().start);
-  const [end, setEnd] = useState(lastTwoWeeksRange().end);
-  // Round six (CB, on a screenshot of the single-employee card): "label... the card['s] two
-  // week report if we're contingent on that specific one" — the card showed the date range
-  // (e.g. "Sep 25 – Oct 8, 2026") but nothing said THAT'S the biweekly payroll window Sean/
-  // Daijour are pulling, as opposed to any other two-week stretch someone picked by hand.
-  // Tracks which preset button (if any) produced the period currently on screen — "custom"
-  // once the start/end date fields are hand-edited and Generate is clicked, since at that
-  // point the range no longer necessarily matches what a preset would produce.
-  const [periodPreset, setPeriodPreset] = useState<"week" | "month" | "twoWeeks" | "custom">("twoWeeks");
-  const PERIOD_PRESET_LABEL: Record<"week" | "month" | "twoWeeks" | "custom", string | null> = {
-    week: "This Week",
-    month: "This Month",
-    twoWeeks: "2-Week Report",
-    custom: null,
-  };
+  // Round eleven (CB, Oct 2026, on a phone screenshot of the old "This Week"/"This Month"/
+  // "2 Week Report" buttons plus a manual Start date/End date/Generate form: "I don't
+  // necessarily feel like [picking which days] is the right functionality for it... I think I
+  // wanna see it in two week intervals and we just could be able to switch in between the
+  // different pay periods... current or the past one"). Every interval this report can ever
+  // show is now one of TTC's real payroll periods — this one offset (relative to
+  // getCurrentPayrollPeriodOffset, same "0 = today's own period, negative = past" convention
+  // My Tasks/Team Tasks/LoggedHoursSection already page by) is the only thing left to track;
+  // start/end below are just the derived boundary dates for whichever offset is selected.
+  const [periodOffset, setPeriodOffset] = useState(getCurrentPayrollPeriodOffset);
+  const { start, end } = getPayrollPeriod(periodOffset);
   // "" means every employee (the original full-company view) — CB: "I could imagine it would
   // be nice to... look at somebody's specific hours [without having to] go through the whole
   // list of people", but also still wants the full view available, so this is additive rather
@@ -145,15 +91,6 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
   // regularExpanded above): switching people or dates should never leave a stale open panel.
   const [switcherOpen, setSwitcherOpen] = useState(false);
 
-  // Round seven (CB: "I should be able to toggle, like maybe there's a drop down... to switch in
-  // between like this week or this month... if I wanted to change the two week report pill"):
-  // the period preset pill used to be a plain read-only label — this makes it a dropdown, same
-  // open/close pattern as switcherOpen just above, so she can jump straight to This Week/This
-  // Month/2-Week Report from inside the single-employee card instead of leaving it to use the
-  // preset buttons further up the page. Reset to closed on every generate() for the same reason
-  // switcherOpen is.
-  const [periodMenuOpen, setPeriodMenuOpen] = useState(false);
-
   async function generate(s: string, e: string, empId: string) {
     setLoadState("loading");
     setErrorMessage("");
@@ -161,7 +98,6 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
     setRegularEntries(null);
     setRegularError("");
     setSwitcherOpen(false);
-    setPeriodMenuOpen(false);
     try {
       const query = `?start=${s}&end=${e}${empId ? `&employeeId=${empId}` : ""}`;
       const res = await fetch(`/api/payroll/hours${query}`);
@@ -233,23 +169,14 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
     }
   }
 
-  // Initial load only — regenerating after this happens via the explicit "Generate" button
-  // below, not on every keystroke while someone is still picking dates, so deps stay empty.
+  // Initial load only — every regeneration after this happens through handleEmployeeChange or
+  // handlePeriodOffsetChange below, so deps stay empty.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     generate(start, end, employeeId);
     loadEmployees();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    // Hand-edited dates aren't guaranteed to match any preset's own range anymore (even if they
-    // happen to land on the same two dates a preset button would have picked) — "custom" keeps
-    // the label honest rather than claiming a preset that wasn't actually clicked.
-    setPeriodPreset("custom");
-    generate(start, end, employeeId);
-  }
 
   // Round five (CB): "when I click into the name and then I slide back, it's like it's going
   // to the team schedule, but it should go back to like the all team members" — switching into
@@ -274,67 +201,19 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
     return () => window.removeEventListener("popstate", onPopState);
   }, [start, end]);
 
-  function useThisWeek() {
-    const week = thisWeekRange();
-    setStart(week.start);
-    setEnd(week.end);
-    setPeriodPreset("week");
-    generate(week.start, week.end, employeeId);
-  }
-
-  function useThisMonth() {
-    const s = firstOfMonth();
-    const e = todayDateKey();
-    setStart(s);
-    setEnd(e);
-    setPeriodPreset("month");
-    generate(s, e, employeeId);
-  }
-
-  function useLastTwoWeeks() {
-    const range = lastTwoWeeksRange();
-    setStart(range.start);
-    setEnd(range.end);
-    setPeriodPreset("twoWeeks");
+  /** Round eleven (CB, Oct 2026) — see this file's own doc comment on periodOffset above for
+   *  the full story. Every interval this report can show is now one of TTC's real payroll
+   *  periods, so paging is just moving periodOffset by one (getPayrollPeriod, src/lib/week.ts,
+   *  already knows exactly where one period ends and the next begins — no more hand-computing a
+   *  step size). Shared by both the top-level controls and the single-employee card below via
+   *  the same PayrollPeriodSwitcher component the rest of the app already pages pay periods
+   *  with (My Tasks, Team Tasks, LoggedHoursSection). */
+  function handlePeriodOffsetChange(newOffset: number) {
+    setPeriodOffset(newOffset);
+    const range = getPayrollPeriod(newOffset);
     generate(range.start, range.end, employeeId);
   }
 
-  /** Round six (CB, on a screenshot of the Period row): "we should be able to toggle and go to
-   *  the different... other two weeks. Past to present... I should be able to click the
-   *  different dates and it auto-update" — the prev/next arrows flanking the date range below.
-   *  Steps the current range back or forward by its own length (7 days for This Week, etc.)
-   *  rather than jumping to some fixed preset, so the same two buttons work regardless of which
-   *  preset — or hand-picked range — produced what's currently on screen.
-   *  periodPreset is deliberately left untouched here (unlike handleSubmit's "custom" reset):
-   *  paging through 2-week blocks stays tagged "2-Week Report" the whole time, since each one
-   *  really is a payroll period, just not THE one lastTwoWeeksRange would pick on its own.
-   *
-   *  Round ten (CB, Oct 2026): a 2-Week Report's own DISPLAYED span is now 12 days (Monday
-   *  through the following Friday — see PAYROLL_PERIOD_SPAN_DAYS's doc comment in src/lib/
-   *  week.ts), but one payroll period's start is still a full PAYROLL_PERIOD_CYCLE_DAYS (14)
-   *  after the previous one's — the Sat/Sun between a period's Friday end and the next period's
-   *  Monday start belongs to neither. Stepping by the displayed span (12 days) would walk the
-   *  arrows a tiny bit off the real payroll calendar every click, compounding with each page.
-   *  So "2-Week Report" is special-cased here to step by the fixed 14-day cycle instead of its
-   *  own displayed span; every other preset still steps by what's actually on screen. */
-  function shiftPeriod(direction: -1 | 1) {
-    const stepDays =
-      periodPreset === "twoWeeks"
-        ? PAYROLL_PERIOD_CYCLE_DAYS
-        : Math.round((new Date(`${end}T00:00:00`).getTime() - new Date(`${start}T00:00:00`).getTime()) / 86400000) + 1;
-    const toKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    const newStartDate = new Date(`${start}T00:00:00`);
-    newStartDate.setDate(newStartDate.getDate() + direction * stepDays);
-    const newEndDate = new Date(`${end}T00:00:00`);
-    newEndDate.setDate(newEndDate.getDate() + direction * stepDays);
-    const newStart = toKey(newStartDate);
-    const newEnd = toKey(newEndDate);
-    setStart(newStart);
-    setEnd(newEnd);
-    generate(newStart, newEnd, employeeId);
-  }
-
-  const rangeInvalid = end < start;
   const exportQuery = `?start=${start}&end=${end}${employeeId ? `&employeeId=${employeeId}` : ""}`;
 
   // Round five (CB): "the download PDF and download CSV should be like kind of on the bottom
@@ -417,33 +296,18 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
           : "Approved hours for a pay period, ready to hand to your payroll company. This is hours only — no pay rate, overtime, or tax math happens here."}
       </p>
 
-      <div className="flex items-center gap-2 mb-3 flex-wrap">
-        <button type="button" onClick={useThisWeek} disabled={loadState === "loading"} className="btn-neutral text-xs px-3 py-1.5">
-          This week
-        </button>
-        <button type="button" onClick={useThisMonth} disabled={loadState === "loading"} className="btn-neutral text-xs px-3 py-1.5">
-          This month
-        </button>
-        {/* Round six (CB, on a screenshot): "at the top where it says last two weeks I think we
-            need to reword that to say two week report as well and make that pink because
-            that's going to be important for Sean and Daijour" — Sean/Daijour's own biweekly
-            payroll pull (see lastTwoWeeksRange's own doc comment above), so this one preset is
-            now visually called out from "This week"/"This month" rather than reading as just
-            another neutral option among three. */}
-        <button
-          type="button"
-          onClick={useLastTwoWeeks}
-          disabled={loadState === "loading"}
-          className="inline-flex items-center gap-1.5 rounded-full border-[1.5px] border-accent-ink text-accent-ink bg-accent/10 text-xs font-semibold px-3.5 py-1.5 disabled:opacity-60"
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
-            <path d="M8 2v4M16 2v4M3 10h18M5 6h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z" />
-          </svg>
-          2 Week Report
-        </button>
-      </div>
-
-      <form onSubmit={handleSubmit} className="bg-surface border border-border rounded-xl p-4 mb-5 flex flex-wrap items-end gap-3">
+      {/* Round eleven (CB, Oct 2026, on a phone screenshot of this exact row + form: "I don't
+          necessarily feel like [picking which days] is the right functionality for it... I
+          think I wanna see it in two week intervals and we just could be able to switch in
+          between the different pay periods... current or the past one"): "This week"/"This
+          month"/"2 Week Report" plus a manual Start date/End date/Generate form let someone
+          land on a stretch that isn't one of TTC's real payroll periods at all — exactly what
+          she didn't want from a report that's handed straight to payroll. Replaced with just
+          paging PayrollPeriodSwitcher's own offset (see handlePeriodOffsetChange above); there's
+          no other interval to pick anymore, so Team Member and the period switcher are the
+          whole control surface, and nothing needs an explicit Generate click — both already
+          regenerate the report the moment either one changes. */}
+      <div className="bg-surface border border-border rounded-xl p-4 mb-5 flex flex-wrap items-center justify-between gap-4">
         <div>
           <label className="block text-sm font-medium mb-1.5">Team Member</label>
           <select
@@ -459,31 +323,8 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
             ))}
           </select>
         </div>
-        <div>
-          <label className="block text-sm font-medium mb-1.5">Start date</label>
-          <input
-            type="date"
-            required
-            value={start}
-            onChange={(ev) => setStart(ev.target.value)}
-            className="rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium mb-1.5">End date</label>
-          <input
-            type="date"
-            required
-            value={end}
-            onChange={(ev) => setEnd(ev.target.value)}
-            className="rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
-          />
-        </div>
-        <button type="submit" disabled={rangeInvalid || loadState === "loading"} className="btn-primary text-sm px-5 py-2">
-          {loadState === "loading" ? "Generating…" : "Generate"}
-        </button>
-        {rangeInvalid && <p className="text-xs text-accent basis-full">End date must be on or after the start date.</p>}
-      </form>
+        <PayrollPeriodSwitcher offset={periodOffset} onOffsetChange={handlePeriodOffsetChange} capNextAtCurrent />
+      </div>
 
       {loadState === "loading" && (
         <div className="space-y-2">
@@ -573,7 +414,9 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
                 // hiding everything past "This Week" — exactly CB's screenshot. Dropped so the
                 // menu can render in full; it floats over the table beneath on open (z-10) the
                 // same way any dropdown menu does, and the card's rounded corners and gradient
-                // are unaffected.
+                // are unaffected. (Round eleven: that period-preset dropdown is gone now — see
+                // PayrollPeriodSwitcher below — but the employee-switcher dropdown right above it
+                // still benefits from the same unclipped overflow, so this stays dropped.)
                 className="rounded-2xl shadow-sm mb-4 p-5"
                 style={{ background: "linear-gradient(135deg, var(--ttc-pink-ink), var(--ttc-pink))" }}
               >
@@ -642,107 +485,14 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
                     ))}
                   </div>
                 )}
-                {/* Round six (CB, on a screenshot: "it's kind of awkwardly placed with the
-                    card... the hierarchy needs to fit correctly and cleanly"): the period used
-                    to be crammed into the top-right corner of the identity row, fighting the
-                    name/role for space and nearly touching the card's own rounded corner. Its
-                    own full-width row below a divider gives both the date range and the preset
-                    pill room to actually read, instead of a cramped vertical stack in a corner.
-                    PERIOD_PRESET_LABEL names which preset produced this exact range (most often
-                    "2-Week Report," Sean/Daijour's own payroll pull), so it reads as a known,
-                    intentional period rather than just whatever dates happen to be showing —
-                    silent for a hand-picked range. The prev/next arrows (shiftPeriod's own doc
-                    comment above) let CB page straight through past 2-week blocks from here,
-                    instead of having to go edit the date fields by hand every time. */}
-                <div className="mt-4 pt-3.5 border-t border-white/20 flex items-center justify-between gap-3 flex-wrap">
-                  <div className="flex items-center gap-1.5">
-                    {/* No loadState-based disabling here (unlike the preset buttons above) —
-                        this whole card only renders while loadState === "ready" to begin with,
-                        so a mid-fetch disabled state would never actually show. */}
-                    <button
-                      type="button"
-                      onClick={() => shiftPeriod(-1)}
-                      aria-label="Previous period"
-                      className="h-[22px] w-[22px] shrink-0 rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center"
-                    >
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" aria-hidden="true">
-                        <path d="M15 6l-6 6 6 6" />
-                      </svg>
-                    </button>
-                    <div className="flex flex-col items-center leading-tight">
-                      <span className="text-[9px] font-semibold uppercase tracking-wide text-white/65">Period</span>
-                      <span className="text-sm font-semibold text-white/95 whitespace-nowrap">
-                        {formatWeekRange(report.startDate, report.endDate)}
-                      </span>
-                    </div>
-                    {/* Can't page into the future — once the shown period already reaches today,
-                        there's nothing newer to generate. */}
-                    <button
-                      type="button"
-                      onClick={() => shiftPeriod(1)}
-                      disabled={end >= todayDateKey()}
-                      aria-label="Next period"
-                      className="h-[22px] w-[22px] shrink-0 rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center disabled:opacity-30"
-                    >
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" aria-hidden="true">
-                        <path d="M9 6l6 6-6 6" />
-                      </svg>
-                    </button>
-                  </div>
-                  {/* Round seven (CB): the pill itself is now the dropdown's own trigger — same
-                      "the label is the control" shape the name switcher right above already
-                      uses, rather than a separate menu button bolted on next to it. Shown even
-                      on a hand-picked "custom" range (previously blank) so there's always a way
-                      back into a preset from here. */}
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setPeriodMenuOpen((v) => !v)}
-                      aria-expanded={periodMenuOpen}
-                      className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-accent-ink bg-white rounded-full pl-3 pr-2 py-1"
-                    >
-                      {PERIOD_PRESET_LABEL[periodPreset] ?? "Choose period"}
-                      <svg
-                        width="11"
-                        height="11"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="3"
-                        aria-hidden="true"
-                        className={`shrink-0 transition-transform ${periodMenuOpen ? "rotate-180" : ""}`}
-                      >
-                        <path d="M6 9l6 6 6-6" />
-                      </svg>
-                    </button>
-                    {periodMenuOpen && (
-                      <div className="absolute right-0 top-full mt-1.5 bg-white rounded-xl shadow-lg overflow-hidden w-40 z-10">
-                        {(
-                          [
-                            { key: "week" as const, label: "This Week", run: useThisWeek },
-                            { key: "month" as const, label: "This Month", run: useThisMonth },
-                            { key: "twoWeeks" as const, label: "2-Week Report", run: useLastTwoWeeks },
-                          ]
-                        ).map((opt) => (
-                          <button
-                            key={opt.key}
-                            type="button"
-                            onClick={() => {
-                              opt.run();
-                              setPeriodMenuOpen(false);
-                            }}
-                            className={`w-full px-3.5 py-2 text-left text-sm border-t border-border first:border-t-0 ${
-                              periodPreset === opt.key
-                                ? "bg-accent/10 text-accent-ink font-semibold"
-                                : "text-foreground hover:bg-black/[0.02]"
-                            }`}
-                          >
-                            {opt.label}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                {/* Round eleven (CB, Oct 2026) — same PayrollPeriodSwitcher as the top-level
+                    controls above; see this file's own doc comment there for the full story.
+                    This single-employee card no longer offers This Week/This Month or a
+                    period-preset dropdown of its own — a payroll period, current or past, is
+                    the only thing either view of this report ever shows now, so paging here and
+                    paging up top can never disagree with each other. */}
+                <div className="mt-4 pt-3.5 border-t border-white/20">
+                  <PayrollPeriodSwitcher offset={periodOffset} onOffsetChange={handlePeriodOffsetChange} capNextAtCurrent />
                 </div>
               </div>
 
