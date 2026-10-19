@@ -56,10 +56,11 @@ export default function LoggedHoursSection({ showHeading = true }: { showHeading
   const [entries, setEntries] = useState<TimeEntryDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   // See this component's own doc comment above — relative to getPayrollPeriod's own 0 (the
-  // most recently CLOSED period), negative steps back into past periods, positive steps forward.
-  // Opens on whatever period actually contains today (getCurrentPayrollPeriodOffset — usually 1,
-  // since 0 is deliberately the last CLOSED one), and the "Next period" button won't go past that
-  // same offset — there's nothing to show beyond the period someone's actively logging into.
+  // period containing today — see that function's doc comment in src/lib/week.ts), negative
+  // steps back into past periods, positive steps forward. Opens on whatever period actually
+  // contains today (getCurrentPayrollPeriodOffset — always 0, same reasoning), and the "Next
+  // period" button won't go past that same offset — there's nothing to show beyond the period
+  // someone's actively logging into.
   const [periodOffset, setPeriodOffset] = useState(getCurrentPayrollPeriodOffset);
   const currentOffset = getCurrentPayrollPeriodOffset();
   const [busyEntryId, setBusyEntryId] = useState<string | null>(null);
@@ -118,15 +119,14 @@ export default function LoggedHoursSection({ showHeading = true }: { showHeading
 
   // CB, Sept 2026: "I should be able to delete those times... if I swipe... on the respective
   // date block." Then again, once she'd tried it: a whole day should be revertible while it's
-  // still Awaiting Approval, not just an accidental zero-minute one — confirmed scope is "true
-  // delete[,] awaiting approval only... they wouldn't be able to do that on their side once we
-  // approve" (see deleteEmployeeTimeEntry's doc comment on the server for the full rule and the
-  // compliance reasoning behind the Approved lock). Removed from `entries` on success so it
-  // disappears immediately; since it's a real delete against the one shared TimeEntry table,
-  // it's gone from any other view reading the same data too (a supervisor's review page, most
-  // notably). A rejection is a real, expected case now (most likely a supervisor approved the
-  // same entry a moment earlier) rather than the near-impossible edge case it was when only
-  // zero-minute rows qualified, so it's surfaced on the row instead of failing silently.
+  // still Awaiting Approval, not just an accidental zero-minute one (see deleteEmployeeTimeEntry's
+  // doc comment on the server for the full rule and the compliance reasoning behind the Approved
+  // lock). Removed from `entries` on success so it disappears immediately; since it's a real
+  // delete against the one shared TimeEntry table, it's gone from any other view reading the same
+  // data too (a supervisor's review page, most notably). A rejection is a real, expected case now
+  // (most likely a supervisor approved the same entry a moment earlier) rather than the
+  // near-impossible edge case it was when only zero-minute rows qualified, so it's surfaced on
+  // the row instead of failing silently.
   async function deleteEntry(entryId: string) {
     setDeletingEntryId(entryId);
     setDeleteError(undefined);
