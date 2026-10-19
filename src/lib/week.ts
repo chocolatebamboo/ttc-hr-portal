@@ -124,6 +124,41 @@ export function payrollPeriodOffsetForDate(dateKey: string): number {
   return periodsElapsedTarget - periodsElapsedToday;
 }
 
+/** Splits a pay period's 12-day span into its two weeks — Week 1 the full Monday–Sunday (7
+ *  days, starting at the period's own start) and Week 2 Monday–Friday only (5 days, ending at
+ *  the period's own end) — see PAYROLL_PERIOD_SPAN_DAYS's own doc comment for why Week 2 never
+ *  gets a weekend of its own.
+ *
+ *  Round fourteen (CB, Oct 2026, on the per-employee Timesheet review page, after approving the
+ *  "2-week report" link added to WeeklyTotalSidebar and the mobile reorder that moved it above
+ *  the day list: "I kind of want to see the two weeks respectively... it reads cleanly instead
+ *  of us having to keep switching to see the 2 weeks... if I switch to the next week, then it
+ *  will see the next pay period"): ReviewTimesheetView now pages by whole pay period instead of
+ *  single calendar week (reusing PayrollPeriodSwitcher for the nav, same as My Tasks/Logged
+ *  hours), with each of this split's two weeks rendered as its own collapsible section — see
+ *  that file for the accordion itself and which week opens by default. */
+export function getPayrollPeriodWeeks(offsetPeriods = 0): {
+  period: { start: string; end: string };
+  week1: { start: string; end: string; days: string[] };
+  week2: { start: string; end: string; days: string[] };
+} {
+  const period = getPayrollPeriod(offsetPeriods);
+  const startDate = new Date(`${period.start}T00:00:00`);
+  const days: string[] = [];
+  for (let i = 0; i < PAYROLL_PERIOD_SPAN_DAYS; i++) {
+    const d = new Date(startDate);
+    d.setDate(startDate.getDate() + i);
+    days.push(toDateKey(d));
+  }
+  const week1Days = days.slice(0, 7);
+  const week2Days = days.slice(7);
+  return {
+    period,
+    week1: { start: week1Days[0], end: week1Days[6], days: week1Days },
+    week2: { start: week2Days[0], end: week2Days[week2Days.length - 1], days: week2Days },
+  };
+}
+
 export function formatWeekRange(start: string, end: string): string {
   const s = new Date(`${start}T00:00:00`);
   const e = new Date(`${end}T00:00:00`);
