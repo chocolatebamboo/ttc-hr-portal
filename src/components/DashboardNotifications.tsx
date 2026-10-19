@@ -91,9 +91,14 @@ async function dismissBanner(banner: "approvals" | "messages" | "reportReady"): 
 type Entry = { key: "approvals" | "messages" | "reportReady"; node: React.ReactNode };
 
 /**
- * CB, Sept 2026: "the ability to exit [things]... notifications" — these are the two banners CB
+ * CB, Sept 2026: "the ability to exit [things]... notifications" — these are the three banners CB
  * herself calls a "notification." Swiping one away uses the same SwipeReveal "Clear" pattern
- * Messages and Team Availability already use.
+ * Messages and Team Availability already use; Oct 2026 (CB, on the report-ready card stuck
+ * showing a ten-day-old period: "there's no way to like exit that notification out, like clear
+ * it") each banner also carries its own small "x" (DismissButton, below) that fires the exact
+ * same dismiss on a plain click — swipe-to-reveal only ever responds to an actual touch/trackpad
+ * swipe, which a desktop mouse simply cannot produce, so that was the only way to clear anything
+ * on desktop before this.
  *
  * Correction brief #1/#9 (this round): dismissal is now real server state
  * (src/lib/dashboard-dismissals.ts), not localStorage — it persists across refresh, logout,
@@ -132,15 +137,22 @@ export default function DashboardNotifications({
           periodStart={summary.reportReady.periodStart}
           periodEnd={summary.reportReady.periodEnd}
           teamCount={summary.reportReady.teamCount}
+          onDismiss={() => clear("reportReady")}
         />
       ),
     });
   }
   if (summary.approvals.show && !clearedNow.has("approvals")) {
-    entries.push({ key: "approvals", node: <PendingApprovalsBanner count={summary.approvals.count} /> });
+    entries.push({
+      key: "approvals",
+      node: <PendingApprovalsBanner count={summary.approvals.count} onDismiss={() => clear("approvals")} />,
+    });
   }
   if (summary.messages.show && !clearedNow.has("messages")) {
-    entries.push({ key: "messages", node: <MessagesBanner count={summary.messages.unread} /> });
+    entries.push({
+      key: "messages",
+      node: <MessagesBanner count={summary.messages.unread} onDismiss={() => clear("messages")} />,
+    });
   }
 
   if (entries.length === 0) return null;
@@ -165,45 +177,86 @@ export default function DashboardNotifications({
   );
 }
 
+/**
+ * Oct 2026 (CB, pointing at the report-ready card stuck showing a ten-day-old period: "there's no
+ * way to like exit that notification out, like clear it"): SwipeReveal's "Clear" action (below)
+ * only ever fires off an actual touch/trackpad swipe — scroll-snap has no equivalent for a plain
+ * mouse, so on desktop there was genuinely no way to reach it at all. This is a second, always-
+ * visible way to trigger the exact same dismiss `onDismiss` (itself just `clear(key)` from the
+ * parent, same server-persisted dismissal SwipeReveal's "Clear" already uses) — a plain click,
+ * no swipe required, on every device. Swipe-to-clear is untouched and still works; this is
+ * additive. Rendered as a sibling of the banner's own `<Link>`, not nested inside it — a `<button>`
+ * nested inside an `<a>` is invalid HTML and unreliable with screen readers — so the parent must
+ * wrap both in `className="relative"` and the `<Link>` itself must NOT also claim `w-full`'s outer
+ * wrapper (each banner below does this).
+ */
+function DismissButton({ onDismiss, corner = false }: { onDismiss: () => void; corner?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onDismiss();
+      }}
+      aria-label="Dismiss"
+      className={
+        "absolute z-[3] h-6 w-6 rounded-full bg-white/[0.16] hover:bg-white/30 flex items-center justify-center text-white transition-colors " +
+        (corner ? "top-3 right-3" : "top-1/2 right-3.5 -translate-y-1/2")
+      }
+    >
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" aria-hidden="true">
+        <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
+      </svg>
+    </button>
+  );
+}
+
 // CB, Sept 2026: the admin-facing half — "on the administrator that is approving, that should
 // be a notification... on their home page saying that this person wants to have that time
 // approved."
-function PendingApprovalsBanner({ count }: { count: number }) {
+function PendingApprovalsBanner({ count, onDismiss }: { count: number; onDismiss: () => void }) {
   return (
-    <Link
-      href="/admin/availability"
-      className="flex items-center gap-3 rounded-2xl px-4 py-3.5 text-white transition-transform hover:-translate-y-0.5 w-full"
-      style={{ background: "linear-gradient(135deg, var(--ttc-blue-ink), var(--ttc-blue))" }}
-    >
-      <span className="h-9 w-9 shrink-0 rounded-full bg-white/15 flex items-center justify-center">
-        <BellIcon className="h-4.5 w-4.5" />
-      </span>
-      <p className="text-sm font-medium">
-        {count} availability {count === 1 ? "request" : "requests"} waiting for your review
-      </p>
-      <span className="ml-auto text-xs font-medium whitespace-nowrap shrink-0 opacity-90">Review →</span>
-    </Link>
+    <div className="relative">
+      <Link
+        href="/admin/availability"
+        className="flex items-center gap-3 rounded-2xl pl-4 pr-11 py-3.5 text-white transition-transform hover:-translate-y-0.5 w-full"
+        style={{ background: "linear-gradient(135deg, var(--ttc-blue-ink), var(--ttc-blue))" }}
+      >
+        <span className="h-9 w-9 shrink-0 rounded-full bg-white/15 flex items-center justify-center">
+          <BellIcon className="h-4.5 w-4.5" />
+        </span>
+        <p className="text-sm font-medium">
+          {count} availability {count === 1 ? "request" : "requests"} waiting for your review
+        </p>
+        <span className="ml-auto text-xs font-medium whitespace-nowrap shrink-0 opacity-90">Review →</span>
+      </Link>
+      <DismissButton onDismiss={onDismiss} />
+    </div>
   );
 }
 
 // The messaging half — Correction brief #1: "reflect only genuinely unread messages... remove
 // the unread-message homepage banner [when there are none]." `count` here is real unread, not
 // "ever posted by someone else" (see TeamNoteTopicCountDTO's own comment in src/types/index.ts).
-function MessagesBanner({ count }: { count: number }) {
+function MessagesBanner({ count, onDismiss }: { count: number; onDismiss: () => void }) {
   return (
-    <Link
-      href="/messages"
-      className="flex items-center gap-3 rounded-2xl px-4 py-3.5 text-white transition-transform hover:-translate-y-0.5 w-full"
-      style={{ background: "linear-gradient(135deg, #6d28d9, #8b5cf6)" }}
-    >
-      <span className="h-9 w-9 shrink-0 rounded-full bg-white/15 flex items-center justify-center">
-        <ChatIcon className="h-4.5 w-4.5" />
-      </span>
-      <p className="text-sm font-medium">
-        {count} new {count === 1 ? "message" : "messages"} waiting for you
-      </p>
-      <span className="ml-auto text-xs font-medium whitespace-nowrap shrink-0 opacity-90">View →</span>
-    </Link>
+    <div className="relative">
+      <Link
+        href="/messages"
+        className="flex items-center gap-3 rounded-2xl pl-4 pr-11 py-3.5 text-white transition-transform hover:-translate-y-0.5 w-full"
+        style={{ background: "linear-gradient(135deg, #6d28d9, #8b5cf6)" }}
+      >
+        <span className="h-9 w-9 shrink-0 rounded-full bg-white/15 flex items-center justify-center">
+          <ChatIcon className="h-4.5 w-4.5" />
+        </span>
+        <p className="text-sm font-medium">
+          {count} new {count === 1 ? "message" : "messages"} waiting for you
+        </p>
+        <span className="ml-auto text-xs font-medium whitespace-nowrap shrink-0 opacity-90">View →</span>
+      </Link>
+      <DismissButton onDismiss={onDismiss} />
+    </div>
   );
 }
 
@@ -296,53 +349,58 @@ function ReportReadyBanner({
   periodStart,
   periodEnd,
   teamCount,
+  onDismiss,
 }: {
   periodStart: string;
   periodEnd: string;
   teamCount: number;
+  onDismiss: () => void;
 }) {
   return (
-    <Link
-      href={`/admin/reports?periodEnd=${periodEnd}`}
-      className="report-ready-card relative block overflow-hidden rounded-3xl px-[13px] py-4 text-white transition-transform hover:-translate-y-0.5 w-full"
-      style={{
-        boxShadow:
-          "0 10px 30px -6px color-mix(in srgb, var(--ttc-pink-ink) 45%, transparent), 0 2px 8px rgba(0,0,0,0.08)",
-        background:
-          "radial-gradient(120% 140% at 0% 0%, rgba(255,255,255,0.16), transparent 55%), linear-gradient(135deg, var(--ttc-blue-ink) 0%, var(--ttc-blue) 48%, var(--ttc-pink) 100%)",
-      }}
-    >
-      <span className="report-ready-glow" aria-hidden="true" />
-      <ReportReadyConfetti />
-      <div className="relative z-[2] flex items-center gap-[11px]">
-        <span className="relative shrink-0">
-          <span className="report-ready-seal-ring absolute -inset-1 rounded-full border-[1.5px] border-white/50" aria-hidden="true" />
-          <span className="report-ready-seal flex h-[46px] w-[46px] items-center justify-center rounded-full bg-white shadow-[0_4px_12px_rgba(0,0,0,0.16)]">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--ttc-pink-ink)" strokeWidth="2.3" aria-hidden="true">
-              <path d="M3.5 20.5h17" strokeLinecap="round" />
-              <path d="M6.5 20.5v-6M12 20.5V7M17.5 20.5v-9.5" strokeLinecap="round" />
+    <div className="relative">
+      <Link
+        href={`/admin/reports?periodEnd=${periodEnd}`}
+        className="report-ready-card relative block overflow-hidden rounded-3xl px-[13px] py-4 text-white transition-transform hover:-translate-y-0.5 w-full"
+        style={{
+          boxShadow:
+            "0 10px 30px -6px color-mix(in srgb, var(--ttc-pink-ink) 45%, transparent), 0 2px 8px rgba(0,0,0,0.08)",
+          background:
+            "radial-gradient(120% 140% at 0% 0%, rgba(255,255,255,0.16), transparent 55%), linear-gradient(135deg, var(--ttc-blue-ink) 0%, var(--ttc-blue) 48%, var(--ttc-pink) 100%)",
+        }}
+      >
+        <span className="report-ready-glow" aria-hidden="true" />
+        <ReportReadyConfetti />
+        <div className="relative z-[2] flex items-center gap-[11px] pr-7">
+          <span className="relative shrink-0">
+            <span className="report-ready-seal-ring absolute -inset-1 rounded-full border-[1.5px] border-white/50" aria-hidden="true" />
+            <span className="report-ready-seal flex h-[46px] w-[46px] items-center justify-center rounded-full bg-white shadow-[0_4px_12px_rgba(0,0,0,0.16)]">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--ttc-pink-ink)" strokeWidth="2.3" aria-hidden="true">
+                <path d="M3.5 20.5h17" strokeLinecap="round" />
+                <path d="M6.5 20.5v-6M12 20.5V7M17.5 20.5v-9.5" strokeLinecap="round" />
+              </svg>
+            </span>
+          </span>
+          <div className="min-w-0">
+            <div className="font-serif text-[1.36rem] font-bold leading-[1.12] tracking-[-0.01em] truncate">
+              Two-week report is ready
+            </div>
+            <div className="mt-[3px] truncate text-[0.89rem] text-white/80">{formatWeekRange(periodStart, periodEnd)} wrapped up</div>
+          </div>
+        </div>
+        <div className="relative z-[2] my-3 h-px bg-white/20" />
+        <div className="relative z-[2] flex items-center justify-between gap-3">
+          <span className="text-[0.78rem] text-white/80">
+            <b className="font-bold text-white">{teamCount}</b> team {teamCount === 1 ? "member" : "members"} logged time
+          </span>
+          <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-white px-3.5 py-1.5 text-[0.78rem] font-bold text-[color:var(--ttc-pink-ink)]">
+            View report
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" aria-hidden="true">
+              <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </span>
-        </span>
-        <div className="min-w-0">
-          <div className="font-serif text-[1.36rem] font-bold leading-[1.12] tracking-[-0.01em] truncate">
-            Two-week report is ready
-          </div>
-          <div className="mt-[3px] truncate text-[0.89rem] text-white/80">{formatWeekRange(periodStart, periodEnd)} wrapped up</div>
         </div>
-      </div>
-      <div className="relative z-[2] my-3 h-px bg-white/20" />
-      <div className="relative z-[2] flex items-center justify-between gap-3">
-        <span className="text-[0.78rem] text-white/80">
-          <b className="font-bold text-white">{teamCount}</b> team {teamCount === 1 ? "member" : "members"} logged time
-        </span>
-        <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-white px-3.5 py-1.5 text-[0.78rem] font-bold text-[color:var(--ttc-pink-ink)]">
-          View report
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" aria-hidden="true">
-            <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </span>
-      </div>
-    </Link>
+      </Link>
+      <DismissButton onDismiss={onDismiss} corner />
+    </div>
   );
 }
