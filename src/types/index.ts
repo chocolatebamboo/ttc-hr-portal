@@ -89,6 +89,24 @@ export interface TimeEntryDTO {
   status: TimeEntryStatus;
   /** Set only when status is RETURNED — the supervisor/HR comment explaining the issue. */
   reviewComment?: string | null;
+  /** Round twelve (CB, Oct 2026, pointing at Haile's own corrected entry: "I'm still not
+   *  seeing like who also corrected the time and stuff and when they did it... we should still
+   *  be seeing the flagged [reason]"): set only when a reviewer has used the CB/Shawn-only
+   *  "Edit times" capability on this entry at some point (submitReviewerCorrection, src/lib/
+   *  time-actions.ts — an HR_CORRECTION audit event exists for it) — who, when, and what it was
+   *  originally flagged for, since the correction itself wipes the flag off the live session
+   *  rows (a clean set of corrected times, not a flagged one — see that function's own doc
+   *  comment) and that history would otherwise be lost to view once the old sessions are
+   *  replaced. Pulled from the audit trail, same single source of truth reviewComment above
+   *  draws from, never duplicated onto TimeEntry itself. */
+  correction?: {
+    reviewerName: string;
+    correctedAt: string; // ISO datetime
+    /** The exception reason(s) recorded at clock-in or auto-clock-out before this correction,
+     *  joined with "; " if more than one session was flagged — null if the day reached this
+     *  reviewer's "Edit times" without ever actually being flagged for anything. */
+    originalFlagReason: string | null;
+  } | null;
 }
 
 /** One row in the HR-wide attendance dashboard (src/app/(portal)/admin/attendance) — every
