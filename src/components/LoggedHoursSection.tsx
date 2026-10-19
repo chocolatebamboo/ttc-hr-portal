@@ -119,14 +119,15 @@ export default function LoggedHoursSection({ showHeading = true }: { showHeading
 
   // CB, Sept 2026: "I should be able to delete those times... if I swipe... on the respective
   // date block." Then again, once she'd tried it: a whole day should be revertible while it's
-  // still Awaiting Approval, not just an accidental zero-minute one (see deleteEmployeeTimeEntry's
-  // doc comment on the server for the full rule and the compliance reasoning behind the Approved
-  // lock). Removed from `entries` on success so it disappears immediately; since it's a real
-  // delete against the one shared TimeEntry table, it's gone from any other view reading the same
-  // data too (a supervisor's review page, most notably). A rejection is a real, expected case now
-  // (most likely a supervisor approved the same entry a moment earlier) rather than the
-  // near-impossible edge case it was when only zero-minute rows qualified, so it's surfaced on
-  // the row instead of failing silently.
+  // still Awaiting Approval, not just an accidental zero-minute one — confirmed scope is "true
+  // delete[,] awaiting approval only... they wouldn't be able to do that on their side once we
+  // approve" (see deleteEmployeeTimeEntry's doc comment on the server for the full rule and the
+  // compliance reasoning behind the Approved lock). Removed from `entries` on success so it
+  // disappears immediately; since it's a real delete against the one shared TimeEntry table,
+  // it's gone from any other view reading the same data too (a supervisor's review page, most
+  // notably). A rejection is a real, expected case now (most likely a supervisor approved the
+  // same entry a moment earlier) rather than the near-impossible edge case it was when only
+  // zero-minute rows qualified, so it's surfaced on the row instead of failing silently.
   async function deleteEntry(entryId: string) {
     setDeletingEntryId(entryId);
     setDeleteError(undefined);
