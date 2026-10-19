@@ -36,76 +36,75 @@ export function weekOffsetForDate(dateKey: string): number {
 }
 
 /** TTC's real biweekly payroll calendar (Round four/seven, Oct 2026 — see ReportsView's own
- *  lastTwoWeeksRange, the original home of this logic, for the full story). PAYROLL_PERIOD_END_
- *  ANCHOR is one confirmed period's last day; every other period end, past or future, falls
- *  exactly a whole number of 14-day blocks from that one date. Pulled out to a shared home
- *  (Round eight, CB, on LoggedHoursSection's own "Total, last 90 days" card: "I need this to be
- *  reflecting the two-week report... toggle between the different two-week reports") so the
- *  Reports page's "2-Week Report" preset and the employee-facing Logged hours widget always
- *  agree on exactly where one period ends and the next begins.
+ *  lastTwoWeeksRange, the original home of this logic, for the full story). Pulled out to a
+ *  shared home (Round eight, CB, on LoggedHoursSection's own "Total, last 90 days" card: "I need
+ *  this to be reflecting the two-week report... toggle between the different two-week reports")
+ *  so the Reports page's "2-Week Report" preset, the employee-facing Logged hours widget, and My
+ *  Tasks' pay-period paging always agree on exactly where one period ends and the next begins.
  *
- *  Round nine (CB, Oct 9 2026, the Friday this anchor itself names: "the next pay period starts
- *  today... it's every two weeks... starting from today, that's the pay period"): this was first
- *  written as "2026-10-09", on the mistaken belief that Oct 9 2026 was a Thursday closing out a
- *  period — it's actually a Friday, and CB confirmed direct and unambiguous that Oct 9 itself is
- *  a new period's FIRST day (Oct 9 – Oct 22), not a period's last day. Corrected to the Thursday
- *  right before it, 2026-10-08, the true last day of the period that closed the day before this
- *  anchor needed fixing — every period this drives (Reports' 2-Week Report, LoggedHoursSection,
- *  My Tasks' pay-period paging) shifts by this same one day, past and future alike, since they
- *  all read off this one constant rather than their own copies. */
-export const PAYROLL_PERIOD_END_ANCHOR = "2026-10-08";
-export const PAYROLL_PERIOD_DAYS = 14;
+ *  Round nine (CB, Oct 9 2026): first anchor attempt, corrected same-day to "2026-10-08" as one
+ *  confirmed period's last day, with every period a 14-day INCLUSIVE block (end minus 13 days).
+ *
+ *  Round ten (CB, Oct 2026, pointing at a Reports default of Sep 25 – Oct 8 while the period
+ *  actually active that day was Oct 12 – 23): round nine's anchor was wrong by more than a day —
+ *  TTC's real payroll weeks don't run as one unbroken 14-day block at all. CB's own unambiguous
+ *  worked example: the period active right now runs Monday Oct 12 through Friday Oct 23 (12
+ *  calendar days), and the next one starts Monday Oct 26 through Friday Nov 6. The Saturday/
+ *  Sunday between one period's Friday and the next period's Monday belongs to NEITHER period —
+ *  confirmed via AskUserQuestion before changing this a third time, given this exact constant has
+ *  already needed one prior correction. Replaced the single "14-day inclusive block" shape with a
+ *  Monday-start anchor plus two separate numbers: the CYCLE (14 days, one period's start to the
+ *  next's) and the SPAN (12 days, the Monday through the following Friday that's actually
+ *  displayed) — a period's displayed end is no longer just "anchor plus a multiple of the cycle,"
+ *  since span and cycle are different lengths now. */
+export const PAYROLL_PERIOD_START_ANCHOR = "2026-10-12"; // a confirmed period's first day (Monday)
+export const PAYROLL_PERIOD_CYCLE_DAYS = 14; // days from one period's start to the next period's start
+export const PAYROLL_PERIOD_SPAN_DAYS = 12; // Monday through the following Friday, inclusive
 
-/** The most recently CLOSED 14-day payroll period as of today, offset by `offsetPeriods` whole
- *  periods (0 = current/most-recently-closed, -1 = the one before that, 1 = the one in progress
- *  now). Same "most recently closed, not a rolling N days ending today" rule lastTwoWeeksRange
- *  established — a period keeps showing as current all the way through its successor actually
- *  closing, no matter what day someone happens to look. */
+/** The payroll period CONTAINING today, offset by `offsetPeriods` whole cycles (0 = today's own
+ *  period, -1 = the one before that, 1 = the one after). Unlike round nine's "most recently
+ *  closed" rule, offset 0 is always whichever period today actually falls in — including the
+ *  Sat/Sun gap right after a period's Friday end, which keeps showing that period (not the next
+ *  one) until its Monday actually arrives, same "doesn't flip until the next period really
+ *  starts" idea round nine had, just anchored to the period's START instead of its END. */
 export function getPayrollPeriod(offsetPeriods = 0): { start: string; end: string } {
-  const anchor = new Date(`${PAYROLL_PERIOD_END_ANCHOR}T00:00:00`);
+  const anchor = new Date(`${PAYROLL_PERIOD_START_ANCHOR}T00:00:00`);
   const today = new Date(`${toDateKey(new Date())}T00:00:00`);
   const daysSinceAnchor = Math.round((today.getTime() - anchor.getTime()) / 86400000);
-  const periodsElapsed = Math.floor(daysSinceAnchor / PAYROLL_PERIOD_DAYS);
-  const endDate = new Date(anchor);
-  endDate.setDate(endDate.getDate() + (periodsElapsed + offsetPeriods) * PAYROLL_PERIOD_DAYS);
-  const startDate = new Date(endDate);
-  startDate.setDate(startDate.getDate() - (PAYROLL_PERIOD_DAYS - 1));
+  const periodsElapsed = Math.floor(daysSinceAnchor / PAYROLL_PERIOD_CYCLE_DAYS);
+  const startDate = new Date(anchor);
+  startDate.setDate(startDate.getDate() + (periodsElapsed + offsetPeriods) * PAYROLL_PERIOD_CYCLE_DAYS);
+  const endDate = new Date(startDate);
+  endDate.setDate(endDate.getDate() + (PAYROLL_PERIOD_SPAN_DAYS - 1));
   return { start: toDateKey(startDate), end: toDateKey(endDate) };
 }
 
-/** Which getPayrollPeriod offset contains TODAY specifically — 0 on the single day a period is
- *  also closing (today is itself a period's last day, same day getPayrollPeriod(0) already
- *  resolves to), 1 on every other day, since getPayrollPeriod(0) is always the most recently
- *  CLOSED period (see its own doc comment) and the period actually in progress right now is
- *  always the very next one after that. ReportsView's payroll report deliberately keeps showing
- *  offset 0 (the last CLOSED period) throughout the next one being in progress — it's a report,
- *  not a live counter. LoggedHoursSection is the opposite: an employee's own "what have I logged"
- *  widget should open on whatever period they're actively logging into, so it uses this as its
- *  default and as the cap its own "Next period" button won't go past. */
+/** Which getPayrollPeriod offset contains TODAY — always 0 now, since getPayrollPeriod(0) is
+ *  itself defined as "today's own period" (see its own doc comment). Kept as a real function
+ *  rather than inlining a literal 0 at every call site: ReportsView/LoggedHoursSection/My
+ *  Tasks/Team Tasks all ask "what's current" through this one name, so a future change to what
+ *  "current" means only has to happen here. */
 export function getCurrentPayrollPeriodOffset(): number {
-  const anchor = new Date(`${PAYROLL_PERIOD_END_ANCHOR}T00:00:00`);
-  const today = new Date(`${toDateKey(new Date())}T00:00:00`);
-  const daysSinceAnchor = Math.round((today.getTime() - anchor.getTime()) / 86400000);
-  return daysSinceAnchor % PAYROLL_PERIOD_DAYS === 0 ? 0 : 1;
+  return 0;
 }
 
 /** Inverse of getPayrollPeriod, same shape as weekOffsetForDate above but for pay periods
  *  instead of calendar weeks: given a date key, which getPayrollPeriod offset its own period is
- *  from today's (0 = the most recently closed period — see getPayrollPeriod's own doc comment —
- *  negative further into the past, positive into the future). Round four (CB, Oct 2026, on My
- *  Tasks: "I should be able to see all the tasks that's [under] review for that period of
- *  time... based off of those two week intervals"): MyTasksView's own `?date=` deep link (from
- *  the "Tasks" link on an Availability/Schedule card) uses this the same way weekOffsetForDate
- *  used to, now that both of that page's tabs page by 2-week period instead of calendar week. */
+ *  from today's (0 = today's own period — see getPayrollPeriod's own doc comment — negative
+ *  further into the past, positive into the future). Round four (CB, Oct 2026, on My Tasks: "I
+ *  should be able to see all the tasks that's [under] review for that period of time... based
+ *  off of those two week intervals"): MyTasksView's own `?date=` deep link (from the "Tasks" link
+ *  on an Availability/Schedule card) uses this the same way weekOffsetForDate used to, now that
+ *  both of that page's tabs page by 2-week period instead of calendar week. */
 export function payrollPeriodOffsetForDate(dateKey: string): number {
-  const anchor = new Date(`${PAYROLL_PERIOD_END_ANCHOR}T00:00:00`);
+  const anchor = new Date(`${PAYROLL_PERIOD_START_ANCHOR}T00:00:00`);
   const today = new Date(`${toDateKey(new Date())}T00:00:00`);
   const target = new Date(`${dateKey}T00:00:00`);
   const todaysDaysSinceAnchor = Math.round((today.getTime() - anchor.getTime()) / 86400000);
-  const periodsElapsedToday = Math.floor(todaysDaysSinceAnchor / PAYROLL_PERIOD_DAYS);
+  const periodsElapsedToday = Math.floor(todaysDaysSinceAnchor / PAYROLL_PERIOD_CYCLE_DAYS);
   const targetDaysSinceAnchor = Math.round((target.getTime() - anchor.getTime()) / 86400000);
-  const targetPeriodIndex = Math.ceil(targetDaysSinceAnchor / PAYROLL_PERIOD_DAYS);
-  return targetPeriodIndex - periodsElapsedToday;
+  const periodsElapsedTarget = Math.floor(targetDaysSinceAnchor / PAYROLL_PERIOD_CYCLE_DAYS);
+  return periodsElapsedTarget - periodsElapsedToday;
 }
 
 export function formatWeekRange(start: string, end: string): string {
