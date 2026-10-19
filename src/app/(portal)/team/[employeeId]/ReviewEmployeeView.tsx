@@ -52,12 +52,17 @@ export default function ReviewEmployeeView({
   jobTitle,
   avatarUrl,
   viewerId,
+  canEditFlaggedTimeEntries = false,
 }: {
   employeeId: string;
   employeeName: string;
   jobTitle: string;
   avatarUrl: string | null;
   viewerId: string;
+  /** Round 10 (CB, Oct 2026): threaded straight through to the Timesheet tab — see that tab's
+   *  own ReviewTimesheetView for the full reasoning. Just a pass-through here, same as every
+   *  other prop on this view. */
+  canEditFlaggedTimeEntries?: boolean;
 }) {
   const [tab, setTab] = useState<TabKey>("timesheet");
 
@@ -99,7 +104,9 @@ export default function ReviewEmployeeView({
         </div>
       </div>
 
-      {tab === "timesheet" && <ReviewTimesheetView employeeId={employeeId} />}
+      {tab === "timesheet" && (
+        <ReviewTimesheetView employeeId={employeeId} canEditFlaggedTimeEntries={canEditFlaggedTimeEntries} />
+      )}
       {tab === "timeoff" && <TeamPtoSection employeeId={employeeId} />}
       {tab === "availability" && <TeamAvailabilitySection employeeId={employeeId} />}
       {/* CB, Sept 2026: "say I accept it, then I would be able to, like, add notes, add
