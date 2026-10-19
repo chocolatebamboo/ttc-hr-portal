@@ -227,9 +227,9 @@ const REPORT_READY_CONFETTI = Array.from({ length: 16 }, (_, i) => {
   };
 });
 const REPORT_READY_SPARKLES = [
-  { left: 10, top: 10, size: 11, delay: "0.6s" },
-  { left: 60, top: 4, size: 8, delay: "0.72s" },
-  { left: 180, top: 16, size: 9, delay: "0.84s" },
+  { left: 5, top: 10, size: 11, delay: "0.6s" },
+  { left: 55, top: 4, size: 8, delay: "0.72s" },
+  { left: 175, top: 16, size: 9, delay: "0.84s" },
 ];
 
 type ConfettiPieceStyle = React.CSSProperties & {
@@ -247,7 +247,7 @@ function ReportReadyConfetti() {
           aria-hidden="true"
           style={
             {
-              left: "42px",
+              left: "37px",
               background: piece.color,
               animationDelay: piece.delay,
               "--report-ready-end": piece.end,
@@ -279,14 +279,18 @@ function ReportReadyConfetti() {
  * first draft scope: "that's only for me Shawn and Daijour") — gated server-side in
  * getDashboardNotificationsSummary, never rendered here for anyone else.
  *
- * Four mockup rounds (CB's own words each time): V1's thin pill "doesn't really stand out...
+ * Seven mockup rounds (CB's own words each time): V1's thin pill "doesn't really stand out...
  * besides that pink gradient"; V2's bigger standalone card with a serif headline and a real
  * badge; V3's centered layout with a solid-seal checkmark badge ("a symbol is what I meant to
- * say"); V4 — this one — back to left-aligned ("there's too much space up top and it needs to
- * be left aligned") but keeping V3's seal badge and V2's tighter card padding. Tapping the card
- * deep-links straight into that closed period's report (ReportsView's own `?periodEnd=` read),
- * the same "land directly on the right range" convention the unapproved-entries banner already
- * uses with `?week=`.
+ * say"); V4 back to left-aligned ("there's too much space up top and it needs to be left
+ * aligned") but keeping V3's seal badge and V2's tighter card padding; V5, on V4: bigger
+ * title/subtitle and tighter side padding ("I don't like the empty spaces on the sides"); V6
+ * tried dropping the white circle for a bare chart-bars icon (CB: the checkmark "feels like you
+ * have to click that"); V7 — this one — keeps the circle after all, just with that same
+ * chart-bars glyph (the app's own Reports icon, see ChartIcon/StatCard on this dashboard)
+ * swapped in for the checkmark. Tapping the card deep-links straight into that closed period's
+ * report (ReportsView's own `?periodEnd=` read), the same "land directly on the right range"
+ * convention the unapproved-entries banner already uses with `?week=`.
  */
 function ReportReadyBanner({
   periodStart,
@@ -300,7 +304,7 @@ function ReportReadyBanner({
   return (
     <Link
       href={`/admin/reports?periodEnd=${periodEnd}`}
-      className="report-ready-card relative block overflow-hidden rounded-3xl px-[18px] py-4 text-white transition-transform hover:-translate-y-0.5 w-full"
+      className="report-ready-card relative block overflow-hidden rounded-3xl px-[13px] py-4 text-white transition-transform hover:-translate-y-0.5 w-full"
       style={{
         boxShadow:
           "0 10px 30px -6px color-mix(in srgb, var(--ttc-pink-ink) 45%, transparent), 0 2px 8px rgba(0,0,0,0.08)",
@@ -310,28 +314,29 @@ function ReportReadyBanner({
     >
       <span className="report-ready-glow" aria-hidden="true" />
       <ReportReadyConfetti />
-      <div className="relative z-[2] flex items-center gap-3">
+      <div className="relative z-[2] flex items-center gap-[11px]">
         <span className="relative shrink-0">
           <span className="report-ready-seal-ring absolute -inset-1 rounded-full border-[1.5px] border-white/50" aria-hidden="true" />
           <span className="report-ready-seal flex h-[46px] w-[46px] items-center justify-center rounded-full bg-white shadow-[0_4px_12px_rgba(0,0,0,0.16)]">
-            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--ttc-pink-ink)" strokeWidth="2.75" aria-hidden="true">
-              <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--ttc-pink-ink)" strokeWidth="2.3" aria-hidden="true">
+              <path d="M3.5 20.5h17" strokeLinecap="round" />
+              <path d="M6.5 20.5v-6M12 20.5V7M17.5 20.5v-9.5" strokeLinecap="round" />
             </svg>
           </span>
         </span>
         <div className="min-w-0">
-          <div className="font-serif text-[1.18rem] font-bold leading-[1.15] tracking-[-0.01em] truncate">
+          <div className="font-serif text-[1.36rem] font-bold leading-[1.12] tracking-[-0.01em] truncate">
             Two-week report is ready
           </div>
-          <div className="mt-0.5 truncate text-[0.8rem] text-white/80">{formatWeekRange(periodStart, periodEnd)} wrapped up</div>
+          <div className="mt-[3px] truncate text-[0.89rem] text-white/80">{formatWeekRange(periodStart, periodEnd)} wrapped up</div>
         </div>
       </div>
       <div className="relative z-[2] my-3 h-px bg-white/20" />
       <div className="relative z-[2] flex items-center justify-between gap-3">
-        <span className="text-[0.74rem] text-white/80">
+        <span className="text-[0.78rem] text-white/80">
           <b className="font-bold text-white">{teamCount}</b> team {teamCount === 1 ? "member" : "members"} logged time
         </span>
-        <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-white px-3.5 py-1.5 text-[0.76rem] font-bold text-[color:var(--ttc-pink-ink)]">
+        <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-white px-3.5 py-1.5 text-[0.78rem] font-bold text-[color:var(--ttc-pink-ink)]">
           View report
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" aria-hidden="true">
             <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
