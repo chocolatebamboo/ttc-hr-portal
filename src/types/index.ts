@@ -39,6 +39,11 @@ export interface CurrentEmployee {
    *  status/button/hours-stat at all (see that component's own doc comment) — true everywhere
    *  else in the app that isn't about clocking in. */
   clocksIn: boolean;
+  /** Round 10 (CB, Oct 2026): "only Shawn and I am supposed to be able to have those types of
+   *  capabilities" — gates the reviewer-side "Edit times" action on a flagged/AWAITING_APPROVAL
+   *  time entry (see TimesheetTable's review.onEditTimes and assertCanEditFlaggedTimeEntries in
+   *  src/lib/authorization.ts). Same per-person, role-independent flag shape as clocksIn above. */
+  canEditFlaggedTimeEntries: boolean;
 }
 
 /** One clock-in/clock-out pair. clockOut is null exactly while this is the day's currently
