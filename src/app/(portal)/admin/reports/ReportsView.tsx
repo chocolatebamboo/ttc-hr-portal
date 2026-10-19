@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getWeek, formatWeekRange, getPayrollPeriod } from "@/lib/week";
+import { getWeek, formatWeekRange, getPayrollPeriod, PAYROLL_PERIOD_CYCLE_DAYS } from "@/lib/week";
 import { formatClockTime } from "@/lib/time";
 import ActivityHistoryView from "./ActivityHistoryView";
 import type { PayrollHoursReportDTO, TimeEntryDTO } from "@/types";
@@ -38,19 +38,18 @@ function thisWeekRange(): { start: string; end: string } {
  *  Generate," so running it even a day or two after a period closed would silently drift onto a
  *  mix of the old and new periods instead of staying on the one that actually just closed). Now
  *  anchored to TTC's real biweekly payroll calendar instead of today's own date.
- *  PAYROLL_PERIOD_END_ANCHOR is one confirmed period's last day (Thu, Oct 9 2026 — CB: "tomorrow
- *  is Friday... the payroll is every two weeks on a Friday... it's going to restart pretty much
- *  tomorrow," i.e. the period ending Oct 9 closes and the next one starts Oct 10); every other
- *  period end, past or future, falls exactly a whole number of 14-day blocks from that one date.
- *  This finds the most recently CLOSED period — the latest period-end that isn't after today —
- *  so "2-Week Report" keeps showing Sep 26–Oct 9 all the way through Oct 10–23 being in progress,
- *  and only flips over to Oct 10–23 once THAT period itself closes, no matter what day Sean or
- *  Daijour actually happens to click the button.
  *
  *  Round eight (CB, Oct 2026, on LoggedHoursSection's own pay-period card): this period math is
  *  now the shared getPayrollPeriod (src/lib/week.ts) so the Reports page and the employee-facing
- *  Logged hours widget can't drift apart on where one period ends and the next begins — this is
- *  just that same lookup at offset 0 (the current/most-recently-closed period). */
+ *  Logged hours widget can't drift apart on where one period ends and the next begins.
+ *
+ *  Round ten (CB, Oct 2026, pointing at this tab defaulting to Sep 25–Oct 8 while the period
+ *  actually active was Oct 12–23): getPayrollPeriod's own semantics changed — see that function's
+ *  doc comment in src/lib/week.ts for the full story — from "most recently CLOSED period" to
+ *  "the period containing today." This call site is the one deliberately relying on that new
+ *  meaning: offset 0 now always opens this tab on the period that's actually live right now,
+ *  which is exactly the fix CB asked for ("I shouldn't have to... manually put in the dates of
+ *  the payroll"). */
 function lastTwoWeeksRange(): { start: string; end: string } {
   return getPayrollPeriod(0);
 }
@@ -303,20 +302,31 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
   /** Round six (CB, on a screenshot of the Period row): "we should be able to toggle and go to
    *  the different... other two weeks. Past to present... I should be able to click the
    *  different dates and it auto-update" — the prev/next arrows flanking the date range below.
-   *  Steps the current range back or forward by its own length (14 days for a 2-Week Report, 7
-   *  for This Week, etc.) rather than jumping to some fixed preset, so the same two buttons work
-   *  regardless of which preset — or hand-picked range — produced what's currently on screen.
+   *  Steps the current range back or forward by its own length (7 days for This Week, etc.)
+   *  rather than jumping to some fixed preset, so the same two buttons work regardless of which
+   *  preset — or hand-picked range — produced what's currently on screen.
    *  periodPreset is deliberately left untouched here (unlike handleSubmit's "custom" reset):
    *  paging through 2-week blocks stays tagged "2-Week Report" the whole time, since each one
-   *  really is a 2-week block, just not THE 2-week block lastTwoWeeksRange would pick on its
-   *  own. */
+   *  really is a payroll period, just not THE one lastTwoWeeksRange would pick on its own.
+   *
+   *  Round ten (CB, Oct 2026): a 2-Week Report's own DISPLAYED span is now 12 days (Monday
+   *  through the following Friday — see PAYROLL_PERIOD_SPAN_DAYS's doc comment in src/lib/
+   *  week.ts), but one payroll period's start is still a full PAYROLL_PERIOD_CYCLE_DAYS (14)
+   *  after the previous one's — the Sat/Sun between a period's Friday end and the next period's
+   *  Monday start belongs to neither. Stepping by the displayed span (12 days) would walk the
+   *  arrows a tiny bit off the real payroll calendar every click, compounding with each page.
+   *  So "2-Week Report" is special-cased here to step by the fixed 14-day cycle instead of its
+   *  own displayed span; every other preset still steps by what's actually on screen. */
   function shiftPeriod(direction: -1 | 1) {
-    const spanDays = Math.round((new Date(`${end}T00:00:00`).getTime() - new Date(`${start}T00:00:00`).getTime()) / 86400000) + 1;
+    const stepDays =
+      periodPreset === "twoWeeks"
+        ? PAYROLL_PERIOD_CYCLE_DAYS
+        : Math.round((new Date(`${end}T00:00:00`).getTime() - new Date(`${start}T00:00:00`).getTime()) / 86400000) + 1;
     const toKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     const newStartDate = new Date(`${start}T00:00:00`);
-    newStartDate.setDate(newStartDate.getDate() + direction * spanDays);
+    newStartDate.setDate(newStartDate.getDate() + direction * stepDays);
     const newEndDate = new Date(`${end}T00:00:00`);
-    newEndDate.setDate(newEndDate.getDate() + direction * spanDays);
+    newEndDate.setDate(newEndDate.getDate() + direction * stepDays);
     const newStart = toKey(newStartDate);
     const newEnd = toKey(newEndDate);
     setStart(newStart);
