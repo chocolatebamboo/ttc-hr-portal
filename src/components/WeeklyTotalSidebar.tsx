@@ -34,6 +34,10 @@ const BUCKET_ORDER: WeekBucket[] = ["approved", "awaiting", "returned", "inProgr
  * matching the approved mockup. On narrower screens (ReviewTimesheetView's grid collapses to
  * one column below `lg`), this simply renders below the day list instead of beside it — never
  * hidden, since it's still the only place the weekly total shows once `hideSummaryBar` is set.
+ *
+ * Oct 2026 (CB, screenshotting a team member's Timesheet with it circled out): dropped the small
+ * explainer card underneath ("On desktop, this card stays in view...") — CB didn't want it there.
+ * The sticky behavior itself is unchanged, just no longer narrated on the page.
  */
 export default function WeeklyTotalSidebar({
   weekLabel,
@@ -71,12 +75,6 @@ export default function WeeklyTotalSidebar({
             </div>
           </>
         )}
-      </div>
-
-      <div className="hidden lg:block rounded-2xl border border-border bg-surface p-4 text-xs text-muted leading-relaxed">
-        <span className="text-foreground font-semibold">On desktop</span>, this card stays in view as
-        you scroll through the week&rsquo;s days — no more scrolling past every day to find the total
-        at the bottom.
       </div>
     </div>
   );
