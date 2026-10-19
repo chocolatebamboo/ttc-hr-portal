@@ -238,11 +238,29 @@ function TimesheetDayCard({
                       clock-in (scheduledStartTime/EndTime come from GET /api/time/timesheet
                       only — see TimeSessionDTO's own doc comment), not just on a flagged row,
                       so a reviewer can always see the schedule right next to the recorded time
-                      instead of only being told something didn't match. */}
-                  {s.scheduledStartTime && s.scheduledEndTime && (
+                      instead of only being told something didn't match.
+
+                      Round two (CB, Oct 2026, on Donique's flagged Oct 12 day, which had no
+                      shift at all to match against: "I should see kind of the original... schedule
+                      of based off of what was approved... so we could kind of compare"): a flagged
+                      row with nothing to show here used to just go quiet — this adds the same kind
+                      of line for that case too, so a reviewer always has a baseline to check the
+                      clock-in against, whether that's a real schedule or confirmation there wasn't
+                      one. Scoped to flagged rows only (isException) — an ordinary clean clock-in
+                      with no shift stays exactly as quiet as before, nothing new to see there.
+                      Worded carefully per CB's own correction: clock-in was never gated on an
+                      approved shift existing (Phase 3: "clocking in with no shift scheduled at
+                      all is still allowed, and is always an exception," confirmed again here —
+                      she chose to keep that rather than start blocking clock-ins), so this reads
+                      as a plain fact to check against, not as something that shouldn't have been
+                      possible — same unstyled treatment as the "Scheduled ___" line above it,
+                      never calling special attention to it. */}
+                  {s.scheduledStartTime && s.scheduledEndTime ? (
                     <div className="text-[11px] text-muted">
                       Scheduled {formatTime12h(s.scheduledStartTime)} – {formatTime12h(s.scheduledEndTime)}
                     </div>
+                  ) : (
+                    s.isException && <div className="text-[11px] text-muted">No approved shift to compare against</div>
                   )}
                   {/* Phase 3 (client spec, Sept 2026): flags a clock-in that had no scheduled
                       shift, or fell outside its 15-minute window — visible here on both the
