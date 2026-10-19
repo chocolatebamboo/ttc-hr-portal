@@ -414,13 +414,21 @@ export async function submitEmployeeCorrection(
  * Shawn and I am supposed to be able to have those types of capabilities"). The reviewer-side
  * counterpart to submitEmployeeCorrection just above — same session-replace shape (validate,
  * delete-then-recreate, before/after audit summary) — but for a DIFFERENT entry/status pairing:
- * this acts on a flagged entry still AWAITING_APPROVAL (not one already RETURNED back to the
- * employee), and it resolves the review in the same step rather than handing it back for a
- * second look — the corrected times land straight on APPROVED, since the reviewer editing them
- * IS the review. Authorization (actually Shawn or CB, and actually allowed to reach this
- * employee's records) is the caller's job — see assertCanEditFlaggedTimeEntries in
- * src/lib/authorization.ts — enforced again here via withRlsContext under the REVIEWER's own
- * identity, same layered pattern reviewTimeEntry already uses.
+ * a flagged entry, not one already RETURNED back to the employee — and it resolves the review in
+ * the same step rather than handing it back for a second look, since the corrected times land
+ * straight on APPROVED either way and the reviewer editing them IS the review.
+ *
+ * Round 11 (CB, Oct 2026, pointing at that exact same Haile entry again — by then it had already
+ * been left Approved as-is, 0h 00m and all): the status check below originally only allowed
+ * AWAITING_APPROVAL, on the assumption a reviewer would always catch a flagged day before
+ * approving it. In practice a flagged day can reach APPROVED first — an admin approves it before
+ * noticing the flag, or it was approved before this capability existed — and still need fixing
+ * afterward, so this now accepts either AWAITING_APPROVAL or APPROVED as the starting status,
+ * landing on APPROVED either way once corrected. Authorization (actually Shawn or CB, and
+ * actually allowed to reach this employee's records) is the caller's job — see
+ * assertCanEditFlaggedTimeEntries in src/lib/authorization.ts — enforced again here via
+ * withRlsContext under the REVIEWER's own identity, same layered pattern reviewTimeEntry already
+ * uses.
  */
 export async function submitReviewerCorrection(
   reviewer: CurrentEmployee,
@@ -434,8 +442,8 @@ export async function submitReviewerCorrection(
     if (!entry) {
       throw new InvalidCorrectionError("Time entry not found.");
     }
-    if (entry.status !== "AWAITING_APPROVAL") {
-      throw new InvalidCorrectionError('Only a flagged ("Awaiting Approval") day can have its times edited this way.');
+    if (entry.status !== "AWAITING_APPROVAL" && entry.status !== "APPROVED") {
+      throw new InvalidCorrectionError("Only a day that's Awaiting Approval or already Approved can have its times edited this way.");
     }
 
     const oldSummary = describeSessions(entry.sessions);
