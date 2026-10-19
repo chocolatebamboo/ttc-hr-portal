@@ -3,7 +3,7 @@
 import { useState } from "react";
 import StatusPill from "@/components/StatusPill";
 import { WarningIcon } from "@/components/icons";
-import { formatTime12h } from "@/lib/availability-format";
+import { formatTime12h, formatReviewedAt } from "@/lib/availability-format";
 import { combineDateAndTime, formatClockTime, formatMinutes, todayDateKey, toTimeInputValue } from "@/lib/time";
 import type { TimeEntryDTO } from "@/types";
 
@@ -247,6 +247,29 @@ function TimesheetDayCard({
 
       {entry?.status === "RETURNED" && entry.reviewComment && (
         <p className="text-xs text-accent mt-2">Returned: {entry.reviewComment}</p>
+      )}
+
+      {/* Round twelve (CB, Oct 2026, pointing at Haile's own entry after CB had already used
+          Edit times on it: "I'm still not seeing like who also corrected the time and stuff
+          and when they did it... we should still be seeing the flagged [reason]"). Once a
+          reviewer corrects a flagged day, the live sessions above are just the corrected times
+          — nothing on them says this day used to be flagged, or who fixed it. This surfaces
+          both, pulled from the audit trail (see GET /api/time/timesheet's own doc comment on
+          entry.correction) — visible to the employee on their own My Time page the same as it
+          is to CB/Shawn reviewing it, since it's their own worked day either way. */}
+      {entry?.correction && (
+        <div className="mt-2 space-y-1">
+          {entry.correction.originalFlagReason && (
+            <div className="flex items-start gap-1 text-xs text-amber-700">
+              <WarningIcon className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+              <span>Originally flagged: {entry.correction.originalFlagReason}</span>
+            </div>
+          )}
+          <p className="text-xs text-muted">
+            Corrected by {entry.correction.reviewerName}
+            <span className="block text-[11px] mt-0.5">{formatReviewedAt(entry.correction.correctedAt)}</span>
+          </p>
+        </div>
       )}
 
       {review && isActionable && (
