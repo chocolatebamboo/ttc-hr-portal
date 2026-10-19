@@ -17,9 +17,11 @@ export interface ReviewControls {
    *  Shawn and I am supposed to be able to have those types of capabilities"). Optional — only
    *  passed by a caller that already knows the current reviewer has canEditFlaggedTimeEntries
    *  (see that field's own doc comment in src/types/index.ts); omitted entirely, nothing about
-   *  this table changes for anyone else. When present, a flagged (Awaiting Approval) day gets an
-   *  "Edit times" action alongside Approve/Return, reusing the same session-editing form the
-   *  employee's own Edit & resubmit already uses — see TimesheetDayCard's isReviewEditable. */
+   *  this table changes for anyone else. When present, an AWAITING_APPROVAL day gets an "Edit
+   *  times" action alongside Approve/Return; an already-APPROVED day gets it on its own, since
+   *  there's nothing left to Approve/Return there (round 11, CB: a flagged day that had already
+   *  been approved as-is still needed fixing) — both reuse the same session-editing form the
+   *  employee's own Edit & resubmit already uses. See TimesheetDayCard's isReviewEditable. */
   onEditTimes?: (entryId: string, sessions: CorrectionValues) => void;
   /** Server-reported validation message from the last onEditTimes attempt — same shape as
    *  CorrectionControls.error below. */
@@ -135,10 +137,17 @@ function TimesheetDayCard({
   const isActionable = review && entry?.status === "AWAITING_APPROVAL";
   const isCorrectable = correction && entry?.status === "RETURNED";
   // Round 10 (CB, Oct 2026): the reviewer-side "Edit times" capability — see ReviewControls'
-  // own doc comment on onEditTimes. Same AWAITING_APPROVAL gate as isActionable (Approve/Return)
-  // since this is only ever offered on the flagged day a reviewer is already looking at, not any
-  // entry regardless of status.
-  const isReviewEditable = review?.onEditTimes && entry?.status === "AWAITING_APPROVAL";
+  // own doc comment on onEditTimes.
+  //
+  // Round 11 (CB, Oct 2026, pointing at Haile's own entry after it had already been left
+  // Approved with 0h 00m still on it): originally gated to AWAITING_APPROVAL only, same as
+  // isActionable (Approve/Return) just below — but a flagged day can reach APPROVED before
+  // anyone notices the flag, and CB still needs to fix it from here once it has. Now offered on
+  // either status; RETURNED/IN_PROGRESS/no-entry stay out of scope — RETURNED already has the
+  // employee's own Edit & resubmit path, and there's nothing meaningful to correct on a day
+  // that's still open or was never logged at all.
+  const isReviewEditable =
+    !!review?.onEditTimes && (entry?.status === "AWAITING_APPROVAL" || entry?.status === "APPROVED");
   // CB, Oct 2026: a week view always renders all 7 days up front, including days later this
   // same week that haven't happened yet — those showed "Missing Entry" right alongside genuinely
   // overdue past days, which read as a problem on a day nobody could have logged time for yet.
@@ -268,6 +277,22 @@ function TimesheetDayCard({
               {editing ? "Cancel" : "Edit times"}
             </button>
           )}
+        </div>
+      )}
+
+      {/* Round 11 (CB, Oct 2026, on Haile's own already-Approved 0h 00m day): Approve/Return
+          only ever show on an AWAITING_APPROVAL day (isActionable above) — there's nothing left
+          to decide on one that's already Approved. Edit times still needs its own way in here,
+          on its own, for exactly that case. */}
+      {review && !isActionable && isReviewEditable && (
+        <div className="mt-3">
+          <button
+            onClick={() => (editing ? setEditing(false) : startEditing())}
+            disabled={isReviewBusy}
+            className="btn-neutral text-xs px-3 py-1.5"
+          >
+            {editing ? "Cancel" : "Edit times"}
+          </button>
         </div>
       )}
 
