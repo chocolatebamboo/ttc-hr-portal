@@ -4,10 +4,12 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import SwipeReveal from "@/components/SwipeReveal";
 import { BellIcon, ChatIcon, CheckCircleIcon } from "@/components/icons";
+import { formatWeekRange } from "@/lib/week";
 
 export interface DashboardNotificationsSummary {
   approvals: { count: number; show: boolean };
   messages: { unread: number; show: boolean };
+  reportReady: { show: boolean; periodStart: string; periodEnd: string; teamCount: number };
 }
 
 // Same polling interval and "poll GET, fire-and-forget POST" shape NotificationBell.tsx already
@@ -73,7 +75,7 @@ export function MessagesBadgeLink({ initial }: { initial: DashboardNotifications
   );
 }
 
-async function dismissBanner(banner: "approvals" | "messages"): Promise<void> {
+async function dismissBanner(banner: "approvals" | "messages" | "reportReady"): Promise<void> {
   try {
     await fetch("/api/dashboard/notifications/dismiss", {
       method: "POST",
@@ -86,7 +88,7 @@ async function dismissBanner(banner: "approvals" | "messages"): Promise<void> {
   }
 }
 
-type Entry = { key: "approvals" | "messages"; node: React.ReactNode };
+type Entry = { key: "approvals" | "messages" | "reportReady"; node: React.ReactNode };
 
 /**
  * CB, Sept 2026: "the ability to exit [things]... notifications" — these are the two banners CB
@@ -111,14 +113,29 @@ export default function DashboardNotifications({
   // Optimistic local hide the instant Clear is tapped, so the banner doesn't wait for the
   // dismiss POST to resolve (or the next 45s poll) to disappear — same "update local state
   // immediately, persist in the background" shape NotificationBell.tsx's handleClick uses.
-  const [clearedNow, setClearedNow] = useState<Set<"approvals" | "messages">>(new Set());
+  const [clearedNow, setClearedNow] = useState<Set<"approvals" | "messages" | "reportReady">>(new Set());
 
-  function clear(key: "approvals" | "messages") {
+  function clear(key: "approvals" | "messages" | "reportReady") {
     setClearedNow((prev) => new Set(prev).add(key));
     dismissBanner(key);
   }
 
   const entries: Entry[] = [];
+  // Round twelve (CB, Oct 2026, on the V1 mockup: "it doesn't really stand out from the rest of
+  // the notifications... I need to stand out a little bit more"): leads the stack, ahead of the
+  // everyday approvals/messages banners, same as every mockup round showed it.
+  if (summary.reportReady.show && !clearedNow.has("reportReady")) {
+    entries.push({
+      key: "reportReady",
+      node: (
+        <ReportReadyBanner
+          periodStart={summary.reportReady.periodStart}
+          periodEnd={summary.reportReady.periodEnd}
+          teamCount={summary.reportReady.teamCount}
+        />
+      ),
+    });
+  }
   if (summary.approvals.show && !clearedNow.has("approvals")) {
     entries.push({ key: "approvals", node: <PendingApprovalsBanner count={summary.approvals.count} /> });
   }
@@ -186,6 +203,141 @@ function MessagesBanner({ count }: { count: number }) {
         {count} new {count === 1 ? "message" : "messages"} waiting for you
       </p>
       <span className="ml-auto text-xs font-medium whitespace-nowrap shrink-0 opacity-90">View →</span>
+    </Link>
+  );
+}
+
+// Fixed burst geometry — not randomized — so this renders identically on the server and the
+// client with no hydration mismatch and no need to gate the burst behind a mounted/useEffect
+// check. 16 pieces radiating out from the seal badge, spaced evenly around a circle with a
+// small per-piece offset baked into the angle/distance/rotation so it doesn't read as a
+// perfectly mechanical fan. Values translated straight from the approved V4 mockup's own
+// JS-generated burst (report-ready-banner-mockup-v4.html).
+const REPORT_READY_CONFETTI_COLORS = ["#ffffff", "#ffd166", "#ed008c", "#8ecae6"];
+const REPORT_READY_CONFETTI = Array.from({ length: 16 }, (_, i) => {
+  const angle = (Math.PI * 2 * i) / 16 + ((i % 3) - 1) * 0.08;
+  const dist = 55 + ((i * 37) % 70);
+  const dx = Math.cos(angle) * dist;
+  const dy = Math.sin(angle) * dist * 0.6 - 12;
+  return {
+    color: REPORT_READY_CONFETTI_COLORS[i % REPORT_READY_CONFETTI_COLORS.length],
+    end: `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px)`,
+    rot: `${(i * 53) % 360}deg`,
+    delay: `${0.05 + ((i * 7) % 20) / 100}s`,
+  };
+});
+const REPORT_READY_SPARKLES = [
+  { left: 10, top: 10, size: 11, delay: "0.6s" },
+  { left: 60, top: 4, size: 8, delay: "0.72s" },
+  { left: 180, top: 16, size: 9, delay: "0.84s" },
+];
+
+type ConfettiPieceStyle = React.CSSProperties & {
+  "--report-ready-end": string;
+  "--report-ready-rot": string;
+};
+
+function ReportReadyConfetti() {
+  return (
+    <>
+      {REPORT_READY_CONFETTI.map((piece, i) => (
+        <span
+          key={i}
+          className="report-ready-confetti-piece"
+          aria-hidden="true"
+          style={
+            {
+              left: "42px",
+              background: piece.color,
+              animationDelay: piece.delay,
+              "--report-ready-end": piece.end,
+              "--report-ready-rot": piece.rot,
+            } as ConfettiPieceStyle
+          }
+        />
+      ))}
+      {REPORT_READY_SPARKLES.map((s, i) => (
+        <span
+          key={i}
+          className="report-ready-sparkle"
+          aria-hidden="true"
+          style={{ left: s.left, top: s.top, animationDelay: s.delay }}
+        >
+          <svg width={s.size} height={s.size} viewBox="0 0 24 24" fill="white">
+            <path d="M12 0l2.4 9.6L24 12l-9.6 2.4L12 24l-2.4-9.6L0 12l9.6-2.4z" />
+          </svg>
+        </span>
+      ))}
+    </>
+  );
+}
+
+/**
+ * CB, Oct 2026: "when the two week report comes in on that Friday morning I want... something
+ * aesthetic and animated... like a celebration but still clean aesthetic to what we currently
+ * have." Reserved for exactly the audience canAccessReports already names (CB, correcting the
+ * first draft scope: "that's only for me Shawn and Daijour") — gated server-side in
+ * getDashboardNotificationsSummary, never rendered here for anyone else.
+ *
+ * Four mockup rounds (CB's own words each time): V1's thin pill "doesn't really stand out...
+ * besides that pink gradient"; V2's bigger standalone card with a serif headline and a real
+ * badge; V3's centered layout with a solid-seal checkmark badge ("a symbol is what I meant to
+ * say"); V4 — this one — back to left-aligned ("there's too much space up top and it needs to
+ * be left aligned") but keeping V3's seal badge and V2's tighter card padding. Tapping the card
+ * deep-links straight into that closed period's report (ReportsView's own `?periodEnd=` read),
+ * the same "land directly on the right range" convention the unapproved-entries banner already
+ * uses with `?week=`.
+ */
+function ReportReadyBanner({
+  periodStart,
+  periodEnd,
+  teamCount,
+}: {
+  periodStart: string;
+  periodEnd: string;
+  teamCount: number;
+}) {
+  return (
+    <Link
+      href={`/admin/reports?periodEnd=${periodEnd}`}
+      className="report-ready-card relative block overflow-hidden rounded-3xl px-[18px] py-4 text-white transition-transform hover:-translate-y-0.5 w-full"
+      style={{
+        boxShadow:
+          "0 10px 30px -6px color-mix(in srgb, var(--ttc-pink-ink) 45%, transparent), 0 2px 8px rgba(0,0,0,0.08)",
+        background:
+          "radial-gradient(120% 140% at 0% 0%, rgba(255,255,255,0.16), transparent 55%), linear-gradient(135deg, var(--ttc-blue-ink) 0%, var(--ttc-blue) 48%, var(--ttc-pink) 100%)",
+      }}
+    >
+      <span className="report-ready-glow" aria-hidden="true" />
+      <ReportReadyConfetti />
+      <div className="relative z-[2] flex items-center gap-3">
+        <span className="relative shrink-0">
+          <span className="report-ready-seal-ring absolute -inset-1 rounded-full border-[1.5px] border-white/50" aria-hidden="true" />
+          <span className="report-ready-seal flex h-[46px] w-[46px] items-center justify-center rounded-full bg-white shadow-[0_4px_12px_rgba(0,0,0,0.16)]">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="var(--ttc-pink-ink)" strokeWidth="2.75" aria-hidden="true">
+              <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </span>
+        </span>
+        <div className="min-w-0">
+          <div className="font-serif text-[1.18rem] font-bold leading-[1.15] tracking-[-0.01em] truncate">
+            Two-week report is ready
+          </div>
+          <div className="mt-0.5 truncate text-[0.8rem] text-white/80">{formatWeekRange(periodStart, periodEnd)} wrapped up</div>
+        </div>
+      </div>
+      <div className="relative z-[2] my-3 h-px bg-white/20" />
+      <div className="relative z-[2] flex items-center justify-between gap-3">
+        <span className="text-[0.74rem] text-white/80">
+          <b className="font-bold text-white">{teamCount}</b> team {teamCount === 1 ? "member" : "members"} logged time
+        </span>
+        <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-white px-3.5 py-1.5 text-[0.76rem] font-bold text-[color:var(--ttc-pink-ink)]">
+          View report
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" aria-hidden="true">
+            <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </span>
+      </div>
     </Link>
   );
 }
