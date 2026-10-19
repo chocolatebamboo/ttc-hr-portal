@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import StatusPill from "@/components/StatusPill";
-import { WarningIcon } from "@/components/icons";
+import { WarningIcon, ChevronDownIcon } from "@/components/icons";
 import { formatTime12h, formatReviewedAt } from "@/lib/availability-format";
 import { combineDateAndTime, formatClockTime, formatMinutes, todayDateKey, toTimeInputValue } from "@/lib/time";
 import type { TimeEntryDTO } from "@/types";
@@ -21,7 +21,14 @@ export interface ReviewControls {
    *  times" action alongside Approve/Return; an already-APPROVED day gets it on its own, since
    *  there's nothing left to Approve/Return there (round 11, CB: a flagged day that had already
    *  been approved as-is still needed fixing) — both reuse the same session-editing form the
-   *  employee's own Edit & resubmit already uses. See TimesheetDayCard's isReviewEditable. */
+   *  employee's own Edit & resubmit already uses. See TimesheetDayCard's isReviewEditable.
+   *
+   *  Round 13 (CB, Oct 2026, looking at the standing "Edit times" button on Haile's own card:
+   *  "I don't want it to seem like this is something serious... just kind of say that we're
+   *  adjusting the time"): the capability itself is unchanged, but it no longer sits on the
+   *  card as its own always-visible button. It's reached by tapping the time range itself,
+   *  which opens a single quiet "Adjust time" option — see the clickable time trigger and
+   *  menuOpen state below. Still only ever offered to CB/Shawn, same as before. */
   onEditTimes?: (entryId: string, sessions: CorrectionValues) => void;
   /** Server-reported validation message from the last onEditTimes attempt — same shape as
    *  CorrectionControls.error below. */
@@ -131,6 +138,10 @@ function TimesheetDayCard({
   const [comment, setComment] = useState("");
   const [editing, setEditing] = useState(false);
   const [rows, setRows] = useState<SessionRow[]>([]);
+  // Round 13 (CB, Oct 2026) — whether the quiet "Adjust time" option is showing, toggled by
+  // tapping the time range itself (see isReviewEditable's own doc comment on ReviewControls).
+  // Only ever meaningful when isReviewEditable is true; otherwise never read.
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const isReviewBusy = review?.busyEntryId === entry?.id;
   const isCorrectionBusy = correction?.busyEntryId === entry?.id;
@@ -162,6 +173,7 @@ function TimesheetDayCard({
         : [{ clockIn: "", clockOut: "" }]
     );
     setEditing(true);
+    setMenuOpen(false);
   }
 
   function updateRow(index: number, field: keyof SessionRow, value: string) {
@@ -207,9 +219,18 @@ function TimesheetDayCard({
             <div className="space-y-1.5">
               {entry.sessions.map((s) => (
                 <div key={s.id}>
-                  <div className="tabular-nums text-xs text-foreground">
-                    {formatClockTime(s.clockIn)} – {s.clockOut ? formatClockTime(s.clockOut) : "in progress"}
-                  </div>
+                  {/* Round 13 (CB, Oct 2026): for CB/Shawn only (isReviewEditable), the time
+                      itself is the way in — see ReviewControls.onEditTimes's own doc comment.
+                      Nothing changes here for anyone else; the time stays plain text. */}
+                  {isReviewEditable ? (
+                    <TimeDropdownTrigger menuOpen={menuOpen} onToggle={() => setMenuOpen((o) => !o)}>
+                      {formatClockTime(s.clockIn)} – {s.clockOut ? formatClockTime(s.clockOut) : "in progress"}
+                    </TimeDropdownTrigger>
+                  ) : (
+                    <div className="tabular-nums text-xs text-foreground">
+                      {formatClockTime(s.clockIn)} – {s.clockOut ? formatClockTime(s.clockOut) : "in progress"}
+                    </div>
+                  )}
                   {/* CB, Oct 2026, on a flagged/auto-clocked-out day: "we should be able to see
                       the exact time that they were supposed to clock in... what was the actual
                       time frame they were supposed to clock out, even if it automatically clocks
@@ -235,6 +256,20 @@ function TimesheetDayCard({
                   )}
                 </div>
               ))}
+              {/* Round 13 (CB, Oct 2026): the one option this opens — see
+                  ReviewControls.onEditTimes's own doc comment above for why it replaced a
+                  standing "Edit times" button. */}
+              {isReviewEditable && menuOpen && <AdjustTimeMenu onSelect={startEditing} />}
+            </div>
+          ) : entry && isReviewEditable ? (
+            // A flagged day can land here with no real sessions left to show a time on (e.g. a
+            // double-clock-in that nets to 0h 00m) — the "Adjust time" entry point still needs
+            // somewhere to live, so the empty-state dash itself becomes the trigger.
+            <div>
+              <TimeDropdownTrigger menuOpen={menuOpen} onToggle={() => setMenuOpen((o) => !o)}>
+                —
+              </TimeDropdownTrigger>
+              {menuOpen && <AdjustTimeMenu onSelect={startEditing} />}
             </div>
           ) : (
             <span className="text-sm text-muted">—</span>
@@ -287,34 +322,6 @@ function TimesheetDayCard({
             className="btn-neutral text-xs px-3 py-1.5 flex-1 justify-center"
           >
             Return
-          </button>
-          {/* Round 10 (CB, Oct 2026) — see ReviewControls' onEditTimes doc comment. Only CB and
-              Shawn ever have onEditTimes passed in at all, so this button simply doesn't exist
-              for anyone else. */}
-          {isReviewEditable && (
-            <button
-              onClick={() => (editing ? setEditing(false) : startEditing())}
-              disabled={isReviewBusy}
-              className="btn-neutral text-xs px-3 py-1.5 flex-1 justify-center"
-            >
-              {editing ? "Cancel" : "Edit times"}
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Round 11 (CB, Oct 2026, on Haile's own already-Approved 0h 00m day): Approve/Return
-          only ever show on an AWAITING_APPROVAL day (isActionable above) — there's nothing left
-          to decide on one that's already Approved. Edit times still needs its own way in here,
-          on its own, for exactly that case. */}
-      {review && !isActionable && isReviewEditable && (
-        <div className="mt-3">
-          <button
-            onClick={() => (editing ? setEditing(false) : startEditing())}
-            disabled={isReviewBusy}
-            className="btn-neutral text-xs px-3 py-1.5"
-          >
-            {editing ? "Cancel" : "Edit times"}
           </button>
         </div>
       )}
@@ -409,14 +416,62 @@ function TimesheetDayCard({
                   : "Resubmit for approval"
                 : isReviewBusy
                   ? "Saving…"
-                  : "Save corrected times"}
+                  : "Save adjustment"}
             </button>
-            <button onClick={() => setEditing(false)} className="btn-neutral text-xs px-3 py-1.5">
+            <button
+              onClick={() => {
+                setEditing(false);
+                setMenuOpen(false);
+              }}
+              className="btn-neutral text-xs px-3 py-1.5"
+            >
               Cancel
             </button>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Round 13 (CB, Oct 2026) — the clickable time display itself, standing in for what used to be
+ *  a separate "Edit times" button. Shared by the real session times above and the no-sessions
+ *  empty-state dash, so both ways into "Adjust time" look and behave the same. */
+function TimeDropdownTrigger({
+  menuOpen,
+  onToggle,
+  children,
+}: {
+  menuOpen: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={`tabular-nums text-xs text-foreground inline-flex items-center gap-1 -mx-1 -my-0.5 rounded px-1 py-0.5 ${
+        menuOpen ? "bg-accent/10" : ""
+      }`}
+    >
+      {children}
+      <ChevronDownIcon className={`h-3 w-3 text-muted/70 transition-transform ${menuOpen ? "rotate-180" : ""}`} />
+    </button>
+  );
+}
+
+/** Round 13 (CB, Oct 2026) — the one quiet option the time trigger opens. A single-item menu
+ *  today, but its own component in case a second option (e.g. "View history") ever joins it. */
+function AdjustTimeMenu({ onSelect }: { onSelect: () => void }) {
+  return (
+    <div className="w-44 rounded-lg border border-border bg-surface shadow-lg overflow-hidden">
+      <button
+        type="button"
+        onClick={onSelect}
+        className="w-full text-left px-3 py-2 text-xs font-medium hover:bg-black/[0.03]"
+      >
+        Adjust time
+      </button>
     </div>
   );
 }
