@@ -264,3 +264,28 @@ export async function assertCanManageShifts(
   if (actor.role !== "SUPERVISOR") throw new ForbiddenError();
   await assertCanAccessEmployeeRecords(actor, targetEmployeeId);
 }
+
+/**
+ * Round 10 (CB, Oct 2026, on a flagged double-clock-in that recorded 0h 00m as-is: "we should
+ * have the option to adjust the time and manually edit the time... but remember only Shawn and
+ * I am supposed to be able to have those types of capabilities"). Unlike every assertCan*
+ * function above, this is NOT a role check (isAdmin/SUPERVISOR) — it's the per-person
+ * canEditFlaggedTimeEntries flag on CurrentEmployee (see that field's own doc comment), checked
+ * directly against the two people CB named, same "named-person flag, independent of role"
+ * pattern as clocksIn/isAvailabilityReviewer. Still layered on top of the normal
+ * assertCanAccessEmployeeRecords relationship check — the flag alone doesn't let CB or Shawn
+ * reach an employee record they otherwise couldn't (moot in practice today, since both are
+ * SUPER_ADMIN/HR_ADMIN and already pass that check for everyone, but keeps this safe if the
+ * flag is ever extended to a Supervisor later).
+ */
+export function canEditFlaggedTimeEntries(actor: CurrentEmployee): boolean {
+  return actor.canEditFlaggedTimeEntries;
+}
+
+export async function assertCanEditFlaggedTimeEntries(
+  actor: CurrentEmployee,
+  targetEmployeeId: string
+): Promise<void> {
+  if (!canEditFlaggedTimeEntries(actor)) throw new ForbiddenError();
+  await assertCanAccessEmployeeRecords(actor, targetEmployeeId);
+}
