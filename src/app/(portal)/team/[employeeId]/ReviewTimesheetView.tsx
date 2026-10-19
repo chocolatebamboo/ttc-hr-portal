@@ -3,13 +3,24 @@
 import { useEffect, useState } from "react";
 import { getWeek, formatWeekRange, weekOffsetForDate } from "@/lib/week";
 import { todayDateKey } from "@/lib/time";
-import TimesheetTable from "@/components/TimesheetTable";
+import TimesheetTable, { type CorrectionValues } from "@/components/TimesheetTable";
 import WeeklyTotalSidebar, { type WeekBucket } from "@/components/WeeklyTotalSidebar";
 import type { TimeEntryDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error" | "empty";
 
-export default function ReviewTimesheetView({ employeeId }: { employeeId: string }) {
+export default function ReviewTimesheetView({
+  employeeId,
+  canEditFlaggedTimeEntries = false,
+}: {
+  employeeId: string;
+  /** Round 10 (CB, Oct 2026): "only Shawn and I am supposed to be able to have those types of
+   *  capabilities" — the viewing reviewer's own canEditFlaggedTimeEntries flag (see that field's
+   *  doc comment in src/types/index.ts), threaded down from page.tsx. Gates whether editTimes is
+   *  even wired into TimesheetTable's review prop at all, not just whether a button happens to
+   *  render — someone without the flag never gets review.onEditTimes passed in the first place. */
+  canEditFlaggedTimeEntries?: boolean;
+}) {
   const [offset, setOffset] = useState(0);
   const [entries, setEntries] = useState<TimeEntryDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
@@ -17,6 +28,7 @@ export default function ReviewTimesheetView({ employeeId }: { employeeId: string
   const [bulkBusy, setBulkBusy] = useState(false);
   const [actionError, setActionError] = useState("");
   const [actionNotice, setActionNotice] = useState("");
+  const [editTimesError, setEditTimesError] = useState("");
 
   const week = getWeek(offset);
 
@@ -95,6 +107,38 @@ export default function ReviewTimesheetView({ employeeId }: { employeeId: string
       }
     } catch {
       setActionError("Unable to reach the server. Check your connection and try again.");
+    } finally {
+      setBusyEntryId(null);
+      load();
+    }
+  }
+
+  // Round 10 (CB, Oct 2026, pointing at a flagged double-clock-in recorded as 0h 00m: "we
+  // should have the option to adjust the time and manually edit the time... but remember only
+  // Shawn and I am supposed to be able to have those types of capabilities"). Same
+  // busyEntryId/setActionError/setActionNotice/load() shape as approve/returnEntry above, plus
+  // its own editTimesError since this is a validation message about the SESSION TIMES
+  // themselves (e.g. "clock out must be after clock in"), not a generic action failure — kept
+  // separate so it reads back into TimesheetTable's own editing form via review.editError
+  // rather than the banner actionError above uses.
+  async function editTimes(entryId: string, sessions: CorrectionValues) {
+    setBusyEntryId(entryId);
+    setEditTimesError("");
+    setActionNotice("");
+    try {
+      const res = await fetch(`/api/time/entries/${entryId}/hr-correct`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessions }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setEditTimesError(data.error ?? "Unable to save these times. Please try again.");
+      } else {
+        setActionNotice("Times corrected and approved.");
+      }
+    } catch {
+      setEditTimesError("Unable to reach the server. Check your connection and try again.");
     } finally {
       setBusyEntryId(null);
       load();
@@ -219,7 +263,12 @@ export default function ReviewTimesheetView({ employeeId }: { employeeId: string
           <TimesheetTable
             days={week.days}
             entries={entries}
-            review={{ onApprove: approve, onReturn: returnEntry, busyEntryId }}
+            review={{
+              onApprove: approve,
+              onReturn: returnEntry,
+              busyEntryId,
+              ...(canEditFlaggedTimeEntries ? { onEditTimes: editTimes, editError: editTimesError } : {}),
+            }}
             hideSummaryBar
           />
           <WeeklyTotalSidebar
