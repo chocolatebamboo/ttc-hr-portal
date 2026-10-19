@@ -28,12 +28,13 @@ function parseSessions(body: unknown): CorrectionSessionInput[] {
  * should have the option to adjust the time and manually edit the time... but remember only
  * Shawn and I am supposed to be able to have those types of capabilities"). POST
  * /api/time/entries/[id]/hr-correct, body { sessions: [{ clockIn, clockOut }, ...] } — the
- * reviewer-side counterpart to /correct above, for a flagged (AWAITING_APPROVAL) entry rather
- * than the employee's own RETURNED one. Same "look up whose entry this is before deciding if the
- * caller may act on it" shape as /approve — never trusts a client-supplied employeeId for the
- * authorization check — but gates on assertCanEditFlaggedTimeEntries (the per-person
- * canEditFlaggedTimeEntries flag, restricted to CB and Shawn) instead of assertCanReviewTimesheet.
- * Status/ownership rules themselves (must be AWAITING_APPROVAL) are enforced again inside
+ * reviewer-side counterpart to /correct above, for a flagged entry rather than the employee's own
+ * RETURNED one. Same "look up whose entry this is before deciding if the caller may act on it"
+ * shape as /approve — never trusts a client-supplied employeeId for the authorization check — but
+ * gates on assertCanEditFlaggedTimeEntries (the per-person canEditFlaggedTimeEntries flag,
+ * restricted to CB and Shawn) instead of assertCanReviewTimesheet.
+ * Status/ownership rules themselves (must be AWAITING_APPROVAL or already APPROVED — round 11,
+ * see submitReviewerCorrection's own doc comment) are enforced again inside
  * submitReviewerCorrection, independently backed by the same RLS policy every other time-entry
  * write goes through.
  */
