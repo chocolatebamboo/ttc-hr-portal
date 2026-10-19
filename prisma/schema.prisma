@@ -99,6 +99,15 @@ model Employee {
   // database (see migration) rather than through an admin UI toggle, which doesn't exist yet.
   isAvailabilityReviewer Boolean @default(false)
 
+  // Round 10 (CB, Oct 2026, on a flagged double-clock-in that recorded 0h 00m: "we should have
+  // the option to adjust the time and manually edit the time just in case those were cases for
+  // it but remember only Shawn and I am supposed to be able to have those types of capabilities").
+  // Same per-person, role-independent flag shape as clocksIn/isAvailabilityReviewer above —
+  // gates the reviewer-side "Edit times" action on a flagged/AWAITING_APPROVAL time entry (see
+  // assertCanEditFlaggedTimeEntries, src/lib/authorization.ts). Defaults false; set true for CB
+  // and Shawn directly in the database (see migration), not through an admin UI toggle.
+  canEditFlaggedTimeEntries Boolean @default(false)
+
   ttcEmail       String  @unique
   workPhone      String?
   personalPhone  String?
