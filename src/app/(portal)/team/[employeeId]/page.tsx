@@ -81,6 +81,7 @@ export default async function ReviewEmployeePage(
         jobTitle={target.jobTitle}
         avatarUrl={target.avatarStorageKey ? getAvatarPublicUrl(target.avatarStorageKey) : null}
         viewerId={reviewer.id}
+        canEditFlaggedTimeEntries={reviewer.canEditFlaggedTimeEntries}
       />
     </div>
   );
