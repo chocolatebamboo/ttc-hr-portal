@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getPayrollPeriod, getCurrentPayrollPeriodOffset } from "@/lib/week";
+import { getPayrollPeriod, getCurrentPayrollPeriodOffset, payrollPeriodOffsetForDate } from "@/lib/week";
 import { formatClockTime } from "@/lib/time";
 import PayrollPeriodSwitcher from "@/components/PayrollPeriodSwitcher";
 import ActivityHistoryView from "./ActivityHistoryView";
@@ -171,9 +171,28 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
 
   // Initial load only — every regeneration after this happens through handleEmployeeChange or
   // handlePeriodOffsetChange below, so deps stay empty.
+  //
+  // Round twelve (CB, Oct 2026): the Home dashboard's report-ready celebration card's own "View
+  // report" button links here with `?periodEnd=<date>` — same `window.location.search` read +
+  // clear-after-read + `payrollPeriodOffsetForDate` convention ReviewTimesheetView's own `?week=`
+  // deep link already uses (see that file's own doc comment), translated to pay-period offsets
+  // instead of calendar weeks. Folded into this same effect, rather than a separate one, because
+  // periodOffset here isn't reactive the way ReviewTimesheetView's offset is — generate() has to
+  // be called directly either way (see handlePeriodOffsetChange below), so a second effect
+  // competing to call it on the same mount would just race this one.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    generate(start, end, employeeId);
+    const params = new URLSearchParams(window.location.search);
+    const periodEndParam = params.get("periodEnd");
+    if (periodEndParam) {
+      const offset = payrollPeriodOffsetForDate(periodEndParam);
+      const range = getPayrollPeriod(offset);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPeriodOffset(offset);
+      generate(range.start, range.end, employeeId);
+      window.history.replaceState(null, "", window.location.pathname);
+    } else {
+      generate(start, end, employeeId);
+    }
     loadEmployees();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
