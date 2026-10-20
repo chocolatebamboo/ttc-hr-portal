@@ -1,16 +1,60 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import ShiftStatusPill from "@/components/ShiftStatusPill";
 import DateTasksPanel from "@/components/DateTasksPanel";
-import { ChecklistIcon, ChevronDownIcon } from "@/components/icons";
+import PayrollPeriodSwitcher from "@/components/PayrollPeriodSwitcher";
+import { ChartIcon, ChecklistIcon, ChevronDownIcon } from "@/components/icons";
 import { formatSlotDate, formatTime12h } from "@/lib/availability-format";
-import { getWeek, formatWeekRange } from "@/lib/week";
+import { todayDateKey } from "@/lib/time";
+import { formatWeekRange, getPayrollPeriodWeeks, payrollPeriodOffsetForDate } from "@/lib/week";
 import type { AdminShiftDTO, AssignmentOptionsDTO, DateTaskDTO, DirectReportDTO, ShiftStatus } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
 
 type EmployeeOption = { id: string; name: string };
+
+/** One person's card in the grouped (all-team-members) view — see groupByPerson below. */
+type GroupedShifts = {
+  employeeId: string;
+  name: string;
+  jobTitle: string;
+  avatarUrl: string | null;
+  shifts: AdminShiftDTO[];
+  missedCount: number;
+};
+
+/** Round 2 (CB, Oct 2026, on the mockup: "I don't like how it's showing up the same name
+ *  multiple times... they're supposed to be organized per profile"): groups a shift list by
+ *  person instead of one flat, repeating-name list. Group order follows first appearance in
+ *  `weekShifts` (already still-coming-first/date-ordered — see byShiftPriority above), same as
+ *  the approved mockup. Round 5: pulled out to module scope (was a useMemo inside the component)
+ *  so TeamScheduleView can call it once per week instead of once for the whole period — see that
+ *  component's own week1Grouped/week2Grouped. */
+function groupByPerson(weekShifts: AdminShiftDTO[], employeeFilter: string): GroupedShifts[] {
+  if (employeeFilter !== "") return [];
+  const order: string[] = [];
+  const byEmployee = new Map<string, AdminShiftDTO[]>();
+  for (const s of weekShifts) {
+    if (!byEmployee.has(s.employeeId)) {
+      byEmployee.set(s.employeeId, []);
+      order.push(s.employeeId);
+    }
+    byEmployee.get(s.employeeId)!.push(s);
+  }
+  return order.map((id) => {
+    const group = byEmployee.get(id)!;
+    return {
+      employeeId: id,
+      name: group[0].employeeName,
+      jobTitle: group[0].employeeJobTitle,
+      avatarUrl: group[0].employeeAvatarUrl,
+      shifts: group,
+      missedCount: group.filter((s) => s.displayStatus === "MISSED").length,
+    };
+  });
+}
 
 const STATUS_OPTIONS: ShiftStatus[] = [
   "UPCOMING",
@@ -35,16 +79,19 @@ function initialsOf(name: string): string {
   return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
 }
 
-/** Round 2 (CB, Oct 2026: "it should only be for the week... after the week it's gonna go to
- *  the next schedule, so it's like multiple pages"): resolves a "?dateFrom=" deep link
- *  (TeamScheduleGlance's "See all upcoming") to the weekOffset whose week contains that date,
- *  rather than the old free-form date-range filter it used to seed. Same Monday-start week math
- *  as getWeek itself, just measured from an arbitrary date instead of "today." */
-function weekOffsetForDate(dateKey: string): number {
-  const target = new Date(`${dateKey}T00:00:00`);
-  const thisMonday = new Date(`${getWeek(0).start}T00:00:00`);
-  const diffDays = Math.round((target.getTime() - thisMonday.getTime()) / 86_400_000);
-  return Math.floor(diffDays / 7);
+/** Round 5 (CB, Oct 2026: "I need to see it in the 2 week intervals as well... the same type of
+ *  vibe... the same drop downs as well"): which of a pay period's two weeks should start open —
+ *  the week containing `targetDate` (today, normally; a specific deep-linked date on first load
+ *  via the ?dateFrom= effect below), falling back to Week 1 when `targetDate` falls in neither
+ *  (viewing a period that doesn't contain it at all). Same helper, same reasoning, as
+ *  ReviewTimesheetView's own defaultOpenWeeks — kept as its own small local copy here rather
+ *  than a shared export, same "don't re-touch an already-shipped file for a non-functional
+ *  dedup" call this app already makes elsewhere (see PayrollPeriodSwitcher's own doc comment on
+ *  LoggedHoursSection). */
+function defaultOpenWeeks(offsetPeriods: number, targetDate: string): { open1: boolean; open2: boolean } {
+  const weeks = getPayrollPeriodWeeks(offsetPeriods);
+  if (weeks.week2.days.includes(targetDate)) return { open1: false, open2: true };
+  return { open1: true, open2: false };
 }
 
 /** Round 3 (CB, Oct 2026, from the live page: "whoever is upcoming... whoever is closest to
@@ -96,24 +143,39 @@ function byShiftPriority(a: AdminShiftDTO, b: AdminShiftDTO): number {
  *
  * Oct 2026 (CB, on the Home dashboard's Upcoming widget: "when we click it we can see that
  * person's full schedule down the line," and separately, "if I click on see more then it should
- * go into another page"): `employeeFilter` (and, via weekOffsetForDate, the initial `weekOffset`)
- * seed themselves from this page's own URL — `?employeeId=<id>` (one Upcoming row) or
+ * go into another page"): `employeeFilter` (and, via payrollPeriodOffsetForDate, the initial
+ * `offset`) seed themselves from this page's own URL — `?employeeId=<id>` (one Upcoming row) or
  * `?dateFrom=<date>` ("See all upcoming") — so TeamScheduleGlance's links can land here
  * pre-filtered instead of dumping an admin on an unfiltered, org-wide list they'd have to filter
  * themselves. Read straight off window.location.search in the mount effect below, not
  * next/navigation's useSearchParams, so this page doesn't need a Suspense boundary — same
  * reasoning MessagesInboxView.tsx's own dm/name URL read already documents. The filter
- * selects/week nav further down are still fully interactive afterward, so nothing about
+ * selects/period nav further down are still fully interactive afterward, so nothing about
  * adjusting or paging once here changes.
  *
  * Round 2 (CB, Oct 2026, on the mockup: "it should only be for the week... multiple pages," and
  * separately "I don't like how it's showing up the same name multiple times... organized per
- * profile"): the list is now bounded to one Monday–Sunday week at a time (`weekOffset` + the
- * same getWeek/formatWeekRange helpers ReportsView's "This week" button already uses), with
- * prev/next nav instead of the old free-form date-range filter. And whenever no single employee
- * is picked, shifts render grouped by person (`groupedByPerson` below) instead of repeating each
- * person's name on every card — approved via mockup first (her standing requirement for this
- * kind of visual change) before landing here.
+ * profile"): the list used to be bounded to one Monday–Sunday week at a time, with prev/next nav
+ * instead of the old free-form date-range filter. And whenever no single employee is picked,
+ * shifts render grouped by person (`groupedByPerson` below) instead of repeating each person's
+ * name on every card — approved via mockup first (her standing requirement for this kind of
+ * visual change) before landing here.
+ *
+ * Round 5 (CB, Oct 2026, on this exact page: "I need to see it in the 2 week intervals as well...
+ * the same type of vibe... that there's a drop down to see... that first week and then... the
+ * second week... I want you to make sure that... it has those same drop downs as well... I also
+ * should see kind of something similar to where we could see that 2 week report" — same request,
+ * same approved design, as the Timesheet review page's own pay-period-accordion round): Round 2's
+ * single-calendar-week paging is now a whole PAY PERIOD at a time (`offset` + getPayrollPeriodWeeks,
+ * same PayrollPeriodSwitcher pill the Timesheet page/My Tasks/Logged hours already use), with a
+ * "2-week report" link next to it (same `?periodEnd=` convention the Timesheet page's own summary
+ * card and the Team Availability page's own button already use). Each of the period's two weeks
+ * renders as its own collapsible section (ScheduleWeekBlock below) — whichever week contains the
+ * relevant date (today, or a ?dateFrom= deep link below) starts open, both can be open at once —
+ * with the single-employee/grouped-by-person view modes from Round 2 completely unchanged, just
+ * rendered once per week instead of once for the whole period. Unlike the Timesheet page, the
+ * "Next" arrow here still isn't capped at the current period — a shift can legitimately be
+ * scheduled ahead of time, same as this page has always allowed.
  */
 export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIsAdmin: boolean; viewerId: string }) {
   const [shifts, setShifts] = useState<AdminShiftDTO[]>([]);
@@ -139,8 +201,19 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
   const [employeeFilter, setEmployeeFilter] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [weekOffset, setWeekOffset] = useState(0);
-  const week = useMemo(() => getWeek(weekOffset), [weekOffset]);
+  const [offset, setOffset] = useState(0);
+  const weeks = useMemo(() => getPayrollPeriodWeeks(offset), [offset]);
+  // Round 5: which of the period's two weeks starts open — see defaultOpenWeeks's own doc
+  // comment above.
+  const [openWeeks, setOpenWeeks] = useState(() => defaultOpenWeeks(0, todayDateKey()));
+
+  // Pages to a different pay period (prev/next/"Jump to current" on PayrollPeriodSwitcher) —
+  // always resets the accordion to that period's own default-open week, never leaves whatever
+  // was open/closed in the previous period showing stale state.
+  function goToOffset(newOffset: number) {
+    setOffset(newOffset);
+    setOpenWeeks(defaultOpenWeeks(newOffset, todayDateKey()));
+  }
 
   const [showCreate, setShowCreate] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -212,7 +285,11 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
     if (!employeeId && !dateFrom) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (employeeId) setEmployeeFilter(employeeId);
-    if (dateFrom) setWeekOffset(weekOffsetForDate(dateFrom));
+    if (dateFrom) {
+      const periodOffset = payrollPeriodOffsetForDate(dateFrom);
+      setOffset(periodOffset);
+      setOpenWeeks(defaultOpenWeeks(periodOffset, dateFrom));
+    }
     window.history.replaceState(null, "", window.location.pathname);
   }, []);
 
@@ -221,10 +298,10 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
       if (employeeFilter && s.employeeId !== employeeFilter) return false;
       if (departmentFilter && s.departmentId !== departmentFilter) return false;
       if (statusFilter && s.displayStatus !== statusFilter) return false;
-      if (s.date < week.start || s.date > week.end) return false;
+      if (s.date < weeks.period.start || s.date > weeks.period.end) return false;
       return true;
     });
-  }, [shifts, employeeFilter, departmentFilter, statusFilter, week]);
+  }, [shifts, employeeFilter, departmentFilter, statusFilter, weeks]);
 
   // Round 3 (CB, Oct 2026 — see byShiftPriority's own doc comment above): still-coming shifts
   // first, soonest first, settled ones after in their normal date order. Used for every actual
@@ -287,39 +364,24 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
 
   // Round 2 (CB, Oct 2026, on the mockup: "I don't like how it's showing up the same name
   // multiple times... they're supposed to be organized per profile"): whenever no single
-  // employee is picked, group this week's shifts by person instead of one flat, repeating-name
-  // list. Group order follows first appearance in `filtered` (already date-ordered from the
+  // employee is picked, group shifts by person instead of one flat, repeating-name list. Group
+  // order follows first appearance in the list it's built from (already date-ordered from the
   // API), same as the approved mockup.
   const isGroupedView = employeeFilter === "" && filtered.length > 0;
-  // Built from `prioritized`, not `filtered`: a person's own shifts land in their card already
-  // still-coming-first (byShiftPriority), and — since `order` below is just first appearance in
-  // that same sorted list — whichever person's own soonest still-coming shift comes earliest
-  // across the whole team is exactly whose card appears first. A person with nothing still
-  // coming this week only shows up once the settled half of the list is reached, same as CB
-  // asked for ("whoever is closest to clock in... they will go at the top... that profile").
-  const groupedByPerson = useMemo(() => {
-    if (employeeFilter !== "") return [];
-    const order: string[] = [];
-    const byEmployee = new Map<string, AdminShiftDTO[]>();
-    for (const s of prioritized) {
-      if (!byEmployee.has(s.employeeId)) {
-        byEmployee.set(s.employeeId, []);
-        order.push(s.employeeId);
-      }
-      byEmployee.get(s.employeeId)!.push(s);
-    }
-    return order.map((id) => {
-      const group = byEmployee.get(id)!;
-      return {
-        employeeId: id,
-        name: group[0].employeeName,
-        jobTitle: group[0].employeeJobTitle,
-        avatarUrl: group[0].employeeAvatarUrl,
-        shifts: group,
-        missedCount: group.filter((s) => s.displayStatus === "MISSED").length,
-      };
-    });
-  }, [prioritized, employeeFilter]);
+
+  // Round 5: splits the period's already-prioritized shift list into each of its two weeks —
+  // `filter` preserves `prioritized`'s own still-coming-first order within each slice, so neither
+  // week needs its own re-sort.
+  const week1DaySet = useMemo(() => new Set(weeks.week1.days), [weeks]);
+  const week2DaySet = useMemo(() => new Set(weeks.week2.days), [weeks]);
+  const week1Shifts = useMemo(() => prioritized.filter((s) => week1DaySet.has(s.date)), [prioritized, week1DaySet]);
+  const week2Shifts = useMemo(() => prioritized.filter((s) => week2DaySet.has(s.date)), [prioritized, week2DaySet]);
+  // Round 5: `groupedByPerson` used to run once over the whole week's `prioritized` list; Team
+  // Schedule now shows two weeks at once (one pay period), each its own accordion with its own
+  // grouping — so groupByPerson (module scope, below the component) runs once per week here
+  // instead of once for the whole period.
+  const week1Grouped = useMemo(() => groupByPerson(week1Shifts, employeeFilter), [week1Shifts, employeeFilter]);
+  const week2Grouped = useMemo(() => groupByPerson(week2Shifts, employeeFilter), [week2Shifts, employeeFilter]);
 
   function toggleEmployeeExpanded(employeeId: string) {
     setExpandedEmployees((prev) => {
@@ -794,36 +856,22 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
         </select>
       </div>
 
-      {/* Round 2 (CB, Oct 2026: "it should only be for the week... after the week it's gonna go
-          to the next schedule, so it's like multiple pages"): replaces the old free-form
-          date-range filter — same prev/next + labeled-range pattern approved on the mockup and
-          shared with Attendance, so every admin list page reads the same way about what date
-          range it's on. "This week" only shows when the selected week is the real current one. */}
-      <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-2.5 mb-4">
-        <button
-          type="button"
-          onClick={() => setWeekOffset((w) => w - 1)}
-          aria-label="Previous week"
-          className="h-7 w-7 shrink-0 rounded-full border border-border flex items-center justify-center text-muted hover:text-foreground hover:bg-black/[0.03]"
+      {/* Round 5 (CB, Oct 2026 — see the component doc comment above): replaces Round 2's
+          single-calendar-week prev/next bar with the same whole-pay-period switcher the Timesheet
+          review page, My Tasks, and Logged hours already use, plus the "2-week report" link right
+          beside it (same `?periodEnd=` convention and markup as Team Availability's own link). No
+          `capNextAtCurrent` here — unlike the Timesheet page, a shift can legitimately be scheduled
+          into a future period. */}
+      <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+        <PayrollPeriodSwitcher offset={offset} onOffsetChange={goToOffset} />
+        <Link
+          href={`/admin/reports?periodEnd=${weeks.period.end}`}
+          className="flex items-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-medium text-accent-ink hover:bg-black/[0.03]"
+          title={`2-week report: ${formatWeekRange(weeks.period.start, weeks.period.end)}`}
         >
-          ‹
-        </button>
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold">Week of {formatWeekRange(week.start, week.end)}</span>
-          {weekOffset === 0 && (
-            <span className="text-[11px] font-semibold text-accent-ink bg-accent/10 rounded-full px-2.5 py-0.5">
-              This week
-            </span>
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={() => setWeekOffset((w) => w + 1)}
-          aria-label="Next week"
-          className="h-7 w-7 shrink-0 rounded-full border border-border flex items-center justify-center text-muted hover:text-foreground hover:bg-black/[0.03]"
-        >
-          ›
-        </button>
+          <ChartIcon className="h-4 w-4" />
+          2-week report
+        </Link>
       </div>
 
       {loadState === "loading" && (
@@ -842,7 +890,7 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
 
       {loadState === "ready" && filtered.length === 0 && (
         <div className="rounded-2xl border border-border bg-surface p-4 text-sm text-muted">
-          No shifts match these filters for this week.
+          No shifts match these filters for this pay period.
         </div>
       )}
 
@@ -888,63 +936,157 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
               </div>
             </div>
           )}
-        {isSingleEmployeeView ? (
-          <div className="bg-surface border border-border rounded-xl divide-y divide-border overflow-hidden">
-            {prioritized.map((s) => renderShiftRow(s))}
+          <div className="flex flex-col gap-3">
+            <ScheduleWeekBlock
+              weekLabel="Week 1"
+              rangeLabel={formatWeekRange(weeks.week1.start, weeks.week1.end)}
+              shiftCount={week1Shifts.length}
+              open={openWeeks.open1}
+              onToggle={() => setOpenWeeks((w) => ({ ...w, open1: !w.open1 }))}
+              isSingleEmployeeView={isSingleEmployeeView}
+              isGroupedView={isGroupedView}
+              shifts={week1Shifts}
+              grouped={week1Grouped}
+              expandedEmployees={expandedEmployees}
+              toggleEmployeeExpanded={toggleEmployeeExpanded}
+              renderShiftRow={renderShiftRow}
+            />
+            <ScheduleWeekBlock
+              weekLabel="Week 2"
+              rangeLabel={formatWeekRange(weeks.week2.start, weeks.week2.end)}
+              shiftCount={week2Shifts.length}
+              open={openWeeks.open2}
+              onToggle={() => setOpenWeeks((w) => ({ ...w, open2: !w.open2 }))}
+              isSingleEmployeeView={isSingleEmployeeView}
+              isGroupedView={isGroupedView}
+              shifts={week2Shifts}
+              grouped={week2Grouped}
+              expandedEmployees={expandedEmployees}
+              toggleEmployeeExpanded={toggleEmployeeExpanded}
+              renderShiftRow={renderShiftRow}
+            />
           </div>
-        ) : isGroupedView ? (
-          // Round 2 (CB, Oct 2026, on the mockup: "I don't like how it's showing up the same
-          // name multiple times... they're supposed to be organized per profile"): one card per
-          // person instead of one flat list — a quiet header naming them once (avatar, name,
-          // real job title, same correction already made to the single-employee banner), then
-          // their shifts as the same compact divided rows the single-employee view uses.
-          <div className="space-y-4">
-            {groupedByPerson.map((group) => {
-              const isExpanded = expandedEmployees.has(group.employeeId);
-              return (
-                <div key={group.employeeId} className="bg-surface border border-border rounded-xl overflow-hidden">
-                  <button
-                    type="button"
-                    onClick={() => toggleEmployeeExpanded(group.employeeId)}
-                    aria-expanded={isExpanded}
-                    className="w-full flex items-center gap-3 px-5 py-3.5 bg-black/[0.02] border-b border-border text-left hover:bg-black/[0.04] transition-colors"
-                  >
-                    {group.avatarUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element -- public storage URL
-                      <img src={group.avatarUrl} alt="" className="h-9 w-9 rounded-full object-cover border border-border shrink-0" />
-                    ) : (
-                      <span
-                        className="h-9 w-9 rounded-full shrink-0 flex items-center justify-center text-white text-xs font-semibold"
-                        style={{ background: "linear-gradient(135deg, var(--ttc-pink-ink), var(--ttc-pink))" }}
-                      >
-                        {initialsOf(group.name) || "?"}
-                      </span>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="font-serif font-bold text-[15px] truncate">{group.name}</p>
-                      <p className="text-xs text-muted truncate">{group.jobTitle}</p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-xs font-semibold text-foreground">
-                        {group.shifts.length} {group.shifts.length === 1 ? "shift" : "shifts"}
-                      </p>
-                      {group.missedCount > 0 && (
-                        <p className="text-[11px] text-rose-800">{group.missedCount} no clock-in</p>
-                      )}
-                    </div>
-                    <ChevronDownIcon
-                      className={`h-3.5 w-3.5 text-muted shrink-0 transition-transform ${isExpanded ? "rotate-180" : ""}`}
-                    />
-                  </button>
-                  {isExpanded && (
-                    <div className="divide-y divide-border">{group.shifts.map((s) => renderShiftRow(s))}</div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        ) : null}
         </>
+      )}
+    </div>
+  );
+}
+
+/** Round 5 — one pay period's Week 1 or Week 2, collapsed to a single header row (its label, date
+ *  range, and its own shift count) until tapped open to show that week's shifts — either the
+ *  single-employee divided row list or the grouped-by-person cards, exactly as the whole-period
+ *  view rendered them before this round, just scoped to one week's `shifts`/`grouped` at a time.
+ *  `renderShiftRow`/`expandedEmployees`/`toggleEmployeeExpanded` are passed through from the main
+ *  component rather than recreated here, same as WeekAccordionBlock on the Timesheet review page
+ *  takes `entries`/`review` as props instead of owning that state itself. Kept local to this file
+ *  since nothing else uses this particular accordion chrome. */
+function ScheduleWeekBlock({
+  weekLabel,
+  rangeLabel,
+  shiftCount,
+  open,
+  onToggle,
+  isSingleEmployeeView,
+  isGroupedView,
+  shifts,
+  grouped,
+  expandedEmployees,
+  toggleEmployeeExpanded,
+  renderShiftRow,
+}: {
+  weekLabel: string;
+  rangeLabel: string;
+  shiftCount: number;
+  open: boolean;
+  onToggle: () => void;
+  isSingleEmployeeView: boolean;
+  isGroupedView: boolean;
+  shifts: AdminShiftDTO[];
+  grouped: GroupedShifts[];
+  expandedEmployees: Set<string>;
+  toggleEmployeeExpanded: (employeeId: string) => void;
+  renderShiftRow: (s: AdminShiftDTO) => JSX.Element;
+}) {
+  return (
+    <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="w-full flex items-center justify-between gap-2 px-4 py-3.5 text-left hover:bg-black/[0.02]"
+      >
+        <span className="flex items-baseline gap-2">
+          <span className="text-sm font-bold">{weekLabel}</span>
+          <span className="text-xs text-muted">{rangeLabel}</span>
+        </span>
+        <span className="flex items-center gap-2.5">
+          <span className="text-xs font-semibold text-muted">
+            {shiftCount} {shiftCount === 1 ? "shift" : "shifts"}
+          </span>
+          <ChevronDownIcon className={`h-4 w-4 text-muted transition-transform ${open ? "rotate-180" : ""}`} />
+        </span>
+      </button>
+      {open && (
+        <div className="border-t border-border p-3">
+          {shiftCount === 0 ? (
+            <p className="text-sm text-muted px-2 py-3">No shifts this week.</p>
+          ) : isSingleEmployeeView ? (
+            <div className="bg-background border border-border rounded-xl divide-y divide-border overflow-hidden">
+              {shifts.map((s) => renderShiftRow(s))}
+            </div>
+          ) : isGroupedView ? (
+            // Round 2 (CB, Oct 2026, on the mockup: "I don't like how it's showing up the same
+            // name multiple times... they're supposed to be organized per profile"): one card per
+            // person instead of one flat list — a quiet header naming them once (avatar, name,
+            // real job title, same correction already made to the single-employee banner), then
+            // their shifts as the same compact divided rows the single-employee view uses.
+            <div className="space-y-3">
+              {grouped.map((group) => {
+                const isExpanded = expandedEmployees.has(group.employeeId);
+                return (
+                  <div key={group.employeeId} className="bg-background border border-border rounded-xl overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => toggleEmployeeExpanded(group.employeeId)}
+                      aria-expanded={isExpanded}
+                      className="w-full flex items-center gap-3 px-5 py-3.5 bg-black/[0.02] border-b border-border text-left hover:bg-black/[0.04] transition-colors"
+                    >
+                      {group.avatarUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element -- public storage URL
+                        <img src={group.avatarUrl} alt="" className="h-9 w-9 rounded-full object-cover border border-border shrink-0" />
+                      ) : (
+                        <span
+                          className="h-9 w-9 rounded-full shrink-0 flex items-center justify-center text-white text-xs font-semibold"
+                          style={{ background: "linear-gradient(135deg, var(--ttc-pink-ink), var(--ttc-pink))" }}
+                        >
+                          {initialsOf(group.name) || "?"}
+                        </span>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="font-serif font-bold text-[15px] truncate">{group.name}</p>
+                        <p className="text-xs text-muted truncate">{group.jobTitle}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-xs font-semibold text-foreground">
+                          {group.shifts.length} {group.shifts.length === 1 ? "shift" : "shifts"}
+                        </p>
+                        {group.missedCount > 0 && (
+                          <p className="text-[11px] text-rose-800">{group.missedCount} no clock-in</p>
+                        )}
+                      </div>
+                      <ChevronDownIcon
+                        className={`h-3.5 w-3.5 text-muted shrink-0 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                      />
+                    </button>
+                    {isExpanded && (
+                      <div className="divide-y divide-border">{group.shifts.map((s) => renderShiftRow(s))}</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
       )}
     </div>
   );
