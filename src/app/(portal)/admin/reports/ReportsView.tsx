@@ -305,6 +305,12 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
     generate(range.start, range.end, employeeId);
   }
 
+  // Round thirteen — see the top filter bar's own doc comment below for the full story. True
+  // only once the single-employee pink identity card is actually on screen (it has its own
+  // Team Member switcher and PayrollPeriodSwitcher), so the top bar can hide without leaving any
+  // other state (all-team-members, loading, empty, error) without a way to change who/when.
+  const showingSingleEmployeeReport = loadState === "ready" && !!report && employeeId !== "" && !!report.rows[0];
+
   const exportQuery = `?start=${start}&end=${end}${employeeId ? `&employeeId=${employeeId}` : ""}`;
 
   // Round five (CB): "the download PDF and download CSV should be like kind of on the bottom
@@ -431,25 +437,37 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
           paging PayrollPeriodSwitcher's own offset (see handlePeriodOffsetChange above); there's
           no other interval to pick anymore, so Team Member and the period switcher are the
           whole control surface, and nothing needs an explicit Generate click — both already
-          regenerate the report the moment either one changes. */}
-      <div className="bg-surface border border-border rounded-xl p-4 mb-5 flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <label className="block text-sm font-medium mb-1.5">Team Member</label>
-          <select
-            value={employeeId}
-            onChange={(ev) => handleEmployeeChange(ev.target.value)}
-            className="rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent min-w-[180px]"
-          >
-            <option value="">All team members</option>
-            {employees.map((emp) => (
-              <option key={emp.id} value={emp.id}>
-                {emp.name}
-              </option>
-            ))}
-          </select>
+          regenerate the report the moment either one changes.
+
+          Round thirteen (CB, Oct 2026, on a phone screenshot of this exact card with a single
+          employee's full report open below it, red-X'd out: "it's kind of redundant because we
+          already have that functionality below"): once a single employee's report is showing,
+          the pink identity card right below already offers both the same controls — the name
+          itself opens the same employee switcher (see switcherOpen above), and its own
+          PayrollPeriodSwitcher pages the same period — so this bar is hidden for that one case.
+          It still renders for every other state (the all-team-members list, and the
+          loading/empty/error states for a single employee, none of which show that pink card),
+          since those have no other way to change who or which period is showing. */}
+      {!showingSingleEmployeeReport && (
+        <div className="bg-surface border border-border rounded-xl p-4 mb-5 flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-1.5">Team Member</label>
+            <select
+              value={employeeId}
+              onChange={(ev) => handleEmployeeChange(ev.target.value)}
+              className="rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent min-w-[180px]"
+            >
+              <option value="">All team members</option>
+              {employees.map((emp) => (
+                <option key={emp.id} value={emp.id}>
+                  {emp.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <PayrollPeriodSwitcher offset={periodOffset} onOffsetChange={handlePeriodOffsetChange} capNextAtCurrent />
         </div>
-        <PayrollPeriodSwitcher offset={periodOffset} onOffsetChange={handlePeriodOffsetChange} capNextAtCurrent />
-      </div>
+      )}
 
       {loadState === "loading" && (
         <div className="space-y-2">
@@ -513,7 +531,7 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
             </div>
           )}
 
-          {employeeId !== "" && report.rows[0] ? (
+          {showingSingleEmployeeReport ? (
             // Round four (CB, Oct 2026: "i should be able to see the full report when clicking
             // their name or... view full report"): the same per-person identity-banner shell
             // TeamScheduleView's own single-employee view already uses, so clicking into one
