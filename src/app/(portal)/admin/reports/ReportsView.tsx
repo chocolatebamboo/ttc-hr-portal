@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getPayrollPeriod, getCurrentPayrollPeriodOffset, payrollPeriodOffsetForDate } from "@/lib/week";
+import { getPayrollPeriod, getCurrentPayrollPeriodOffset, payrollPeriodOffsetForDate, formatWeekRange } from "@/lib/week";
 import { formatClockTime } from "@/lib/time";
 import PayrollPeriodSwitcher from "@/components/PayrollPeriodSwitcher";
 import ActivityHistoryView from "./ActivityHistoryView";
@@ -24,6 +24,78 @@ function initialsOf(name: string): string {
 function formatShortDate(dateKey: string): string {
   const d = new Date(`${dateKey}T00:00:00`);
   return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
+
+// Round twelve (CB, Oct 2026, screenshotting the bottom of this page: "can we see that
+// celebration thing that we created again... I just wanted to be aesthetic so that section kind
+// of stand[s] out like the download button"): the export row below now reuses the exact
+// gradient/seal/confetti treatment from the Home dashboard's "Two-week report is ready" card
+// (ReportReadyBanner in DashboardNotifications.tsx) — same .report-ready-glow/-seal/-seal-ring/
+// -confetti-piece/-sparkle classes from globals.css, which are named generically (not
+// dashboard-specific) and were left untouched rather than re-opening that already-shipped file.
+// The confetti-burst geometry itself is a local copy of that banner's own fixed, non-randomized
+// 16-piece math (so this renders identically server/client with no hydration mismatch, same
+// reasoning as the original) rather than importing DashboardNotifications.tsx's private helpers —
+// same local-copy convention this file already follows for initialsOf above. Confirmed with CB
+// that the burst replaying each time this block mounts (switching between the all-team-members
+// list and a single employee's report) is fine as-is, no toned-down no-confetti variant needed.
+const REPORT_EXPORT_CONFETTI_COLORS = ["#ffffff", "#ffd166", "#ed008c", "#8ecae6"];
+const REPORT_EXPORT_CONFETTI = Array.from({ length: 16 }, (_, i) => {
+  const angle = (Math.PI * 2 * i) / 16 + ((i % 3) - 1) * 0.08;
+  const dist = 55 + ((i * 37) % 70);
+  const dx = Math.cos(angle) * dist;
+  const dy = Math.sin(angle) * dist * 0.6 - 12;
+  return {
+    color: REPORT_EXPORT_CONFETTI_COLORS[i % REPORT_EXPORT_CONFETTI_COLORS.length],
+    end: `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px)`,
+    rot: `${(i * 53) % 360}deg`,
+    delay: `${0.05 + ((i * 7) % 20) / 100}s`,
+  };
+});
+const REPORT_EXPORT_SPARKLES = [
+  { left: 5, top: 10, size: 11, delay: "0.6s" },
+  { left: 55, top: 4, size: 8, delay: "0.72s" },
+  { left: 175, top: 16, size: 9, delay: "0.84s" },
+];
+
+type ExportConfettiPieceStyle = React.CSSProperties & {
+  "--report-ready-end": string;
+  "--report-ready-rot": string;
+};
+
+function ReportExportConfetti() {
+  return (
+    <>
+      {REPORT_EXPORT_CONFETTI.map((piece, i) => (
+        <span
+          key={i}
+          className="report-ready-confetti-piece"
+          aria-hidden="true"
+          style={
+            {
+              left: "37px",
+              background: piece.color,
+              animationDelay: piece.delay,
+              "--report-ready-end": piece.end,
+              "--report-ready-rot": piece.rot,
+            } as ExportConfettiPieceStyle
+          }
+        />
+      ))}
+      {REPORT_EXPORT_SPARKLES.map((s, i) => (
+        <span
+          key={i}
+          className="report-ready-sparkle"
+          aria-hidden="true"
+          style={{ left: s.left, top: s.top, animationDelay: s.delay }}
+        >
+          <svg width={s.size} height={s.size} viewBox="0 0 24 24" fill="white">
+            <path d="M12 0l2.4 9.6L24 12l-9.6 2.4L12 24l-2.4-9.6L0 12l9.6-2.4z" />
+          </svg>
+        </span>
+      ))}
+    </>
+  );
 }
 
 /**
@@ -247,20 +319,54 @@ export default function ReportsView({ scope }: { scope: "all" | "team" }) {
   // sm, the label moves above as its own line and the two buttons split one row evenly
   // (flex-1, smaller padding so they fit); at sm and up this collapses back to the original
   // single inline row, label included.
+  //
+  // Round twelve (CB): see this file's doc comment above ReportExportConfetti for the full
+  // story — this plain bordered strip became the same celebration card as the dashboard's
+  // report-ready banner. Single-employee view already shows the person's name in the card
+  // above, so the subtitle here is just the pay period; the all-team-members view has no name
+  // of its own in view, so its subtitle adds the team-member count the way the mockup did.
+  const periodLabel = formatWeekRange(start, end);
+  const exportSubtitle = employeeId
+    ? periodLabel
+    : `${periodLabel} · ${report?.rows.length ?? 0} team ${(report?.rows.length ?? 0) === 1 ? "member" : "members"}`;
   const exportActions = (
-    <div className="mt-4 pt-4 border-t border-border">
-      <p className="text-xs text-muted mb-2 sm:hidden">Export this report:</p>
-      <div className="flex items-center justify-end gap-2">
-        <span className="hidden sm:inline text-xs text-muted mr-1">Export this report:</span>
+    <div
+      className="report-ready-card relative mt-4 overflow-hidden rounded-3xl px-[15px] py-4 text-white"
+      style={{
+        boxShadow: "0 10px 30px -6px color-mix(in srgb, var(--ttc-pink-ink) 45%, transparent), 0 2px 8px rgba(0,0,0,0.08)",
+        background:
+          "radial-gradient(120% 140% at 0% 0%, rgba(255,255,255,0.16), transparent 55%), linear-gradient(135deg, var(--ttc-blue-ink) 0%, var(--ttc-blue) 48%, var(--ttc-pink) 100%)",
+      }}
+    >
+      <span className="report-ready-glow" aria-hidden="true" />
+      <ReportExportConfetti />
+      <div className="relative z-[2] flex items-center gap-[11px]">
+        <span className="relative shrink-0">
+          <span className="report-ready-seal-ring absolute -inset-1 rounded-full border-[1.5px] border-white/50" aria-hidden="true" />
+          <span className="report-ready-seal flex h-[46px] w-[46px] items-center justify-center rounded-full bg-white shadow-[0_4px_12px_rgba(0,0,0,0.16)]">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--ttc-pink-ink)" strokeWidth="2.2" aria-hidden="true">
+              <path d="M12 3v13" strokeLinecap="round" />
+              <path d="M7 11l5 5 5-5" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M4 20h16" strokeLinecap="round" />
+            </svg>
+          </span>
+        </span>
+        <div className="min-w-0">
+          <div className="font-serif text-[1.3rem] font-bold leading-[1.14] tracking-[-0.01em] truncate">Export this report</div>
+          <div className="mt-[3px] truncate text-[0.86rem] text-white/80">{exportSubtitle}</div>
+        </div>
+      </div>
+      <div className="relative z-[2] my-3.5 h-px bg-white/20" />
+      <div className="relative z-[2] flex items-center gap-2">
         <a
           href={`/api/payroll/hours/csv${exportQuery}`}
-          className="btn-neutral flex-1 sm:flex-none text-center text-sm px-3 sm:px-5 py-2"
+          className="flex-1 text-center rounded-full bg-white px-3 py-2.5 text-sm font-bold text-[color:var(--ttc-pink-ink)]"
         >
           Download CSV
         </a>
         <a
           href={`/api/payroll/hours/pdf${exportQuery}`}
-          className="btn-outline flex-1 sm:flex-none text-center text-sm px-3 sm:px-5 py-2"
+          className="flex-1 text-center rounded-full border-[1.5px] border-white/55 px-3 py-2.5 text-sm font-bold text-white"
         >
           Download PDF
         </a>
