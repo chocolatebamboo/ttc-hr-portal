@@ -8,6 +8,7 @@ import {
   ForbiddenError,
 } from "@/lib/authorization";
 import { getAvatarPublicUrl, getSignedDownloadUrl, uploadDateTaskFile } from "@/lib/storage";
+import { formatSlotDate } from "@/lib/availability-format";
 import { writeAuditLog } from "@/lib/audit-log";
 import { writeNotification } from "@/lib/notifications";
 import { readDateDecisions, autoConfirmShiftForApprovedDate } from "@/lib/availability";
@@ -329,11 +330,21 @@ export async function createDateTask(
       newValue: taskDate,
       comment: trimmedTitle,
     });
+    // Oct 2026 (CB: every single assigned-task email/bell notification shared one generic
+    // "You have a new task" title no matter which task it actually is, with the real task name
+    // buried in the body — she wants the subject line itself to read properly). notification-
+    // emails.ts reuses this exact title/body pair as the email subject/body (see its own doc
+    // comment), so folding the task's own title into this one string fixes both the email
+    // subject and the in-app bell item at once — confirmed she wants both updated together,
+    // matching how DATE_TASK_SUBMITTED/APPROVED/RETURNED below already fold their own specifics
+    // into their titles instead of a generic placeholder. Body now carries the date instead of
+    // repeating the title a second time right underneath it (formatSlotDate matches the "Thu,
+    // Sep 17" style already used for dates everywhere else in this app).
     await writeNotification(tx, {
       recipientId: employeeId,
       type: "DATE_TASK_ASSIGNED",
-      title: "You have a new task",
-      body: trimmedTitle,
+      title: `New task: ${trimmedTitle}`,
+      body: `For ${formatSlotDate(taskDate)}`,
       targetType: "DateTask",
       targetId: row.id,
     });
