@@ -1005,7 +1005,7 @@ function ScheduleWeekBlock({
   grouped: GroupedShifts[];
   expandedEmployees: Set<string>;
   toggleEmployeeExpanded: (employeeId: string) => void;
-  renderShiftRow: (s: AdminShiftDTO) => JSX.Element;
+  renderShiftRow: (s: AdminShiftDTO) => React.ReactNode;
 }) {
   return (
     <div className="rounded-2xl border border-border bg-surface overflow-hidden">
