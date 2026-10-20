@@ -7,7 +7,7 @@ import ShiftStatusPill from "@/components/ShiftStatusPill";
 import DateTasksPanel from "@/components/DateTasksPanel";
 import SwipeReveal from "@/components/SwipeReveal";
 import NewMessagePicker from "@/components/NewMessagePicker";
-import { ChecklistIcon, CheckCircleIcon, CalendarIcon, TrashIcon, ChatIcon } from "@/components/icons";
+import { ChecklistIcon, CheckCircleIcon, CalendarIcon, TrashIcon, ChatIcon, ChevronDownIcon } from "@/components/icons";
 import { slotChips, formatReviewedAt, type SlotChip } from "@/lib/availability-format";
 import { toneForStatus, YOU_TONE } from "@/lib/status-tone";
 import { dateKeyDaysFromNow } from "@/lib/time";
@@ -741,6 +741,12 @@ export default function TeamAvailabilityCards({
         openDate={q.openDate}
         shiftsByDate={q.shiftsByDate}
         dmCounts={q.dmCounts}
+        // Oct 2026 (CB, screenshotting Donique Perry's 8-date card pushing Jennay Johnson's
+        // further down: "it should be a drop down so it's cleaner for each... person so we can
+        // see it"): only the already-decided list collapses by default — Pending still needs an
+        // Approve/Deny decision made on it, so it stays fully expanded, matching CB's own
+        // confirmed mockup (availability-card-dropdown-v1).
+        collapsible
         onToggleDate={(submissionId, date) =>
           q.setOpenDate(
             q.openDate?.submissionId === submissionId && q.openDate.date === date ? null : { submissionId, date }
@@ -865,8 +871,18 @@ export default function TeamAvailabilityCards({
         <section>
           {decidedRecent.length > 0 && (
             <>
+              {/* Oct 2026 (CB, after the pay-period switcher shipped: "I don't like the decided
+                  wording... maybe it's what's on the schedule... or like pay period schedule for
+                  the two weeks"): "Decided" read as unclear about what the list actually shows.
+                  Renamed only in week-bounded (pay-period) mode — the only mode CB was looking
+                  at, and the only one where "pay period" is actually what the nav above is paging
+                  by; the unbounded dashboard widget (TeamAvailabilityRequestsSection) doesn't
+                  page by pay period at all (rolling last-7-days vs. archived, see this
+                  component's own doc comment above), so "Decided" stays accurate there. Confirmed
+                  via CB's own mockup, availability-card-dropdown-v1 (three wording options) —
+                  "Pay Period Schedule" won over "Reviewed This Period" and "Approved & Denied". */}
               <h2 className="text-sm font-semibold uppercase tracking-wide text-muted mb-2.5">
-                Decided ({decidedRecent.length})
+                {weekBounded ? "Pay Period Schedule" : "Decided"} ({decidedRecent.length})
               </h2>
               <div className="space-y-3">{groupByEmployee(decidedRecent).map(renderDecidedGroup)}</div>
             </>
@@ -955,6 +971,7 @@ export function Card({
   openDate,
   shiftsByDate,
   dmCounts,
+  collapsible = false,
   onToggleDate,
   onAddNoteToggle,
   onNoteTextChange,
@@ -986,6 +1003,15 @@ export function Card({
   openDate: { submissionId: string; date: string } | null;
   shiftsByDate: Map<string, AdminShiftDTO>;
   dmCounts: Map<string, { total: number; unread: number }>;
+  /** Oct 2026 (CB: "it should be a drop down so it's cleaner for each... person so we can see
+   *  it"): when true, this card starts collapsed to just its header — name, dates count, a
+   *  chevron toggle — with the date chips and everything below hidden until expanded. Off by
+   *  default so every other caller (Pending, the dashboard widget) is unaffected; only the
+   *  Decided/pay-period-schedule list in TeamAvailabilityCards above opts in. A card still
+   *  auto-expands itself when one of its own dates is the currently open one (openDate below),
+   *  so jumping to a specific date from elsewhere (the tasks icon, a notification) never lands
+   *  on a collapsed, seemingly-empty card. */
+  collapsible?: boolean;
   onToggleDate: (submissionId: string, date: string) => void;
   onAddNoteToggle: () => void;
   onNoteTextChange: (v: string) => void;
@@ -1051,6 +1077,11 @@ export function Card({
   const fullyDecided = solo ? allDatesDecided(solo.dateDecisions) : false;
 
   const [editingDates, setEditingDates] = useState(false);
+  // Oct 2026 — collapsible drop-down (see this component's own doc comment on the `collapsible`
+  // prop above). Manual toggle only; auto-expansion for an already-open date is handled by
+  // `collapsed` below instead of seeding this true, so collapsing it again later doesn't require
+  // first closing that date.
+  const [manuallyExpanded, setManuallyExpanded] = useState(false);
   // Carries which submission the date belongs to, not just the date — a merged card can have
   // the same calendar date on more than one underlying request in principle, and removeDate
   // needs to know exactly which one this confirmation is acting on.
@@ -1144,6 +1175,14 @@ export function Card({
     submissions.filter((s) => s.status === "PENDING" || s.status === "DENIED").map((s) => s.id)
   );
   const canEditDates = chips.length > 1 && chips.some((c) => editableSubmissionIds.has(c.submissionId));
+  // Oct 2026 — collapsible drop-down. `collapsible` is false for every caller except the
+  // Decided/pay-period-schedule list (see the prop's own doc comment), so this is a no-op
+  // everywhere else. Auto-expands (without flipping manuallyExpanded itself, so collapsing it
+  // again doesn't require re-closing the date first) whenever one of this card's own dates is
+  // the one currently open, so arriving here from elsewhere — the tasks icon, "Loop in an admin,"
+  // a notification — never lands on a collapsed card hiding the very date just opened.
+  const hasOwnOpenDate = submissions.some((s) => openDate?.submissionId === s.id);
+  const collapsed = collapsible && !manuallyExpanded && !hasOwnOpenDate;
 
   function startAdjustDate(date: string, seedStart: string, seedEnd: string) {
     setAdjustingDate(date);
@@ -1356,9 +1395,26 @@ export function Card({
               {editingDates ? "Done" : "Edit"}
             </button>
           )}
+          {/* Oct 2026 — collapsible drop-down toggle (see the `collapsible` prop's own doc
+              comment). Shows the dates count even while collapsed, so "how many" is never hidden
+              behind the tap. */}
+          {collapsible && (
+            <button
+              type="button"
+              onClick={() => setManuallyExpanded((v) => !v)}
+              aria-expanded={!collapsed}
+              aria-label={collapsed ? `Show ${employeeName}'s dates` : `Hide ${employeeName}'s dates`}
+              className="flex items-center gap-1.5 h-8 rounded-full border border-border pl-2.5 pr-2 text-xs font-semibold text-muted hover:bg-black/[0.03] transition-colors"
+            >
+              {chips.length} {chips.length === 1 ? "date" : "dates"}
+              <ChevronDownIcon className={`h-3.5 w-3.5 transition-transform ${collapsed ? "" : "rotate-180"}`} />
+            </button>
+          )}
         </div>
       </div>
 
+      {!collapsed && (
+      <>
       {chips.length > 0 ? (
         <div className="mt-3.5 flex flex-wrap gap-1.5">
           {chips.map((c) => {
@@ -1947,6 +2003,8 @@ export function Card({
             <DateTasksPanel employeeId={employeeId} taskDate={openChip.date} viewerId={viewerId} />
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );
