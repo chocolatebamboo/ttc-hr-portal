@@ -27,8 +27,14 @@ import { getCurrentPayrollPeriodOffset, getPayrollPeriod, formatWeekRange } from
  * currentOffset`, or a plain-text shortcut button to jump back to that period otherwise — telling
  * them apart meant noticing a faint background pill was (or wasn't) there, easy to miss at a
  * glance on a phone. The shortcut button now reads "Jump to current" so it can never be misread
- * as the page itself claiming a non-current period is the current one; the badge keeps the plain
- * "Current" label since it's the one case where that word is simply true.
+ * as the page itself claiming a non-current period is the current one.
+ *
+ * Round six (CB, Oct 2026, screenshotting the Timesheet page with the badge circled: "can this
+ * say current pay period instead"): the static badge spells out what it's the current one OF,
+ * instead of the bare "Current" — every page this component renders on is itself paging by pay
+ * period, so there's never a different noun for "pay period" to disambiguate against; this is
+ * purely that one badge's label. "Jump to current" (above) is unchanged — it's a short action
+ * label on a button, not a status badge, and already reads unambiguously on its own.
  */
 export default function PayrollPeriodSwitcher({
   offset,
@@ -58,7 +64,7 @@ export default function PayrollPeriodSwitcher({
       <span className="text-sm font-semibold min-w-[150px] text-center tabular-nums">{rangeLabel}</span>
       {offset === currentOffset ? (
         <span className="text-[11px] font-semibold text-accent-ink bg-accent/10 rounded-full px-2.5 py-0.5 shrink-0">
-          Current
+          Current pay period
         </span>
       ) : (
         <button
