@@ -5,7 +5,7 @@ import Link from "next/link";
 import type { DateTaskDTO } from "@/types";
 import DateTaskRow from "@/components/DateTaskRow";
 import SwipeReveal from "@/components/SwipeReveal";
-import { ChevronDownIcon, CheckCircleIcon } from "@/components/icons";
+import { ChecklistIcon, ChevronDownIcon, CheckCircleIcon } from "@/components/icons";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -217,8 +217,18 @@ export default function DateTasksSection({
 
   if (!stillLoading && activeAll.length === 0 && completedVisible.length === 0) return null;
 
-  const visibleActive = activeAll.slice(0, MAX_VISIBLE_ACTIVE);
-  const overflowCount = activeAll.length - visibleActive.length;
+  // Oct 2026 (CB, on the stacked amber task cards on Home: "I basically want it to be clean and
+  // just be like one notification saying that you have X amount of... tasks to do"): the viewer's
+  // own outstanding ASSIGNED/IN_PROGRESS tasks (activeOwn) no longer render as individual cards
+  // here — they collapse into one TasksNotificationBanner below, same pill shape as the
+  // approvals/messages banners already on Home. The reviewer's own "awaiting your review" items
+  // still need Approve/Send back inline, so those stay itemized, same as before, just capped on
+  // their own now that they're not sharing MAX_VISIBLE_ACTIVE with the own-task cards that used
+  // to sit alongside them.
+  const activeOwnVisible = activeAll.filter((t) => !reviewTaskIds.has(t.id));
+  const teamReviewVisibleAll = activeAll.filter((t) => reviewTaskIds.has(t.id));
+  const teamReviewVisible = teamReviewVisibleAll.slice(0, MAX_VISIBLE_ACTIVE);
+  const reviewOverflowCount = teamReviewVisibleAll.length - teamReviewVisible.length;
 
   return (
     <div className={className}>
@@ -239,14 +249,18 @@ export default function DateTasksSection({
         <div className="space-y-2.5">
           {stillLoading && <div className="h-16 rounded-2xl bg-black/[0.04] animate-pulse" />}
 
-          {!stillLoading && (activeAll.length > 0 || completedVisible.length > 0) && (
+          {/* Oct 2026: one clean summary instead of a stacked card per outstanding task of the
+              viewer's own — see the variable comment above. */}
+          {!stillLoading && activeOwnVisible.length > 0 && <TasksNotificationBanner count={activeOwnVisible.length} />}
+
+          {!stillLoading && (teamReviewVisible.length > 0 || completedVisible.length > 0) && (
             <p className="text-[11px] text-muted">
               Swipe a card left to clear it from Home — it stays on the Tasks page.
             </p>
           )}
 
           {!stillLoading &&
-            visibleActive.map((t) => (
+            teamReviewVisible.map((t) => (
               <SwipeReveal
                 key={t.id}
                 actionSide="right"
@@ -266,12 +280,12 @@ export default function DateTasksSection({
               </SwipeReveal>
             ))}
 
-          {!stillLoading && overflowCount > 0 && (
+          {!stillLoading && reviewOverflowCount > 0 && (
             <Link
               href={canReview ? "/tasks?tab=review" : "/tasks"}
               className="flex items-center justify-center gap-1.5 w-full text-[12.5px] font-semibold text-accent-ink bg-accent/5 hover:bg-accent/10 border border-dashed border-accent/25 rounded-xl py-2.5 transition-colors"
             >
-              View {overflowCount} more in Tasks →
+              View {reviewOverflowCount} more in Tasks →
             </Link>
           )}
 
@@ -318,5 +332,35 @@ export default function DateTasksSection({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Oct 2026 (CB, looking at her own "Your tasks" widget stacked with amber cards: "I feel like
+ * there's a better way to kind of display it... I basically want it to be clean and just be like
+ * one notification saying that you have X amount of like tasks to do and provide a market [marker]
+ * before you do it"): replaces the individual ASSIGNED/IN_PROGRESS cards that used to stack here
+ * with one summary, in the same pill shape DashboardNotifications.tsx's own PendingApprovalsBanner/
+ * MessagesBanner already use elsewhere on Home — amber instead of blue/purple since this is still
+ * the task feature's own color, and a ChecklistIcon badge instead of a bell/chat glyph so it reads
+ * as "tasks" at a glance. Tapping it goes straight to My Tasks, where every one of these still
+ * lists out individually with its full card, comment thread, and Start/Submit actions — this is
+ * purely a Home-widget-level summary, not a change to how tasks are actually worked.
+ */
+function TasksNotificationBanner({ count }: { count: number }) {
+  return (
+    <Link
+      href="/tasks"
+      className="flex items-center gap-3 rounded-2xl pl-4 pr-11 py-3.5 text-white transition-transform hover:-translate-y-0.5 w-full"
+      style={{ background: "linear-gradient(135deg, #f59e0b, #b45309)" }}
+    >
+      <span className="h-9 w-9 shrink-0 rounded-full bg-white/18 flex items-center justify-center">
+        <ChecklistIcon className="h-4.5 w-4.5" />
+      </span>
+      <p className="text-sm font-medium">
+        <b className="font-bold">{count}</b> {count === 1 ? "task" : "tasks"} waiting on you
+      </p>
+      <span className="ml-auto text-xs font-medium whitespace-nowrap shrink-0 opacity-90">View →</span>
+    </Link>
   );
 }
