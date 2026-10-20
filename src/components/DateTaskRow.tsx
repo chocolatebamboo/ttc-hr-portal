@@ -359,154 +359,41 @@ export default function DateTaskRow({
         </div>
       ) : (
       <>
+      {showEmployee && (
+        <div className="flex items-center gap-1.5 mb-1.5">
+          <span className="h-5 w-5 rounded-md bg-white/25 flex items-center justify-center text-[9px] font-extrabold shrink-0">
+            {initialsOf(task.employeeName) || "?"}
+          </span>
+          <span className="text-xs font-bold">{task.employeeName}</span>
+        </div>
+      )}
+
+      {/* Oct 2026 (CB, on the full-width panel below reading "skinny" with lots of plain amber
+          beside it: "it's not really filling up"): the badges and whatever sits on the right —
+          the tap-to-complete ring, the Approve/Send back buttons — now only share THIS row, not
+          the whole card. Previously this row's left side was a flex-1 column holding the badges
+          AND the panel AND everything below, so the panel only ever filled that column's width,
+          which was already narrowed to make room for the right column running the full card
+          height beside it. Confining both sides to just this one row lets the panel (and
+          everything after it) be a full-width sibling below, instead. */}
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          {showEmployee && (
-            <div className="flex items-center gap-1.5 mb-1">
-              <span className="h-5 w-5 rounded-md bg-white/25 flex items-center justify-center text-[9px] font-extrabold shrink-0">
-                {initialsOf(task.employeeName) || "?"}
-              </span>
-              <span className="text-xs font-bold">{task.employeeName}</span>
-            </div>
-          )}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span
-              className="inline-flex items-center rounded-full bg-white px-2.5 py-0.5 text-[11px] font-semibold shrink-0 shadow-sm"
-              style={{ color: ink }}
-            >
-              {STATUS_LABEL[task.status]}
+        <div className="flex items-center gap-2 flex-wrap min-w-0 flex-1">
+          <span
+            className="inline-flex items-center rounded-full bg-white px-2.5 py-0.5 text-[11px] font-semibold shrink-0 shadow-sm"
+            style={{ color: ink }}
+          >
+            {STATUS_LABEL[task.status]}
+          </span>
+          {/* QA pass (Sept 2026): a simple priority flag — deliberately just this one badge,
+              shown only when URGENT, rather than a NORMAL badge nobody needs to see. Same
+              solid-white-pill treatment as the status badge, rose text stays constant
+              regardless of the card's own tone so "urgent" always reads the same. */}
+          {task.priority === "URGENT" && (
+            <span className="inline-flex items-center rounded-full bg-white px-2.5 py-0.5 text-[11px] font-semibold shrink-0 text-rose-700 shadow-sm">
+              Urgent
             </span>
-            {/* QA pass (Sept 2026): a simple priority flag — deliberately just this one badge,
-                shown only when URGENT, rather than a NORMAL badge nobody needs to see. Same
-                solid-white-pill treatment as the status badge, rose text stays constant
-                regardless of the card's own tone so "urgent" always reads the same. */}
-            {task.priority === "URGENT" && (
-              <span className="inline-flex items-center rounded-full bg-white px-2.5 py-0.5 text-[11px] font-semibold shrink-0 text-rose-700 shadow-sm">
-                Urgent
-              </span>
-            )}
-            {showDate && <span className="text-xs text-white/75">{formatTaskDate(task.taskDate)}</span>}
-          </div>
-
-          {/* Oct 2026 (CB, on the title/description sitting straight on the amber gradient: "the
-              white is kind of conflicting with the yellow... it kind of just looks too cluttered
-              and clunky to me"): the title and description — the part an admin actually writes —
-              now sit on this light inset panel instead of plain white text on the gradient,
-              extending the same bg-white/95 treatment this card already uses for "what you
-              submitted" and the returnNote below. The status/urgent badges and date stay solid-
-              white pills directly on the gradient above, unchanged — only the free-text block
-              moved onto its own readable surface. */}
-          <div className="rounded-xl bg-white/95 px-3 py-2.5 mt-1.5 shadow-sm">
-            <p
-              className={`text-sm font-semibold text-foreground ${task.status === "APPROVED" ? "line-through text-muted" : ""}`}
-            >
-              {task.title}
-            </p>
-            {task.description && (
-              <>
-                <p
-                  ref={descRef}
-                  className={`text-sm text-muted mt-1 whitespace-pre-wrap break-words ${
-                    descExpanded ? "" : "line-clamp-2"
-                  }`}
-                >
-                  {task.description}
-                </p>
-                {descOverflows && (
-                  <button
-                    type="button"
-                    onClick={() => setDescExpanded((v) => !v)}
-                    className="text-xs font-semibold text-accent-ink underline underline-offset-2 mt-0.5"
-                  >
-                    {descExpanded ? "Show less" : "Show more"}
-                  </button>
-                )}
-              </>
-            )}
-          </div>
-
-          {task.status !== "APPROVED" && (
-            <p className="text-xs text-white/75 mt-1.5">
-              {task.status === "ASSIGNED" && `From ${task.createdByName}`}
-              {task.status === "IN_PROGRESS" && `In progress — from ${task.createdByName}`}
-              {task.status === "AWAITING_REVIEW" && "Submitted — awaiting review"}
-              {task.status === "RETURNED" && `Sent back by ${task.returnedByName ?? "a reviewer"}`}
-            </p>
           )}
-
-          {/* Oct 2026 (CB, on the mockup's first pass at this: "make sure that we are... making
-              sure that we have it noted about who approved that task"): was a small line folded
-              into the generic meta paragraph above ("Confirmed by X") — promoted to its own row
-              with a name chip, same visual weight "From X" gets on a freshly Assigned card, so
-              who approved it reads just as plainly as who assigned it. */}
-          {task.status === "APPROVED" && (
-            <div className="flex items-center gap-2 mt-1.5">
-              <span className="h-5 w-5 rounded-md bg-white/25 flex items-center justify-center text-[9px] font-extrabold shrink-0">
-                {initialsOf(task.approvedByName ?? "") || "?"}
-              </span>
-              <p className="text-sm font-semibold">
-                Approved by {task.approvedByName ?? "a reviewer"}
-                {task.approvedAt && <span className="font-normal opacity-75"> · {formatCommentTime(task.approvedAt)}</span>}
-              </p>
-            </div>
-          )}
-
-          {task.status === "RETURNED" && task.returnNote && (
-            <div className="rounded-lg bg-white/95 px-3 py-2 text-sm text-rose-800 mt-2 shadow-sm">
-              {task.returnNote}
-            </div>
-          )}
-
-          {/* Oct 2026 (CB: "I should be able to review what was submitted for the task"): the
-              note/file left at submit time (submitComplete below), shown right on the card for
-              whoever reviews it — previously there was nothing captured here at all beyond a
-              status flip. Shows for the employee's own view too ("What you submitted"), not just
-              the reviewer's, since it's useful either way. Persists through RETURNED (the last
-              thing that was actually turned in, alongside the reviewer's returnNote explaining
-              why it came back) and APPROVED, not just AWAITING_REVIEW. */}
-          {hasSubmission && (
-            <div className="rounded-lg bg-white/95 px-3 py-2 mt-2 shadow-sm">
-              <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-700 mb-0.5">
-                What {isOwnTask ? "you" : task.employeeName} submitted
-              </p>
-              {task.submissionNote && (
-                <p className="text-sm text-foreground whitespace-pre-wrap break-words">{task.submissionNote}</p>
-              )}
-              {task.hasSubmissionAttachment && (
-                <button
-                  onClick={handleSubmissionDownload}
-                  disabled={downloadingSubmission}
-                  className="mt-1.5 flex items-center gap-1.5 text-xs font-semibold text-accent-ink underline underline-offset-2"
-                >
-                  <DownloadIcon className="h-3.5 w-3.5" />
-                  {task.submissionAttachmentName ?? "Attachment"}
-                </button>
-              )}
-            </div>
-          )}
-
-          {task.hasAttachment && (
-            <button
-              onClick={handleDownload}
-              disabled={downloading}
-              className="mt-1.5 flex items-center gap-1.5 text-xs font-medium text-white underline underline-offset-2 decoration-white/50 hover:decoration-white"
-            >
-              <DownloadIcon className="h-3.5 w-3.5" />
-              {task.attachmentName ?? "Attachment"}
-            </button>
-          )}
-
-          {actionError && <p className="text-xs font-medium text-white mt-1.5 bg-black/15 rounded px-2 py-1 inline-block">{actionError}</p>}
-
-          {isOwnTask && task.status === "ASSIGNED" && (
-            <button
-              onClick={() => runAction("start")}
-              disabled={busy}
-              className="mt-2 block text-xs font-semibold text-white underline underline-offset-2 decoration-white/50 hover:decoration-white disabled:opacity-50"
-            >
-              Start this task
-            </button>
-          )}
+          {showDate && <span className="text-xs text-white/75">{formatTaskDate(task.taskDate)}</span>}
         </div>
 
         <div className="flex flex-col items-end gap-2 shrink-0">
@@ -589,6 +476,126 @@ export default function DateTaskRow({
           )}
         </div>
       </div>
+
+      {/* Oct 2026 (CB, on the title/description sitting straight on the amber gradient: "the
+          white is kind of conflicting with the yellow... it kind of just looks too cluttered
+          and clunky to me"): the title and description — the part an admin actually writes —
+          sit on this light inset panel instead of plain white text on the gradient, extending
+          the same bg-white/95 treatment this card already uses for "what you submitted" and the
+          returnNote below. A full-width sibling of the badges/actions row above (not nested
+          inside it), so it runs edge to edge no matter how short or long the description is —
+          see that row's own doc comment. */}
+      <div className="rounded-xl bg-white/95 px-3 py-2.5 mt-1.5 shadow-sm">
+        <p
+          className={`text-sm font-semibold text-foreground ${task.status === "APPROVED" ? "line-through text-muted" : ""}`}
+        >
+          {task.title}
+        </p>
+        {task.description && (
+          <>
+            <p
+              ref={descRef}
+              className={`text-sm text-muted mt-1 whitespace-pre-wrap break-words ${
+                descExpanded ? "" : "line-clamp-2"
+              }`}
+            >
+              {task.description}
+            </p>
+            {descOverflows && (
+              <button
+                type="button"
+                onClick={() => setDescExpanded((v) => !v)}
+                className="text-xs font-semibold text-accent-ink underline underline-offset-2 mt-0.5"
+              >
+                {descExpanded ? "Show less" : "Show more"}
+              </button>
+            )}
+          </>
+        )}
+      </div>
+
+      {task.status !== "APPROVED" && (
+        <p className="text-xs text-white/75 mt-1.5">
+          {task.status === "ASSIGNED" && `From ${task.createdByName}`}
+          {task.status === "IN_PROGRESS" && `In progress — from ${task.createdByName}`}
+          {task.status === "AWAITING_REVIEW" && "Submitted — awaiting review"}
+          {task.status === "RETURNED" && `Sent back by ${task.returnedByName ?? "a reviewer"}`}
+        </p>
+      )}
+
+      {/* Oct 2026 (CB, on the mockup's first pass at this: "make sure that we are... making
+          sure that we have it noted about who approved that task"): was a small line folded
+          into the generic meta paragraph above ("Confirmed by X") — promoted to its own row
+          with a name chip, same visual weight "From X" gets on a freshly Assigned card, so
+          who approved it reads just as plainly as who assigned it. */}
+      {task.status === "APPROVED" && (
+        <div className="flex items-center gap-2 mt-1.5">
+          <span className="h-5 w-5 rounded-md bg-white/25 flex items-center justify-center text-[9px] font-extrabold shrink-0">
+            {initialsOf(task.approvedByName ?? "") || "?"}
+          </span>
+          <p className="text-sm font-semibold">
+            Approved by {task.approvedByName ?? "a reviewer"}
+            {task.approvedAt && <span className="font-normal opacity-75"> · {formatCommentTime(task.approvedAt)}</span>}
+          </p>
+        </div>
+      )}
+
+      {task.status === "RETURNED" && task.returnNote && (
+        <div className="rounded-lg bg-white/95 px-3 py-2 text-sm text-rose-800 mt-2 shadow-sm">
+          {task.returnNote}
+        </div>
+      )}
+
+      {/* Oct 2026 (CB: "I should be able to review what was submitted for the task"): the
+          note/file left at submit time (submitComplete below), shown right on the card for
+          whoever reviews it — previously there was nothing captured here at all beyond a
+          status flip. Shows for the employee's own view too ("What you submitted"), not just
+          the reviewer's, since it's useful either way. Persists through RETURNED (the last
+          thing that was actually turned in, alongside the reviewer's returnNote explaining
+          why it came back) and APPROVED, not just AWAITING_REVIEW. */}
+      {hasSubmission && (
+        <div className="rounded-lg bg-white/95 px-3 py-2 mt-2 shadow-sm">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-700 mb-0.5">
+            What {isOwnTask ? "you" : task.employeeName} submitted
+          </p>
+          {task.submissionNote && (
+            <p className="text-sm text-foreground whitespace-pre-wrap break-words">{task.submissionNote}</p>
+          )}
+          {task.hasSubmissionAttachment && (
+            <button
+              onClick={handleSubmissionDownload}
+              disabled={downloadingSubmission}
+              className="mt-1.5 flex items-center gap-1.5 text-xs font-semibold text-accent-ink underline underline-offset-2"
+            >
+              <DownloadIcon className="h-3.5 w-3.5" />
+              {task.submissionAttachmentName ?? "Attachment"}
+            </button>
+          )}
+        </div>
+      )}
+
+      {task.hasAttachment && (
+        <button
+          onClick={handleDownload}
+          disabled={downloading}
+          className="mt-1.5 flex items-center gap-1.5 text-xs font-medium text-white underline underline-offset-2 decoration-white/50 hover:decoration-white"
+        >
+          <DownloadIcon className="h-3.5 w-3.5" />
+          {task.attachmentName ?? "Attachment"}
+        </button>
+      )}
+
+      {actionError && <p className="text-xs font-medium text-white mt-1.5 bg-black/15 rounded px-2 py-1 inline-block">{actionError}</p>}
+
+      {isOwnTask && task.status === "ASSIGNED" && (
+        <button
+          onClick={() => runAction("start")}
+          disabled={busy}
+          className="mt-2 block text-xs font-semibold text-white underline underline-offset-2 decoration-white/50 hover:decoration-white disabled:opacity-50"
+        >
+          Start this task
+        </button>
+      )}
 
       {returning && (
         <div className="mt-2.5 flex flex-col sm:flex-row gap-2">
