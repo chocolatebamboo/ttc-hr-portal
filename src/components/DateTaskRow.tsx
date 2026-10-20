@@ -370,15 +370,12 @@ export default function DateTaskRow({
             </div>
           )}
           <div className="flex items-center gap-2 flex-wrap">
-            <p className={`text-sm font-semibold ${task.status === "APPROVED" ? "line-through text-white/70" : ""}`}>
-              {task.title}
-            </p>
             <span
               className="inline-flex items-center rounded-full bg-white px-2.5 py-0.5 text-[11px] font-semibold shrink-0 shadow-sm"
               style={{ color: ink }}
             >
               {STATUS_LABEL[task.status]}
-                          </span>
+            </span>
             {/* QA pass (Sept 2026): a simple priority flag — deliberately just this one badge,
                 shown only when URGENT, rather than a NORMAL badge nobody needs to see. Same
                 solid-white-pill treatment as the status badge, rose text stays constant
@@ -388,31 +385,45 @@ export default function DateTaskRow({
                 Urgent
               </span>
             )}
+            {showDate && <span className="text-xs text-white/75">{formatTaskDate(task.taskDate)}</span>}
           </div>
 
-          {showDate && <p className="text-xs text-white/75 mt-0.5">{formatTaskDate(task.taskDate)}</p>}
-
-          {task.description && (
-            <>
-              <p
-                ref={descRef}
-                className={`text-sm text-white/90 mt-1 whitespace-pre-wrap break-words ${
-                  descExpanded ? "" : "line-clamp-2"
-                }`}
-              >
-                {task.description}
-              </p>
-              {descOverflows && (
-                <button
-                  type="button"
-                  onClick={() => setDescExpanded((v) => !v)}
-                  className="text-xs font-semibold text-white underline underline-offset-2 decoration-white/50 hover:decoration-white mt-0.5"
+          {/* Oct 2026 (CB, on the title/description sitting straight on the amber gradient: "the
+              white is kind of conflicting with the yellow... it kind of just looks too cluttered
+              and clunky to me"): the title and description — the part an admin actually writes —
+              now sit on this light inset panel instead of plain white text on the gradient,
+              extending the same bg-white/95 treatment this card already uses for "what you
+              submitted" and the returnNote below. The status/urgent badges and date stay solid-
+              white pills directly on the gradient above, unchanged — only the free-text block
+              moved onto its own readable surface. */}
+          <div className="rounded-xl bg-white/95 px-3 py-2.5 mt-1.5 shadow-sm">
+            <p
+              className={`text-sm font-semibold text-foreground ${task.status === "APPROVED" ? "line-through text-muted" : ""}`}
+            >
+              {task.title}
+            </p>
+            {task.description && (
+              <>
+                <p
+                  ref={descRef}
+                  className={`text-sm text-muted mt-1 whitespace-pre-wrap break-words ${
+                    descExpanded ? "" : "line-clamp-2"
+                  }`}
                 >
-                  {descExpanded ? "Show less" : "Show more"}
-                </button>
-              )}
-            </>
-          )}
+                  {task.description}
+                </p>
+                {descOverflows && (
+                  <button
+                    type="button"
+                    onClick={() => setDescExpanded((v) => !v)}
+                    className="text-xs font-semibold text-accent-ink underline underline-offset-2 mt-0.5"
+                  >
+                    {descExpanded ? "Show less" : "Show more"}
+                  </button>
+                )}
+              </>
+            )}
+          </div>
 
           {task.status !== "APPROVED" && (
             <p className="text-xs text-white/75 mt-1.5">
