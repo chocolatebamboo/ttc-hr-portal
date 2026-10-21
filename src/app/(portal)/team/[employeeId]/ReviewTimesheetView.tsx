@@ -12,9 +12,33 @@ import { ChevronDownIcon } from "@/components/icons";
 import PayrollPeriodSwitcher from "@/components/PayrollPeriodSwitcher";
 import TimesheetTable, { type CorrectionValues, type ReviewControls } from "@/components/TimesheetTable";
 import WeeklyTotalSidebar, { type WeekBucket } from "@/components/WeeklyTotalSidebar";
-import type { TimeEntryDTO } from "@/types";
+import type { ShiftDTO, TimeEntryDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error" | "empty";
+
+/** Oct 2026 (CB, pointing at a week where several days had no entry at all: "it needs to reflect
+ *  appropriately here" — she wants the scheduled time shown there too, not just on a day that
+ *  already has a session). One entry per date, keyed the same "YYYY-MM-DD" way `days` already is
+ *  — only ever consulted for an entry-less day (see TimesheetTable's own shiftsByDate doc
+ *  comment), so there's no need to carry anything beyond the two times shown there.
+ *
+ *  CANCELLED/REASSIGNED excluded, same exclusion dashboard/page.tsx's own upcomingShifts filter
+ *  and time-actions.ts's own findShiftIdForCorrection already use — a cancelled or
+ *  reassigned-away shift was never really "the schedule" for this employee this day. When more
+ *  than one shift lands on the same date (a split shift — rare, but the data model allows it),
+ *  keeps whichever starts earliest, same "earliest first" idea this page's own week ordering
+ *  already leans on elsewhere. */
+function buildShiftsByDate(shifts: ShiftDTO[]): Map<string, { startTime: string; endTime: string }> {
+  const map = new Map<string, { startTime: string; endTime: string }>();
+  for (const s of shifts) {
+    if (s.status === "CANCELLED" || s.status === "REASSIGNED") continue;
+    const existing = map.get(s.date);
+    if (!existing || s.startTime < existing.startTime) {
+      map.set(s.date, { startTime: s.startTime, endTime: s.endTime });
+    }
+  }
+  return map;
+}
 
 /** Which of a pay period's two weeks should start open — the week containing `targetDate`
  *  (today, normally; a specific deep-linked date on first load — see the mount effect below),
@@ -68,6 +92,7 @@ export default function ReviewTimesheetView({
   const [offset, setOffset] = useState(0);
   const [openWeeks, setOpenWeeks] = useState(() => defaultOpenWeeks(0, todayDateKey()));
   const [entries, setEntries] = useState<TimeEntryDTO[]>([]);
+  const [shiftsByDate, setShiftsByDate] = useState<Map<string, { startTime: string; endTime: string }>>(new Map());
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [busyEntryId, setBusyEntryId] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -88,12 +113,19 @@ export default function ReviewTimesheetView({
   async function load() {
     setLoadState("loading");
     try {
-      const res = await fetch(
-        `/api/time/timesheet?employeeId=${employeeId}&start=${weeks.period.start}&end=${weeks.period.end}`
-      );
-      if (!res.ok) throw new Error();
-      const data = await res.json();
+      // Oct 2026: fetched alongside the entries themselves (not just when a day turns out to be
+      // entry-less) so the two land together — see buildShiftsByDate's own doc comment above.
+      // /api/shifts has no date-range filtering of its own today (it returns this employee's
+      // whole shift history), which is fine here: shiftsByDate is only ever looked up for one of
+      // this period's own days, so anything outside that range is simply never read.
+      const [entriesRes, shiftsRes] = await Promise.all([
+        fetch(`/api/time/timesheet?employeeId=${employeeId}&start=${weeks.period.start}&end=${weeks.period.end}`),
+        fetch(`/api/shifts?employeeId=${employeeId}`),
+      ]);
+      if (!entriesRes.ok) throw new Error();
+      const data = await entriesRes.json();
       setEntries(data.entries);
+      setShiftsByDate(shiftsRes.ok ? buildShiftsByDate((await shiftsRes.json()).shifts) : new Map());
       setLoadState(data.entries.length === 0 ? "empty" : "ready");
     } catch {
       setLoadState("error");
@@ -329,6 +361,7 @@ export default function ReviewTimesheetView({
               rangeLabel={formatWeekRange(weeks.week1.start, weeks.week1.end)}
               days={weeks.week1.days}
               entries={entries}
+              shiftsByDate={shiftsByDate}
               review={review}
               open={openWeeks.open1}
               onToggle={() => setOpenWeeks((w) => ({ ...w, open1: !w.open1 }))}
@@ -339,6 +372,7 @@ export default function ReviewTimesheetView({
               rangeLabel={formatWeekRange(weeks.week2.start, weeks.week2.end)}
               days={weeks.week2.days}
               entries={entries}
+              shiftsByDate={shiftsByDate}
               review={review}
               open={openWeeks.open2}
               onToggle={() => setOpenWeeks((w) => ({ ...w, open2: !w.open2 }))}
@@ -370,6 +404,7 @@ function WeekAccordionBlock({
   rangeLabel,
   days,
   entries,
+  shiftsByDate,
   review,
   open,
   onToggle,
@@ -379,6 +414,7 @@ function WeekAccordionBlock({
   rangeLabel: string;
   days: string[];
   entries: TimeEntryDTO[];
+  shiftsByDate: Map<string, { startTime: string; endTime: string }>;
   review: ReviewControls;
   open: boolean;
   onToggle: () => void;
@@ -403,7 +439,7 @@ function WeekAccordionBlock({
       </button>
       {open && (
         <div className="border-t border-border px-3 py-3">
-          <TimesheetTable days={days} entries={entries} review={review} hideSummaryBar />
+          <TimesheetTable days={days} entries={entries} shiftsByDate={shiftsByDate} review={review} hideSummaryBar />
         </div>
       )}
     </div>
