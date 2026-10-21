@@ -8,6 +8,46 @@ import { formatTime12h, formatReviewedAt } from "@/lib/availability-format";
 import { combineDateAndTime, formatClockTime, formatMinutes, todayDateKey, toTimeInputValue } from "@/lib/time";
 import type { ShiftStatus, TimeEntryDTO } from "@/types";
 
+/** A day's scheduled shift, as carried into this table whenever that day has no TimeEntry yet —
+ *  see TimesheetTable's own shiftsByDate doc comment below for the full story. Round sixteen
+ *  (CB, Oct 2026, on this same Wed card after round fifteen had already added the pill: "I'm not
+ *  seeing like the place where you approve the cancellation and stuff like that. It's like it
+ *  just says requested") widens this from just {startTime, endTime, displayStatus} to the shift's
+ *  own id plus its request details — approving/declining a request needs the shift's id to call
+ *  the API with, and approving a CHANGE_REQUESTED shift needs somewhere to seed the confirm
+ *  panel's date/time fields from (changeReason/requestedDate/requestedStartTime/requestedEndTime
+ *  — same four fields ShiftDTO itself already carries, see src/types/index.ts). */
+export interface ScheduledShiftInfo {
+  id: string;
+  startTime: string;
+  endTime: string;
+  displayStatus: ShiftStatus;
+  changeReason: string | null;
+  requestedDate: string | null;
+  requestedStartTime: string | null;
+  requestedEndTime: string | null;
+}
+
+/** Round sixteen (CB, Oct 2026 — see ScheduledShiftInfo's own doc comment above for the full
+ *  quote): lets a reviewer act on a pending CHANGE_REQUESTED/CANCELLATION_REQUESTED shift right
+ *  from this table's own card, instead of needing to go to Team Schedule for that. Same three
+ *  actions, same API routes, and same outcome (shift status change + notification back to the
+ *  employee) as Team Schedule's own Approve cancellation/Approve change/Decline request — see
+ *  those handlers in TeamScheduleView.tsx. Optional, same as ReviewControls.onEditTimes below:
+ *  omitted entirely by a caller that has no business approving/declining shift requests (e.g. a
+ *  plain read-only table), and then a pending request here still shows its ShiftStatusPill, just
+ *  with no action buttons under it. */
+export interface ShiftRequestControls {
+  onApproveCancellation: (shiftId: string) => void;
+  onApproveChange: (shiftId: string, date: string, startTime: string, endTime: string) => void;
+  onDecline: (shiftId: string, comment: string) => void;
+  /** The shift currently mid-request, so only its own card shows a busy state — same idea as
+   *  ReviewControls.busyEntryId, just keyed by shift id instead of entry id since the two never
+   *  collide but also never line up (an entry-less day only ever has a shift id here, never
+   *  both). */
+  busyShiftId: string | null;
+}
+
 export interface ReviewControls {
   onApprove: (entryId: string) => void;
   onReturn: (entryId: string, comment: string) => void;
@@ -88,6 +128,7 @@ export default function TimesheetTable({
   correction,
   hideSummaryBar,
   shiftsByDate,
+  shiftRequest,
 }: {
   days: string[]; // ISO date strings, Mon..Sun
   entries: TimeEntryDTO[];
@@ -111,8 +152,13 @@ export default function TimesheetTable({
    *  PM" with no hint it actually had a cancellation request sitting on it: "I just wanna make
    *  sure that it's in that view"): carries the shift's own displayStatus along with its times so
    *  TimesheetDayCard can flag a pending CHANGE_REQUESTED/CANCELLATION_REQUESTED right here too,
-   *  not just on Team Schedule — see the ShiftStatusPill usage below. */
-  shiftsByDate?: Map<string, { startTime: string; endTime: string; displayStatus: ShiftStatus }>;
+   *  not just on Team Schedule — see the ShiftStatusPill usage below.
+   *
+   *  Round sixteen widens each entry to the fuller ScheduledShiftInfo shape — see that type's own
+   *  doc comment above for why. */
+  shiftsByDate?: Map<string, ScheduledShiftInfo>;
+  /** Round sixteen — see ShiftRequestControls' own doc comment above. */
+  shiftRequest?: ShiftRequestControls;
 }) {
   const byDate = new Map(entries.map((e) => [e.workDate.slice(0, 10), e]));
   const weeklyMinutes = entries.reduce((sum, e) => sum + (e.totalMinutes ?? 0), 0);
@@ -135,6 +181,7 @@ export default function TimesheetTable({
             review={review}
             correction={correction}
             scheduledShift={!entry ? shiftsByDate?.get(day) : undefined}
+            shiftRequest={shiftRequest}
           />
         );
       })}
@@ -155,6 +202,7 @@ function TimesheetDayCard({
   review,
   correction,
   scheduledShift,
+  shiftRequest,
 }: {
   day: string;
   label: string;
@@ -163,7 +211,9 @@ function TimesheetDayCard({
   correction?: CorrectionControls;
   /** Already resolved to "only when this day has no entry" by the caller above — see
    *  TimesheetTable's own shiftsByDate doc comment. */
-  scheduledShift?: { startTime: string; endTime: string; displayStatus: ShiftStatus };
+  scheduledShift?: ScheduledShiftInfo;
+  /** Round sixteen — see ShiftRequestControls' own doc comment above. */
+  shiftRequest?: ShiftRequestControls;
 }) {
   const [returning, setReturning] = useState(false);
   const [comment, setComment] = useState("");
@@ -173,6 +223,28 @@ function TimesheetDayCard({
   // tapping the time range itself (see isReviewEditable's own doc comment on ReviewControls).
   // Only ever meaningful when isReviewEditable is true; otherwise never read.
   const [menuOpen, setMenuOpen] = useState(false);
+  // Round sixteen — the two panels Approve change/Decline request can open on a pending shift
+  // request, same toggle-a-panel idea as `returning` above but for a shift instead of a time
+  // entry (distinct state so the two families of actions never collide on the same card — a day
+  // only ever has one or the other in practice, since a day with sessions has no scheduledShift
+  // at all, but keeping them separate avoids relying on that). approveDate/Start/EndTime seed
+  // from the request's own proposed time when the panel opens — see toggleApprovingChange below.
+  const [decliningRequest, setDecliningRequest] = useState(false);
+  const [declineRequestComment, setDeclineRequestComment] = useState("");
+  const [approvingChange, setApprovingChange] = useState(false);
+  const [approveDate, setApproveDate] = useState("");
+  const [approveStartTime, setApproveStartTime] = useState("");
+  const [approveEndTime, setApproveEndTime] = useState("");
+
+  function toggleApprovingChange() {
+    const opening = !approvingChange;
+    setApprovingChange(opening);
+    if (opening && scheduledShift) {
+      setApproveDate(scheduledShift.requestedDate ?? day);
+      setApproveStartTime(scheduledShift.requestedStartTime ?? scheduledShift.startTime);
+      setApproveEndTime(scheduledShift.requestedEndTime ?? scheduledShift.endTime);
+    }
+  }
 
   const isReviewBusy = review?.busyEntryId === entry?.id;
   const isCorrectionBusy = correction?.busyEntryId === entry?.id;
@@ -325,7 +397,7 @@ function TimesheetDayCard({
             // a day that has no entry at all yet — "Not Logged" (past/today) or "Upcoming"
             // (later this week), so there's still something to check against instead of a bare
             // dash. See TimesheetTable's own shiftsByDate doc comment above.
-            <div className="flex flex-col items-start gap-1">
+            <div className="flex flex-col items-start gap-1.5 w-full">
               <span className="text-sm text-muted">
                 Scheduled {formatTime12h(scheduledShift.startTime)} – {formatTime12h(scheduledShift.endTime)}
               </span>
@@ -335,7 +407,130 @@ function TimesheetDayCard({
                   before. */}
               {(scheduledShift.displayStatus === "CHANGE_REQUESTED" ||
                 scheduledShift.displayStatus === "CANCELLATION_REQUESTED") && (
-                <ShiftStatusPill status={scheduledShift.displayStatus} />
+                <>
+                  <ShiftStatusPill status={scheduledShift.displayStatus} />
+                  {scheduledShift.changeReason && (
+                    <p className="text-xs text-muted">
+                      {scheduledShift.displayStatus === "CHANGE_REQUESTED" &&
+                        scheduledShift.requestedDate &&
+                        scheduledShift.requestedStartTime &&
+                        scheduledShift.requestedEndTime &&
+                        `Requested ${new Date(`${scheduledShift.requestedDate}T00:00:00`).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} · ${formatTime12h(scheduledShift.requestedStartTime)} – ${formatTime12h(scheduledShift.requestedEndTime)} — `}
+                      &ldquo;{scheduledShift.changeReason}&rdquo;
+                    </p>
+                  )}
+                  {/* Round sixteen (CB, Oct 2026, on this same Wed card: "I'm not seeing like the
+                      place where you approve the cancellation and stuff like that. It's like it
+                      just says requested"): same two actions, same API routes, as Team Schedule's
+                      own Approve/Decline — see ShiftRequestControls' own doc comment above for the
+                      full story. Only rendered when a caller actually wired shiftRequest in. */}
+                  {shiftRequest && (
+                    <>
+                      <div className="flex gap-4">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            scheduledShift.displayStatus === "CANCELLATION_REQUESTED"
+                              ? shiftRequest.onApproveCancellation(scheduledShift.id)
+                              : toggleApprovingChange()
+                          }
+                          disabled={shiftRequest.busyShiftId === scheduledShift.id}
+                          className="text-xs font-medium text-accent-ink hover:underline"
+                        >
+                          {scheduledShift.displayStatus === "CANCELLATION_REQUESTED"
+                            ? "Approve cancellation"
+                            : "Approve change"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDecliningRequest((d) => !d);
+                            setDeclineRequestComment("");
+                          }}
+                          disabled={shiftRequest.busyShiftId === scheduledShift.id}
+                          className="text-xs font-medium text-accent hover:underline"
+                        >
+                          Decline request
+                        </button>
+                      </div>
+                      {approvingChange && scheduledShift.displayStatus === "CHANGE_REQUESTED" && (
+                        <div className="flex flex-col gap-2 bg-black/[0.02] rounded-lg p-3 w-full">
+                          <label className="flex flex-col gap-1">
+                            <span className="text-xs text-muted">Date</span>
+                            <input
+                              type="date"
+                              value={approveDate}
+                              onChange={(e) => setApproveDate(e.target.value)}
+                              className="rounded-md border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
+                            />
+                          </label>
+                          <div className="flex items-end gap-2">
+                            <TimeField label="Start" value={approveStartTime} onChange={setApproveStartTime} />
+                            <TimeField label="End" value={approveEndTime} onChange={setApproveEndTime} />
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => {
+                                shiftRequest.onApproveChange(
+                                  scheduledShift.id,
+                                  approveDate,
+                                  approveStartTime,
+                                  approveEndTime
+                                );
+                                setApprovingChange(false);
+                              }}
+                              disabled={
+                                !approveDate ||
+                                !approveStartTime ||
+                                !approveEndTime ||
+                                shiftRequest.busyShiftId === scheduledShift.id
+                              }
+                              className="btn-primary text-xs px-3 py-1.5"
+                            >
+                              {shiftRequest.busyShiftId === scheduledShift.id ? "Saving…" : "Confirm approval"}
+                            </button>
+                            <button
+                              onClick={() => setApprovingChange(false)}
+                              className="btn-neutral text-xs px-3 py-1.5"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      {decliningRequest && (
+                        <div className="flex flex-col gap-2 bg-black/[0.02] rounded-lg p-3 w-full">
+                          <textarea
+                            value={declineRequestComment}
+                            onChange={(e) => setDeclineRequestComment(e.target.value)}
+                            placeholder="Optional note back to them…"
+                            rows={2}
+                            className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-accent"
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => {
+                                shiftRequest.onDecline(scheduledShift.id, declineRequestComment.trim());
+                                setDecliningRequest(false);
+                                setDeclineRequestComment("");
+                              }}
+                              disabled={shiftRequest.busyShiftId === scheduledShift.id}
+                              className="btn-primary text-xs px-3 py-1.5"
+                            >
+                              {shiftRequest.busyShiftId === scheduledShift.id ? "Saving…" : "Confirm decline"}
+                            </button>
+                            <button
+                              onClick={() => setDecliningRequest(false)}
+                              className="btn-neutral text-xs px-3 py-1.5"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </>
               )}
             </div>
           ) : (
