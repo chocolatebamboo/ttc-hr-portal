@@ -157,10 +157,26 @@ function groupUpcomingByEmployee(upcomingShifts: AdminShiftDTO[]): UpcomingEmplo
 const UPCOMING_COLLAPSED_COUNT = 4;
 
 /** One row of either the "Who's working right now" or "Today" list — same visual shape either
- *  way, just a different source array, so this is shared instead of copy-pasted twice. */
+ *  way, just a different source array, so this is shared instead of copy-pasted twice.
+ *
+ *  Oct 2026 (CB, circling a "Cancellation requested" row right here on Home: "I only could see
+ *  [the request] in the full schedule tab, but I should be able to click in that area as well
+ *  and see it reflect that information"): a row sitting on a change/cancellation request used to
+ *  link to `/team/${employeeId}` same as every other row — the employee review page, which has
+ *  no shift/request content at all (just Timesheet/Time Off/Availability/Notes). There's no
+ *  dedicated request-detail view anywhere in this app to send it to instead — approving/denying
+ *  a request only exists as inline controls on that shift's own row in TeamScheduleView.tsx
+ *  (src/app/(portal)/team/schedule) — so this instead reuses the exact link the Upcoming list
+ *  below already sends a row to (`/team/schedule?employeeId=...`), which that page already reads
+ *  on load to filter straight to this one person, request and all, rather than inventing a new
+ *  shiftId-based deep link this page doesn't support. Every other status keeps the original
+ *  `/team/${employeeId}` link unchanged — that's still the more useful destination for an
+ *  ordinary working/completed/missed shift. */
 function ShiftGlanceRow({ s }: { s: AdminShiftDTO }) {
+  const hasPendingRequest = s.displayStatus === "CHANGE_REQUESTED" || s.displayStatus === "CANCELLATION_REQUESTED";
+  const href = hasPendingRequest ? `/team/schedule?employeeId=${s.employeeId}` : `/team/${s.employeeId}`;
   return (
-    <Link href={`/team/${s.employeeId}`} className="flex items-center gap-2.5 px-4 py-3 hover:bg-black/[0.02]">
+    <Link href={href} className="flex items-center gap-2.5 px-4 py-3 hover:bg-black/[0.02]">
       {s.employeeAvatarUrl ? (
         // eslint-disable-next-line @next/next/no-img-element -- public storage URL
         <img
