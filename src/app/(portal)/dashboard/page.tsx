@@ -221,6 +221,7 @@ export default async function DashboardPage() {
             shifts={todaysShifts}
             upcomingShifts={upcomingShifts}
             currentlyClockedIn={currentlyClockedIn}
+            canForceClockOut={employee.canEditFlaggedTimeEntries}
           />
         )}
 
@@ -320,6 +321,7 @@ export default async function DashboardPage() {
               shifts={todaysShifts}
               upcomingShifts={upcomingShifts}
               currentlyClockedIn={currentlyClockedIn}
+              canForceClockOut={employee.canEditFlaggedTimeEntries}
             />
           )}
 
