@@ -422,6 +422,31 @@ async function loadShiftRow(tx: PrismaClient, shiftId: string): Promise<ShiftRow
   return row;
 }
 
+export interface ShiftLocationInfo {
+  employeeId: string;
+  date: string;
+}
+
+/**
+ * Round fifteen (CB, Oct 2026, pointing at a shift-cancellation notification that was taking her
+ * to Team Schedule: "that's not how it was before... remember, it was this view" — meaning
+ * ReviewTimesheetView, /team/[employeeId]): a SHIFT_REQUEST_RECEIVED notification's own targetId
+ * is just the Shift's id (see writeNotification's calls in requestShiftChange/
+ * requestShiftCancellation above) — nowhere near enough to build a /team/[employeeId] link on its
+ * own. This resolves just enough about the shift (which employee, which date) for
+ * NotificationBell's click handler to do that lookup client-side before navigating — see
+ * GET /api/shifts/[shiftId]. Same self-or-supervisor/admin access rule
+ * listShiftsForEmployee/GET /api/shifts already use, via assertCanAccessEmployeeRecords, since
+ * this is a read for navigation purposes, not a management action.
+ */
+export async function getShiftLocation(actor: CurrentEmployee, shiftId: string): Promise<ShiftLocationInfo> {
+  return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    const existing = await loadShiftRow(tx, shiftId);
+    await assertCanAccessEmployeeRecords(actor, existing.employeeId);
+    return { employeeId: existing.employeeId, date: existing.date };
+  });
+}
+
 /** The handful of fields the "Add to Calendar" feature (CB, Oct 2026) needs — see
  *  src/lib/ics.ts for the actual .ics generation and
  *  src/app/api/shifts/[shiftId]/ics/route.ts for where the two meet. */
