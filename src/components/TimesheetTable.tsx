@@ -426,7 +426,13 @@ function TimesheetDayCard({
                       full story. Only rendered when a caller actually wired shiftRequest in. */}
                   {shiftRequest && (
                     <>
-                      <div className="flex gap-4">
+                      {/* CB, Oct 2026, right after this round first went live: "can we make them
+                          into buttons instead of it just being the color... like the app
+                          approved and decline stuff" — these were text links (Team Schedule's
+                          own treatment for the same two actions); now real buttons, same
+                          btn-primary/btn-neutral pairing as the Approve/Return row just below on
+                          this very card. */}
+                      <div className="flex gap-2 w-full">
                         <button
                           type="button"
                           onClick={() =>
@@ -435,7 +441,7 @@ function TimesheetDayCard({
                               : toggleApprovingChange()
                           }
                           disabled={shiftRequest.busyShiftId === scheduledShift.id}
-                          className="text-xs font-medium text-accent-ink hover:underline"
+                          className="btn-primary text-xs px-3 py-1.5 flex-1 justify-center"
                         >
                           {scheduledShift.displayStatus === "CANCELLATION_REQUESTED"
                             ? "Approve cancellation"
@@ -448,7 +454,7 @@ function TimesheetDayCard({
                             setDeclineRequestComment("");
                           }}
                           disabled={shiftRequest.busyShiftId === scheduledShift.id}
-                          className="text-xs font-medium text-accent hover:underline"
+                          className="btn-neutral text-xs px-3 py-1.5 flex-1 justify-center"
                         >
                           Decline request
                         </button>
