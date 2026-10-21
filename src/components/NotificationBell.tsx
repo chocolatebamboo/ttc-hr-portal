@@ -39,6 +39,13 @@ const POLL_MS = 45_000;
 // again — DateTasksPanel, where a reviewer actually approves/returns a submitted task, lives on
 // the Team Schedule page; the review-reminder notification points a reviewer at the exact same
 // place the original submit notification already does).
+//
+// Round fifteen (CB, Oct 2026, pointing at a shift-cancellation notification that kept landing
+// her on Team Schedule: "that's not how it was before... remember, it was this view" — meaning
+// the team member's own Review Timesheet page): SHIFT_REQUEST_RECEIVED's own target here is now
+// just the fallback for when the shift-location lookup below can't resolve (deleted shift,
+// offline, etc.) — see handleClick's own async override just below, which is what actually
+// fires for this notification type in the normal case.
 function targetHref(n: NotificationDTO): string {
   if (n.targetType === "Shift") {
     return n.type === "SHIFT_REQUEST_RECEIVED" ? "/team/schedule" : "/schedule";
@@ -157,6 +164,25 @@ export default function NotificationBell() {
       setNotifications((prev) => prev.map((row) => (row.id === n.id ? { ...row, read: true } : row)));
       setUnreadCount((c) => Math.max(0, c - 1));
       fetch(`/api/notifications/${n.id}/read`, { method: "POST" }).catch(() => {});
+    }
+    // Round fifteen (CB, Oct 2026): SHIFT_REQUEST_RECEIVED's own targetId is just the shift's
+    // id — not enough on its own to build a /team/[employeeId] link, so this resolves which
+    // employee (and date, for the same ?week= deep link ReviewTimesheetView's Reports-page
+    // banner already uses) the shift belongs to before navigating there instead of the flat
+    // Team Schedule list targetHref falls back to. Best-effort: any failure here (deleted
+    // shift, offline, not authorized any more) just falls through to that same fallback rather
+    // than leaving the click stuck.
+    if (n.targetType === "Shift" && n.type === "SHIFT_REQUEST_RECEIVED") {
+      try {
+        const res = await fetch(`/api/shifts/${n.targetId}`);
+        if (res.ok) {
+          const location: { employeeId: string; date: string } = await res.json();
+          router.push(`/team/${location.employeeId}?week=${location.date}`);
+          return;
+        }
+      } catch {
+        // falls through to targetHref's fallback below
+      }
     }
     router.push(targetHref(n));
   }
