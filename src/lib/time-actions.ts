@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { withRlsContext } from "@/lib/db";
-import { CLOCK_IN_WINDOW_MINUTES, computeTotalMinutes, orgNow, timeToMinutes, todayDateKey } from "@/lib/time";
+import { CLOCK_IN_WINDOW_MINUTES, computeTotalMinutes, orgNow, timeToMinutes, todayDateKey, zonedDateTimeToUtc } from "@/lib/time";
 import type { CurrentEmployee, TimeClockState } from "@/types";
 
 export class InvalidClockActionError extends Error {
@@ -353,6 +353,51 @@ function describeSessions(list: { clockIn: Date; clockOut: Date | null }[]): str
 }
 
 /**
+ * Oct 2026 (CB, looking at a corrected day in Review Timesheet with no "Scheduled ___" line
+ * under it: "when we correct something I should be able to see what was the scheduled time as
+ * well"). submitEmployeeCorrection/submitReviewerCorrection below both replace a day's sessions
+ * wholesale (delete-then-recreate — see their own doc comments for why), and neither ever set
+ * the new rows' `shiftId` — so a session that matched a real scheduled shift at clock-in (and
+ * would otherwise show "Scheduled ___" right next to the recorded time, per TimesheetTable's own
+ * doc comment on that exact line) went permanently quiet on that comparison the moment anyone
+ * corrected the day, even though the schedule it should be checked against never changed. This
+ * re-resolves that schedule fresh from the entry's own employeeId/workDate (not from whatever the
+ * old sessions happened to be pointing at, which could itself already be stale) so every call
+ * site below can just attach it to the rows it's about to create.
+ *
+ * CANCELLED/REASSIGNED excluded, same exclusion dashboard/page.tsx's own upcomingShifts filter
+ * already uses — a cancelled or reassigned-away shift was never really "the schedule" for this
+ * employee this day. When more than one shift matches (a split shift — rare, but the data model
+ * allows it), picks whichever starts closest to the day's own earliest session, same nearest-
+ * match idea resolveClockInShift already uses for a live clock-in, just scored against the day's
+ * real recorded times instead of "right now." Returns null (and leaves shiftId null, same as an
+ * ordinary ad-hoc clock-in with nothing on the books) when nothing was ever scheduled that day —
+ * nothing new to compare against, so TimesheetTable's "Scheduled ___" line correctly stays quiet.
+ */
+async function findShiftIdForCorrection(
+  tx: PrismaClient,
+  employeeId: string,
+  workDate: Date,
+  sessions: CorrectionSessionInput[]
+): Promise<string | null> {
+  const dateKey = workDate.toISOString().slice(0, 10);
+  const candidates = await tx.shift.findMany({
+    where: { employeeId, date: dateKey, status: { notIn: ["CANCELLED", "REASSIGNED"] } },
+    select: { id: true, startTime: true },
+  });
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0].id;
+
+  const earliestClockIn = sessions.reduce((min, s) => (s.clockIn < min ? s.clockIn : min), sessions[0].clockIn).getTime();
+  const nearest = candidates.reduce((best, c) => {
+    const bestStart = zonedDateTimeToUtc(dateKey, best.startTime).getTime();
+    const cStart = zonedDateTimeToUtc(dateKey, c.startTime).getTime();
+    return Math.abs(cStart - earliestClockIn) < Math.abs(bestStart - earliestClockIn) ? c : best;
+  });
+  return nearest.id;
+}
+
+/**
  * Closes the loop a supervisor's Return opens: the employee edits their own returned day
  * (now a list of sessions, not four fixed fields) and resubmits it. Only reachable on the
  * employee's OWN entry, and only while its status is RETURNED — an approved or in-progress day
@@ -379,10 +424,11 @@ export async function submitEmployeeCorrection(
 
     const oldSummary = describeSessions(entry.sessions);
     const newSummary = describeSessions(sorted);
+    const shiftId = await findShiftIdForCorrection(tx, entry.employeeId, entry.workDate, sorted);
 
     await tx.timeSession.deleteMany({ where: { timeEntryId: entryId } });
     await tx.timeSession.createMany({
-      data: sorted.map((s) => ({ timeEntryId: entryId, clockIn: s.clockIn, clockOut: s.clockOut })),
+      data: sorted.map((s) => ({ timeEntryId: entryId, clockIn: s.clockIn, clockOut: s.clockOut, shiftId })),
     });
 
     const totalMinutes = computeTotalMinutes(sorted);
@@ -448,10 +494,11 @@ export async function submitReviewerCorrection(
 
     const oldSummary = describeSessions(entry.sessions);
     const newSummary = describeSessions(sorted);
+    const shiftId = await findShiftIdForCorrection(tx, entry.employeeId, entry.workDate, sorted);
 
     await tx.timeSession.deleteMany({ where: { timeEntryId: entryId } });
     await tx.timeSession.createMany({
-      data: sorted.map((s) => ({ timeEntryId: entryId, clockIn: s.clockIn, clockOut: s.clockOut })),
+      data: sorted.map((s) => ({ timeEntryId: entryId, clockIn: s.clockIn, clockOut: s.clockOut, shiftId })),
     });
 
     const totalMinutes = computeTotalMinutes(sorted);
