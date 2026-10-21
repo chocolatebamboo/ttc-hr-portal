@@ -159,22 +159,21 @@ const UPCOMING_COLLAPSED_COUNT = 4;
 /** One row of either the "Who's working right now" or "Today" list — same visual shape either
  *  way, just a different source array, so this is shared instead of copy-pasted twice.
  *
- *  Oct 2026 (CB, circling a "Cancellation requested" row right here on Home: "I only could see
- *  [the request] in the full schedule tab, but I should be able to click in that area as well
- *  and see it reflect that information"): a row sitting on a change/cancellation request used to
- *  link to `/team/${employeeId}` same as every other row — the employee review page, which has
- *  no shift/request content at all (just Timesheet/Time Off/Availability/Notes). There's no
- *  dedicated request-detail view anywhere in this app to send it to instead — approving/denying
- *  a request only exists as inline controls on that shift's own row in TeamScheduleView.tsx
- *  (src/app/(portal)/team/schedule) — so this instead reuses the exact link the Upcoming list
- *  below already sends a row to (`/team/schedule?employeeId=...`), which that page already reads
- *  on load to filter straight to this one person, request and all, rather than inventing a new
- *  shiftId-based deep link this page doesn't support. Every other status keeps the original
- *  `/team/${employeeId}` link unchanged — that's still the more useful destination for an
- *  ordinary working/completed/missed shift. */
+ *  Round fifteen (CB, Oct 2026, circling this exact "Cancellation requested" row a second time:
+ *  "I'm still not seeing it, I'm still getting this page whenever we click"): the previous round
+ *  (see git history on this doc comment) sent a pending-request row to
+ *  `/team/schedule?employeeId=...` instead, since that's the only page with actual
+ *  approve/decline controls on it. CB confirmed she'd rather land on this employee's own
+ *  Timesheet/Schedule page instead — the same page the "Scheduled ___"/pending-request pill was
+ *  just added to (TimesheetTable.tsx) — and go to Team Schedule separately when she actually
+ *  wants to act on the request. So every row here, request or not, now links to
+ *  `/team/${employeeId}?week=<date>` same as NotificationBell's own SHIFT_REQUEST_RECEIVED
+ *  click does (see that file's own doc comment) — the `?week=` carries this shift's own date so
+ *  ReviewTimesheetView's existing deep-link handling (its own doc comment on that query param)
+ *  opens straight to the pay period/week this shift actually falls in, not just whatever's
+ *  current. */
 function ShiftGlanceRow({ s }: { s: AdminShiftDTO }) {
-  const hasPendingRequest = s.displayStatus === "CHANGE_REQUESTED" || s.displayStatus === "CANCELLATION_REQUESTED";
-  const href = hasPendingRequest ? `/team/schedule?employeeId=${s.employeeId}` : `/team/${s.employeeId}`;
+  const href = `/team/${s.employeeId}?week=${s.date}`;
   return (
     <Link href={href} className="flex items-center gap-2.5 px-4 py-3 hover:bg-black/[0.02]">
       {s.employeeAvatarUrl ? (
