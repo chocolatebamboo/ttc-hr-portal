@@ -86,6 +86,7 @@ export default function TimesheetTable({
   review,
   correction,
   hideSummaryBar,
+  shiftsByDate,
 }: {
   days: string[]; // ISO date strings, Mon..Sun
   entries: TimeEntryDTO[];
@@ -94,6 +95,17 @@ export default function TimesheetTable({
   /** Suppress the built-in "Weekly total" bar below the day stack — for a caller that renders
    *  its own weekly total elsewhere (ReviewTimesheetView's desktop sidebar). */
   hideSummaryBar?: boolean;
+  /** Oct 2026 (CB, looking at a week where several days had no entry at all yet: "it needs to
+   *  reflect appropriately here" — she wants the scheduled time to show on those days too, not
+   *  just on a day that already has a corrected/recorded session — see the "Scheduled ___" line
+   *  elsewhere in this file for the existing per-session version of the same idea). Keyed by the
+   *  same "YYYY-MM-DD" day string `days` already uses; only ever consulted for a day with NO
+   *  TimeEntry (see TimesheetDayCard below) — a day that already has sessions keeps using each
+   *  session's own scheduledStartTime/EndTime instead, which can legitimately differ from this if
+   *  a shift was changed after the fact. Optional — a caller with no schedule data to offer (or
+   *  that doesn't care, e.g. a quick read-only table) just omits it and every day falls back to
+   *  today's plain "—"/"Upcoming" treatment, unchanged. */
+  shiftsByDate?: Map<string, { startTime: string; endTime: string }>;
 }) {
   const byDate = new Map(entries.map((e) => [e.workDate.slice(0, 10), e]));
   const weeklyMinutes = entries.reduce((sum, e) => sum + (e.totalMinutes ?? 0), 0);
@@ -108,7 +120,15 @@ export default function TimesheetTable({
           day: "numeric",
         });
         return (
-          <TimesheetDayCard key={day} day={day} label={label} entry={entry} review={review} correction={correction} />
+          <TimesheetDayCard
+            key={day}
+            day={day}
+            label={label}
+            entry={entry}
+            review={review}
+            correction={correction}
+            scheduledShift={!entry ? shiftsByDate?.get(day) : undefined}
+          />
         );
       })}
       {!hideSummaryBar && (
@@ -127,12 +147,16 @@ function TimesheetDayCard({
   entry,
   review,
   correction,
+  scheduledShift,
 }: {
   day: string;
   label: string;
   entry: TimeEntryDTO | undefined;
   review?: ReviewControls;
   correction?: CorrectionControls;
+  /** Already resolved to "only when this day has no entry" by the caller above — see
+   *  TimesheetTable's own shiftsByDate doc comment. */
+  scheduledShift?: { startTime: string; endTime: string };
 }) {
   const [returning, setReturning] = useState(false);
   const [comment, setComment] = useState("");
@@ -289,6 +313,14 @@ function TimesheetDayCard({
               </TimeDropdownTrigger>
               {menuOpen && <AdjustTimeMenu onSelect={startEditing} />}
             </div>
+          ) : scheduledShift ? (
+            // Oct 2026 (CB): same "Scheduled ___" wording as the per-session line above, just for
+            // a day that has no entry at all yet — "Not Logged" (past/today) or "Upcoming"
+            // (later this week), so there's still something to check against instead of a bare
+            // dash. See TimesheetTable's own shiftsByDate doc comment above.
+            <span className="text-sm text-muted">
+              Scheduled {formatTime12h(scheduledShift.startTime)} – {formatTime12h(scheduledShift.endTime)}
+            </span>
           ) : (
             <span className="text-sm text-muted">—</span>
           )}
