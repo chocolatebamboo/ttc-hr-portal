@@ -477,6 +477,95 @@ export async function submitReviewerCorrection(
   });
 }
 
+/**
+ * Oct 2026 (CB, looking at Donique's card running 5h21m past her scheduled end on the Home
+ * dashboard's "Clocked in now": "I feel like there should be kind of an option... from an admin
+ * perspective... to stop it and correct it"). Everything above this point only ever touches an
+ * entry that's already CLOSED — submitReviewerCorrection requires both a clockIn AND a clockOut
+ * for every session, so it has no way to act on a session that's still actively open right now.
+ * autoCloseStaleClockIns (src/lib/auto-clockout.ts) is the only thing that ever force-closes a
+ * live session today, and only once it's been open 4 hours — this is the same idea (force-close,
+ * prefer the schedule over whatever time it happens to be), just reachable immediately instead
+ * of waiting on that cap, for the one open session the caller is actually looking at.
+ *
+ * Same "actually Shawn or CB, and actually allowed to reach this employee's records" authorization
+ * split as submitReviewerCorrection just above — assertCanEditFlaggedTimeEntries is the caller's
+ * job (see POST /api/time/sessions/[id]/force-clock-out), not re-checked in here, since this is
+ * the same class of action (changing someone else's recorded clock time) CB restricted to just
+ * the two of them.
+ *
+ * Deliberately narrow: only ever closes the ONE open session passed in, lands the day on
+ * APPROVED exactly like submitReviewerCorrection does (the reviewer setting the time IS the
+ * review), and refuses outright if this employee's day somehow already has a different open
+ * session too (shouldn't be possible — a person can only be clocked in once at a time — but
+ * failing loudly here beats silently guessing which one was meant).
+ */
+export async function forceClockOutSession(
+  reviewer: CurrentEmployee,
+  sessionId: string,
+  clockOut: Date
+) {
+  return withRlsContext({ employeeId: reviewer.id, role: reviewer.role }, async (tx) => {
+    const session = await tx.timeSession.findUnique({
+      where: { id: sessionId },
+      select: {
+        id: true,
+        clockIn: true,
+        clockOut: true,
+        timeEntryId: true,
+        timeEntry: { select: { employeeId: true, sessions: true } },
+      },
+    });
+    if (!session) {
+      throw new InvalidCorrectionError("That clock-in session couldn't be found.");
+    }
+    if (session.clockOut) {
+      throw new InvalidCorrectionError("This session is already clocked out.");
+    }
+    if (clockOut <= session.clockIn) {
+      throw new InvalidCorrectionError("Clock-out time must be after the clock-in time.");
+    }
+    if (clockOut > new Date()) {
+      throw new InvalidCorrectionError("Clock-out time can't be in the future.");
+    }
+
+    const siblingSessions = session.timeEntry.sessions.filter((s) => s.id !== sessionId);
+    if (siblingSessions.some((s) => !s.clockOut)) {
+      throw new InvalidCorrectionError("This day already has another open session — correct it from Review Timesheet instead.");
+    }
+
+    const oldSummary = describeSessions(session.timeEntry.sessions);
+    const candidate: CorrectionSessionInput[] = [
+      ...siblingSessions.map((s) => ({ clockIn: s.clockIn, clockOut: s.clockOut as Date })),
+      { clockIn: session.clockIn, clockOut },
+    ];
+    const sorted = assertValidSessions(candidate);
+
+    await tx.timeSession.update({ where: { id: sessionId }, data: { clockOut } });
+
+    const totalMinutes = computeTotalMinutes(sorted);
+    const updated = await tx.timeEntry.update({
+      where: { id: session.timeEntryId },
+      data: { totalMinutes, status: "APPROVED" },
+      include: { sessions: { orderBy: { clockIn: "asc" } } },
+    });
+
+    await tx.timeEntryAuditEvent.create({
+      data: {
+        timeEntryId: session.timeEntryId,
+        action: "HR_CORRECTION",
+        actorId: reviewer.id,
+        fieldName: "clockOut",
+        oldValue: oldSummary,
+        newValue: describeSessions(sorted),
+        comment: "Clocked out from an active session and corrected the time.",
+      },
+    });
+
+    return updated;
+  });
+}
+
 export class InvalidTimeEntryDeleteError extends Error {
   constructor(message: string) {
     super(message);
