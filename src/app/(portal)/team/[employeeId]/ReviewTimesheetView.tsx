@@ -10,9 +10,14 @@ import {
 import { formatMinutes, todayDateKey } from "@/lib/time";
 import { ChevronDownIcon } from "@/components/icons";
 import PayrollPeriodSwitcher from "@/components/PayrollPeriodSwitcher";
-import TimesheetTable, { type CorrectionValues, type ReviewControls } from "@/components/TimesheetTable";
+import TimesheetTable, {
+  type CorrectionValues,
+  type ReviewControls,
+  type ScheduledShiftInfo,
+  type ShiftRequestControls,
+} from "@/components/TimesheetTable";
 import WeeklyTotalSidebar, { type WeekBucket } from "@/components/WeeklyTotalSidebar";
-import type { ShiftDTO, ShiftStatus, TimeEntryDTO } from "@/types";
+import type { ShiftDTO, TimeEntryDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error" | "empty";
 
@@ -33,16 +38,29 @@ type LoadState = "loading" | "ready" | "error" | "empty";
  *  "I just wanna make sure that it's in that view"): now also carries the shift's own
  *  displayStatus through, so TimesheetTable can flag a pending CHANGE_REQUESTED/
  *  CANCELLATION_REQUESTED right on the card instead of this view silently treating every
- *  unresolved status the same as a plain confirmed UPCOMING shift. */
-function buildShiftsByDate(
-  shifts: ShiftDTO[]
-): Map<string, { startTime: string; endTime: string; displayStatus: ShiftStatus }> {
-  const map = new Map<string, { startTime: string; endTime: string; displayStatus: ShiftStatus }>();
+ *  unresolved status the same as a plain confirmed UPCOMING shift.
+ *
+ *  Round sixteen (CB, Oct 2026, on that same Wed card after round fifteen: "I'm not seeing like
+ *  the place where you approve the cancellation and stuff like that"): widens each entry to
+ *  ScheduledShiftInfo (id + the request's own changeReason/requestedDate/requestedStartTime/
+ *  requestedEndTime) — see that type's own doc comment in TimesheetTable.tsx for why Approve/
+ *  Decline need all of it, not just the display status. */
+function buildShiftsByDate(shifts: ShiftDTO[]): Map<string, ScheduledShiftInfo> {
+  const map = new Map<string, ScheduledShiftInfo>();
   for (const s of shifts) {
     if (s.status === "CANCELLED" || s.status === "REASSIGNED") continue;
     const existing = map.get(s.date);
     if (!existing || s.startTime < existing.startTime) {
-      map.set(s.date, { startTime: s.startTime, endTime: s.endTime, displayStatus: s.displayStatus });
+      map.set(s.date, {
+        id: s.id,
+        startTime: s.startTime,
+        endTime: s.endTime,
+        displayStatus: s.displayStatus,
+        changeReason: s.changeReason,
+        requestedDate: s.requestedDate,
+        requestedStartTime: s.requestedStartTime,
+        requestedEndTime: s.requestedEndTime,
+      });
     }
   }
   return map;
@@ -100,11 +118,10 @@ export default function ReviewTimesheetView({
   const [offset, setOffset] = useState(0);
   const [openWeeks, setOpenWeeks] = useState(() => defaultOpenWeeks(0, todayDateKey()));
   const [entries, setEntries] = useState<TimeEntryDTO[]>([]);
-  const [shiftsByDate, setShiftsByDate] = useState<
-    Map<string, { startTime: string; endTime: string; displayStatus: ShiftStatus }>
-  >(new Map());
+  const [shiftsByDate, setShiftsByDate] = useState<Map<string, ScheduledShiftInfo>>(new Map());
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [busyEntryId, setBusyEntryId] = useState<string | null>(null);
+  const [busyShiftId, setBusyShiftId] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [actionError, setActionError] = useState("");
   const [actionNotice, setActionNotice] = useState("");
@@ -246,6 +263,82 @@ export default function ReviewTimesheetView({
     }
   }
 
+  // Round sixteen (CB, Oct 2026, on Haile's Wed card: "I'm not seeing like the place where you
+  // approve the cancellation and stuff like that. It's like it just says requested") — same
+  // three actions, same API routes, as Team Schedule's own Approve cancellation/Approve
+  // change/Decline request (TeamScheduleView's handleApproveCancellation/handleApproveChange/
+  // handleDeclineRequest), just reached from this page now too. Same busyShiftId/
+  // setActionError/setActionNotice/load() shape as approve/returnEntry/editTimes above — the
+  // page-level banner above the day list is reused here rather than adding a second, separate
+  // error surface.
+  async function approveShiftCancellation(shiftId: string) {
+    setBusyShiftId(shiftId);
+    setActionError("");
+    setActionNotice("");
+    try {
+      const res = await fetch(`/api/admin/shifts/${shiftId}/approve-cancellation`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionError(data.error ?? "Unable to approve that cancellation. Please try again.");
+      } else {
+        setActionNotice("Cancellation approved.");
+      }
+    } catch {
+      setActionError("Unable to reach the server. Check your connection and try again.");
+    } finally {
+      setBusyShiftId(null);
+      load();
+    }
+  }
+
+  async function approveShiftChange(shiftId: string, date: string, startTime: string, endTime: string) {
+    setBusyShiftId(shiftId);
+    setActionError("");
+    setActionNotice("");
+    try {
+      const res = await fetch(`/api/admin/shifts/${shiftId}/approve-change`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date, startTime, endTime }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionError(data.error ?? "Unable to approve that change. Please try again.");
+      } else {
+        setActionNotice("Shift change approved.");
+      }
+    } catch {
+      setActionError("Unable to reach the server. Check your connection and try again.");
+    } finally {
+      setBusyShiftId(null);
+      load();
+    }
+  }
+
+  async function declineShiftRequest(shiftId: string, comment: string) {
+    setBusyShiftId(shiftId);
+    setActionError("");
+    setActionNotice("");
+    try {
+      const res = await fetch(`/api/admin/shifts/${shiftId}/deny-request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment: comment || undefined }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionError(data.error ?? "Unable to decline that request. Please try again.");
+      } else {
+        setActionNotice("Request declined.");
+      }
+    } catch {
+      setActionError("Unable to reach the server. Check your connection and try again.");
+    } finally {
+      setBusyShiftId(null);
+      load();
+    }
+  }
+
   const awaitingCount = entries.filter((e) => e.status === "AWAITING_APPROVAL").length;
 
   // Round fourteen: aggregated across the WHOLE period (both weeks) for WeeklyTotalSidebar's
@@ -317,6 +410,17 @@ export default function ReviewTimesheetView({
     ...(canEditFlaggedTimeEntries ? { onEditTimes: editTimes, editError: editTimesError } : {}),
   };
 
+  // Round sixteen — this page is only ever reached by someone already authorized to review this
+  // employee (page.tsx's own canAccessEmployeeRecords gate), same as the review controls above,
+  // so there's no extra condition here to gate this on beyond that. The three API routes
+  // themselves still independently re-check assertCanManageShifts server-side either way.
+  const shiftRequest: ShiftRequestControls = {
+    onApproveCancellation: approveShiftCancellation,
+    onApproveChange: approveShiftChange,
+    onDecline: declineShiftRequest,
+    busyShiftId,
+  };
+
   return (
     <div>
       <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
@@ -373,6 +477,7 @@ export default function ReviewTimesheetView({
               entries={entries}
               shiftsByDate={shiftsByDate}
               review={review}
+              shiftRequest={shiftRequest}
               open={openWeeks.open1}
               onToggle={() => setOpenWeeks((w) => ({ ...w, open1: !w.open1 }))}
               subtotalMinutes={week1Minutes}
@@ -384,6 +489,7 @@ export default function ReviewTimesheetView({
               entries={entries}
               shiftsByDate={shiftsByDate}
               review={review}
+              shiftRequest={shiftRequest}
               open={openWeeks.open2}
               onToggle={() => setOpenWeeks((w) => ({ ...w, open2: !w.open2 }))}
               subtotalMinutes={week2Minutes}
@@ -416,6 +522,7 @@ function WeekAccordionBlock({
   entries,
   shiftsByDate,
   review,
+  shiftRequest,
   open,
   onToggle,
   subtotalMinutes,
@@ -424,8 +531,9 @@ function WeekAccordionBlock({
   rangeLabel: string;
   days: string[];
   entries: TimeEntryDTO[];
-  shiftsByDate: Map<string, { startTime: string; endTime: string; displayStatus: ShiftStatus }>;
+  shiftsByDate: Map<string, ScheduledShiftInfo>;
   review: ReviewControls;
+  shiftRequest: ShiftRequestControls;
   open: boolean;
   onToggle: () => void;
   subtotalMinutes: number;
@@ -449,7 +557,14 @@ function WeekAccordionBlock({
       </button>
       {open && (
         <div className="border-t border-border px-3 py-3">
-          <TimesheetTable days={days} entries={entries} shiftsByDate={shiftsByDate} review={review} hideSummaryBar />
+          <TimesheetTable
+            days={days}
+            entries={entries}
+            shiftsByDate={shiftsByDate}
+            review={review}
+            shiftRequest={shiftRequest}
+            hideSummaryBar
+          />
         </div>
       )}
     </div>
