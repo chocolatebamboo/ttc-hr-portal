@@ -2,10 +2,11 @@
 
 import { useState, type ReactNode } from "react";
 import StatusPill from "@/components/StatusPill";
+import ShiftStatusPill from "@/components/ShiftStatusPill";
 import { WarningIcon, ChevronDownIcon } from "@/components/icons";
 import { formatTime12h, formatReviewedAt } from "@/lib/availability-format";
 import { combineDateAndTime, formatClockTime, formatMinutes, todayDateKey, toTimeInputValue } from "@/lib/time";
-import type { TimeEntryDTO } from "@/types";
+import type { ShiftStatus, TimeEntryDTO } from "@/types";
 
 export interface ReviewControls {
   onApprove: (entryId: string) => void;
@@ -104,8 +105,14 @@ export default function TimesheetTable({
    *  session's own scheduledStartTime/EndTime instead, which can legitimately differ from this if
    *  a shift was changed after the fact. Optional — a caller with no schedule data to offer (or
    *  that doesn't care, e.g. a quick read-only table) just omits it and every day falls back to
-   *  today's plain "—"/"Upcoming" treatment, unchanged. */
-  shiftsByDate?: Map<string, { startTime: string; endTime: string }>;
+   *  today's plain "—"/"Upcoming" treatment, unchanged.
+   *
+   *  Round fifteen (CB, Oct 2026, on Haile's Wed card showing a plain "Scheduled 3:00 PM – 5:00
+   *  PM" with no hint it actually had a cancellation request sitting on it: "I just wanna make
+   *  sure that it's in that view"): carries the shift's own displayStatus along with its times so
+   *  TimesheetDayCard can flag a pending CHANGE_REQUESTED/CANCELLATION_REQUESTED right here too,
+   *  not just on Team Schedule — see the ShiftStatusPill usage below. */
+  shiftsByDate?: Map<string, { startTime: string; endTime: string; displayStatus: ShiftStatus }>;
 }) {
   const byDate = new Map(entries.map((e) => [e.workDate.slice(0, 10), e]));
   const weeklyMinutes = entries.reduce((sum, e) => sum + (e.totalMinutes ?? 0), 0);
@@ -156,7 +163,7 @@ function TimesheetDayCard({
   correction?: CorrectionControls;
   /** Already resolved to "only when this day has no entry" by the caller above — see
    *  TimesheetTable's own shiftsByDate doc comment. */
-  scheduledShift?: { startTime: string; endTime: string };
+  scheduledShift?: { startTime: string; endTime: string; displayStatus: ShiftStatus };
 }) {
   const [returning, setReturning] = useState(false);
   const [comment, setComment] = useState("");
@@ -318,9 +325,19 @@ function TimesheetDayCard({
             // a day that has no entry at all yet — "Not Logged" (past/today) or "Upcoming"
             // (later this week), so there's still something to check against instead of a bare
             // dash. See TimesheetTable's own shiftsByDate doc comment above.
-            <span className="text-sm text-muted">
-              Scheduled {formatTime12h(scheduledShift.startTime)} – {formatTime12h(scheduledShift.endTime)}
-            </span>
+            <div className="flex flex-col items-start gap-1">
+              <span className="text-sm text-muted">
+                Scheduled {formatTime12h(scheduledShift.startTime)} – {formatTime12h(scheduledShift.endTime)}
+              </span>
+              {/* Round fifteen (CB, Oct 2026): flags a pending request right on this card too —
+                  see shiftsByDate's own doc comment above for why. Only these two statuses ever
+                  reach here needing a flag; a plain UPCOMING shift stays exactly as quiet as
+                  before. */}
+              {(scheduledShift.displayStatus === "CHANGE_REQUESTED" ||
+                scheduledShift.displayStatus === "CANCELLATION_REQUESTED") && (
+                <ShiftStatusPill status={scheduledShift.displayStatus} />
+              )}
+            </div>
           ) : (
             <span className="text-sm text-muted">—</span>
           )}
