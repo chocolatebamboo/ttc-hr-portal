@@ -194,11 +194,18 @@ export default function TeamScheduleGlance({
   shifts,
   upcomingShifts,
   currentlyClockedIn,
+  canForceClockOut,
   className,
 }: {
   shifts: AdminShiftDTO[];
   upcomingShifts: AdminShiftDTO[];
   currentlyClockedIn: CurrentlyClockedInRowDTO[];
+  /** Oct 2026 (CB: "an option... from an admin perspective... to stop it and correct it" on a
+   *  live clock-in running way past its scheduled end): passed straight through from
+   *  employee.canEditFlaggedTimeEntries in dashboard/page.tsx (the same per-person flag CB's
+   *  existing "Edit times" capability already uses, restricted to just her and Shawn) down to
+   *  ClockedInNowSection below, which is the only thing that actually needs it. */
+  canForceClockOut: boolean;
   className?: string;
 }) {
   const tomorrowKey = dateKeyDaysFromNow(1);
@@ -259,6 +266,7 @@ export default function TeamScheduleGlance({
       <ClockedInNowSection
         className={shifts.length > 0 ? "mt-4" : ""}
         initial={currentlyClockedIn}
+        canForceClockOut={canForceClockOut}
       />
 
       {upcomingGroups.length > 0 && (
