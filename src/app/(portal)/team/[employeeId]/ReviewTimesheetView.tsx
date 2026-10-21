@@ -12,7 +12,7 @@ import { ChevronDownIcon } from "@/components/icons";
 import PayrollPeriodSwitcher from "@/components/PayrollPeriodSwitcher";
 import TimesheetTable, { type CorrectionValues, type ReviewControls } from "@/components/TimesheetTable";
 import WeeklyTotalSidebar, { type WeekBucket } from "@/components/WeeklyTotalSidebar";
-import type { ShiftDTO, TimeEntryDTO } from "@/types";
+import type { ShiftDTO, ShiftStatus, TimeEntryDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error" | "empty";
 
@@ -20,21 +20,29 @@ type LoadState = "loading" | "ready" | "error" | "empty";
  *  appropriately here" — she wants the scheduled time shown there too, not just on a day that
  *  already has a session). One entry per date, keyed the same "YYYY-MM-DD" way `days` already is
  *  — only ever consulted for an entry-less day (see TimesheetTable's own shiftsByDate doc
- *  comment), so there's no need to carry anything beyond the two times shown there.
+ *  comment).
  *
  *  CANCELLED/REASSIGNED excluded, same exclusion dashboard/page.tsx's own upcomingShifts filter
  *  and time-actions.ts's own findShiftIdForCorrection already use — a cancelled or
  *  reassigned-away shift was never really "the schedule" for this employee this day. When more
  *  than one shift lands on the same date (a split shift — rare, but the data model allows it),
  *  keeps whichever starts earliest, same "earliest first" idea this page's own week ordering
- *  already leans on elsewhere. */
-function buildShiftsByDate(shifts: ShiftDTO[]): Map<string, { startTime: string; endTime: string }> {
-  const map = new Map<string, { startTime: string; endTime: string }>();
+ *  already leans on elsewhere.
+ *
+ *  Round fifteen (CB, Oct 2026, on Haile's own Wed card, requested-cancellation shift and all:
+ *  "I just wanna make sure that it's in that view"): now also carries the shift's own
+ *  displayStatus through, so TimesheetTable can flag a pending CHANGE_REQUESTED/
+ *  CANCELLATION_REQUESTED right on the card instead of this view silently treating every
+ *  unresolved status the same as a plain confirmed UPCOMING shift. */
+function buildShiftsByDate(
+  shifts: ShiftDTO[]
+): Map<string, { startTime: string; endTime: string; displayStatus: ShiftStatus }> {
+  const map = new Map<string, { startTime: string; endTime: string; displayStatus: ShiftStatus }>();
   for (const s of shifts) {
     if (s.status === "CANCELLED" || s.status === "REASSIGNED") continue;
     const existing = map.get(s.date);
     if (!existing || s.startTime < existing.startTime) {
-      map.set(s.date, { startTime: s.startTime, endTime: s.endTime });
+      map.set(s.date, { startTime: s.startTime, endTime: s.endTime, displayStatus: s.displayStatus });
     }
   }
   return map;
@@ -92,7 +100,9 @@ export default function ReviewTimesheetView({
   const [offset, setOffset] = useState(0);
   const [openWeeks, setOpenWeeks] = useState(() => defaultOpenWeeks(0, todayDateKey()));
   const [entries, setEntries] = useState<TimeEntryDTO[]>([]);
-  const [shiftsByDate, setShiftsByDate] = useState<Map<string, { startTime: string; endTime: string }>>(new Map());
+  const [shiftsByDate, setShiftsByDate] = useState<
+    Map<string, { startTime: string; endTime: string; displayStatus: ShiftStatus }>
+  >(new Map());
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [busyEntryId, setBusyEntryId] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -414,7 +424,7 @@ function WeekAccordionBlock({
   rangeLabel: string;
   days: string[];
   entries: TimeEntryDTO[];
-  shiftsByDate: Map<string, { startTime: string; endTime: string }>;
+  shiftsByDate: Map<string, { startTime: string; endTime: string; displayStatus: ShiftStatus }>;
   review: ReviewControls;
   open: boolean;
   onToggle: () => void;
