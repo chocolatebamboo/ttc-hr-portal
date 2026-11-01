@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import ShiftStatusPill from "@/components/ShiftStatusPill";
 import DateTasksPanel from "@/components/DateTasksPanel";
+import DateTaskRow from "@/components/DateTaskRow";
 import PayrollPeriodSwitcher from "@/components/PayrollPeriodSwitcher";
 import { ChartIcon, ChecklistIcon, ChevronDownIcon } from "@/components/icons";
 import { formatSlotDate, formatTime12h } from "@/lib/availability-format";
@@ -189,6 +190,43 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
   // to one shift — same employeeId+taskDate filter DateTasksPanel itself already applies
   // client-side against its own per-employee fetch.
   const [taskCounts, setTaskCounts] = useState<Record<string, number>>({});
+  // Round eighteen (CB, Nov 2026, confirmed via her own interactive mockup: desktop click-to-
+  // expand, same as Team Availability — see TeamAvailabilityCards' own doc comment on its
+  // `expandable` prop for the full reasoning). Only one shift's Tasks panel can ever be open at a
+  // time (openShiftId above), so this one fetch — keyed off whichever shift that is — backs both
+  // the in-place DateTasksPanel on that row AND this page's own right-hand detail panel, same
+  // shared-array, ID-derived-"selected" pattern as TeamAvailabilityCards and, before that,
+  // TeamTaskList. TeamScheduleView has exactly one caller (page.tsx), so this is always on here —
+  // unlike TeamAvailabilityCards, there's no second, dashboard-widget caller that needs an opt-out.
+  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
+  const [openDateTasks, setOpenDateTasks] = useState<DateTaskDTO[]>([]);
+  const openShift = openShiftId ? shifts.find((s) => s.id === openShiftId) : undefined;
+
+  async function loadOpenDateTasks() {
+    if (!openShift) return;
+    try {
+      const res = await fetch(`/api/date-tasks/${openShift.employeeId}`);
+      if (!res.ok) throw new Error();
+      const data: { tasks: DateTaskDTO[] } = await res.json();
+      setOpenDateTasks(data.tasks.filter((t) => t.taskDate === openShift.date));
+    } catch {
+      // Non-fatal — the in-place DateTasksPanel still shows its own loading/error state off this
+      // same array; a failed fetch here just leaves an empty list until the next change.
+    }
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setExpandedTaskId(null);
+    if (!openShift) {
+      setOpenDateTasks([]);
+      return;
+    }
+    loadOpenDateTasks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openShift?.employeeId, openShift?.date]);
+
+  const expandedTask = expandedTaskId ? openDateTasks.find((t) => t.id === expandedTaskId) ?? null : null;
   // Round 4 (CB, Oct 2026, from a live screenshot of a 5-shift week: "make sure we're... [in] the
   // collapsed state... because I don't want it to look too cluttered"): each person's card in the
   // grouped (all-team-members) view now opens collapsed, same reasoning — and the same
@@ -778,7 +816,14 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
                 <ChecklistIcon className="h-3.5 w-3.5" />
                 Tasks for this shift
               </p>
-              <DateTasksPanel employeeId={s.employeeId} taskDate={s.date} viewerId={viewerId} />
+              <DateTasksPanel
+                employeeId={s.employeeId}
+                taskDate={s.date}
+                viewerId={viewerId}
+                tasksOverride={isTasksOpen ? openDateTasks : undefined}
+                onTasksChanged={isTasksOpen ? loadOpenDateTasks : undefined}
+                onExpandTask={isTasksOpen ? (t) => setExpandedTaskId(t.id) : undefined}
+              />
             </div>
           </div>
         )}
@@ -786,7 +831,7 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
     );
   }
 
-  return (
+  const mainContent = (
     <div className="max-w-4xl">
       <div className="flex items-start justify-between gap-3 mb-1">
         <h1 className="page-title text-2xl">Team Schedule</h1>
@@ -968,6 +1013,41 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
           </div>
         </>
       )}
+    </div>
+  );
+
+  // Round eighteen: the master-detail split only kicks in once a task is actually open — see
+  // TeamAvailabilityCards' own identical guard for the full reasoning. Without it this page
+  // renders exactly as it always has, at its usual max-w-4xl.
+  if (!expandedTask) return mainContent;
+
+  return (
+    <div className="lg:grid lg:grid-cols-[minmax(0,56rem)_26rem] lg:gap-5 lg:items-start">
+      <div className="min-w-0">{mainContent}</div>
+      <div className="mt-5 lg:mt-0 lg:sticky lg:top-4">
+        <div className="rounded-2xl border border-border bg-surface shadow-sm p-3 sm:p-4">
+          <div className="flex items-center justify-between gap-2 mb-2 px-0.5">
+            <p className="text-xs font-semibold text-muted">
+              {openShift ? `Opened from ${formatSlotDate(openShift.date)}` : "Task"}
+            </p>
+            <button
+              type="button"
+              onClick={() => setExpandedTaskId(null)}
+              className="text-xs font-semibold text-accent-ink hover:underline underline-offset-2"
+            >
+              Close
+            </button>
+          </div>
+          <DateTaskRow
+            task={expandedTask}
+            viewerId={viewerId}
+            canReview
+            showDate
+            forceDescExpanded
+            onChanged={loadOpenDateTasks}
+          />
+        </div>
+      </div>
     </div>
   );
 }
