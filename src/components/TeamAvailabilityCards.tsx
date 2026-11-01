@@ -1107,6 +1107,7 @@ export function Card({
   collapsible?: boolean;
   onToggleDate: (submissionId: string, date: string) => void;
   onAddNoteToggle: () => void;
+  onNoteTextChange: (v: string) => void;
   /** Saves the note typed into the box above onto an already-decided submission — see
    *  addAvailabilityReviewComment's own doc comment in src/lib/availability.ts. */
   onAddNote: (submissionId: string, comment: string) => void;
