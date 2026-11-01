@@ -1052,6 +1052,7 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
             canReview
             showDate
             forceDescExpanded
+            variant="detail"
             onChanged={loadOpenDateTasks}
           />
         </div>
