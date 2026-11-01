@@ -392,4 +392,27 @@ body {
   .scrollbar-hide::-webkit-scrollbar {
     display: none; /* Chrome, Safari, Chromium Edge */
   }
+
+  /* Round seventeen (CB, Oct 2026): the one place rich text (RichTextEditor.tsx's own toolbar
+     output, and DateTaskRow.tsx's rendering of it) needs its lists/paragraphs to look like actual
+     lists/paragraphs rather than Tailwind's own reset (list-style: none, margin: 0 on every
+     element) — scoped to this one class rather than un-resetting ul/ol/p globally. */
+  .rich-text-content ul {
+    list-style: disc;
+    padding-left: 1.25rem;
+  }
+  .rich-text-content ol {
+    list-style: decimal;
+    padding-left: 1.25rem;
+  }
+  .rich-text-content li {
+    margin: 0.125rem 0;
+  }
+  .rich-text-content p,
+  .rich-text-content div {
+    margin: 0 0 0.25rem;
+  }
+  .rich-text-content > :last-child {
+    margin-bottom: 0;
+  }
 }
