@@ -1,0 +1,15 @@
+-- CB, Oct 2026, on a task card screenshot: "let's make sure that when a task is created, we see
+-- the date and time as well. And then when it needs to be due as well, because yeah." Asked
+-- directly whether a due date should be required on every task or stay optional: "Optional."
+--
+-- Nullable, same "fully optional add-on" shape as DateTask's own submissionNote/dueAt siblings —
+-- a task pushed with no due date set behaves exactly as it always has.
+--
+-- Informational only — already applied directly to the live Supabase database via
+-- mcp__Supabase__apply_migration (same reasoning as every prior phase's migration files: this
+-- project's Render build never runs `prisma migrate deploy`, only `prisma generate`).
+--
+-- No RLS change needed: date_task_write (prisma/rls.sql) is row-level only ("is this employeeId's
+-- row, or one you supervise/administer"), not a column allow-list, so this new column passes
+-- through the existing policy untouched — same reasoning as submissionNote's own migration.
+ALTER TABLE "DateTask" ADD COLUMN "dueAt" TIMESTAMP(3);
