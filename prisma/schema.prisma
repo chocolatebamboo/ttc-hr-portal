@@ -638,6 +638,13 @@ model DateTask {
   title       String
   description String
 
+  // Round seventeen (CB, Oct 2026, on a task card screenshot: "let's make sure that when a task
+  // is created, we see the date and time as well. And then when it needs to be due as well").
+  // createdAt (below) already carries the "when it was created" half of that — this is the new
+  // half, optional per CB's own answer ("Optional") when asked whether every task should require
+  // one: a task pushed with no due date behaves exactly as it always has.
+  dueAt DateTime?
+
   attachmentKey  String?
   attachmentName String?
 
