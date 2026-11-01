@@ -1,6 +1,7 @@
 import { withRlsContext } from "@/lib/db";
+import { isAdmin } from "@/lib/authorization";
 import { getAvatarPublicUrl } from "@/lib/storage";
-import type { CurrentEmployee, DirectoryEntryDTO, Role } from "@/types";
+import type { CurrentEmployee, DirectoryEntryDTO, Role, SwitchableEmployeeDTO } from "@/types";
 
 /**
  * The company directory. Every active employee is a visible ROW to every other authenticated
@@ -58,6 +59,46 @@ export async function listDirectory(actor: CurrentEmployee): Promise<DirectoryEn
     role: e.role as Role,
     email: e.ttcEmail,
     workPhone: e.workPhone,
+    avatarUrl: e.avatarStorageKey ? getAvatarPublicUrl(e.avatarStorageKey) : null,
+  }));
+}
+
+/**
+ * Round seventeen (CB, Oct 2026, on Donique Perry's Timesheet page, circling the pink banner:
+ * "I want to make sure that like we could change between the different team members from this
+ * view as well, similar to how... reports... if we click on the name, we should be able to kind
+ * of change between the team members from here as well"). Backs that new switcher on
+ * ReviewEmployeeView.tsx's banner — exactly the bulk equivalent of canAccessEmployeeRecords
+ * (src/lib/authorization.ts): admin sees every active employee; a supervisor sees themselves
+ * plus their own direct reports; anyone else sees only themselves. Deliberately NOT listDirectory
+ * above (open to every authenticated employee regardless of role — too wide, since every id this
+ * list offers is a jump the viewer has to actually be allowed to land on) and NOT
+ * listTeamDateTasksForPeriod's own employee query in src/lib/date-tasks.ts (narrows to
+ * supervisorId = actor.id but never folds the supervisor's own row back in).
+ */
+export async function listAccessibleTeamMembers(actor: CurrentEmployee): Promise<SwitchableEmployeeDTO[]> {
+  const employees = await withRlsContext({ employeeId: actor.id, role: actor.role }, (tx) =>
+    tx.employee.findMany({
+      where: {
+        deactivatedAt: null,
+        ...(isAdmin(actor) ? {} : { OR: [{ id: actor.id }, { supervisorId: actor.id }] }),
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        preferredName: true,
+        jobTitle: true,
+        avatarStorageKey: true,
+      },
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+    })
+  );
+
+  return employees.map((e) => ({
+    id: e.id,
+    name: `${e.preferredName || e.firstName} ${e.lastName}`,
+    jobTitle: e.jobTitle,
     avatarUrl: e.avatarStorageKey ? getAvatarPublicUrl(e.avatarStorageKey) : null,
   }));
 }
