@@ -8,6 +8,7 @@ import {
   ForbiddenError,
 } from "@/lib/authorization";
 import { getAvatarPublicUrl, getSignedDownloadUrl, uploadDateTaskFile } from "@/lib/storage";
+import { sanitizeRichText } from "@/lib/rich-text";
 import { formatSlotDate } from "@/lib/availability-format";
 import { writeAuditLog } from "@/lib/audit-log";
 import { writeNotification } from "@/lib/notifications";
@@ -61,6 +62,7 @@ type TaskRow = {
   returnedAt: Date | null;
   returnNote: string | null;
   createdAt: Date;
+  dueAt: Date | null;
   employee: NameParts;
   createdBy: NameParts;
   approvedBy: NameParts | null;
@@ -100,6 +102,7 @@ function toDTO(row: TaskRow): DateTaskDTO {
     returnNote: row.returnNote,
     commentCount: row._count.comments,
     createdAt: row.createdAt.toISOString(),
+    dueAt: row.dueAt?.toISOString() ?? null,
   };
 }
 
@@ -289,7 +292,12 @@ export async function listTeamDateTasksForPeriod(
 
 /** Create a task on one employee's specific date — admin or that employee's own supervisor only
  *  (assertCanAssignTasks), never the employee themselves. `attachment` is optional, matching
- *  every other one-file-per-post surface in this app (TeamNote, DirectMessage messages). */
+ *  every other one-file-per-post surface in this app (TeamNote, DirectMessage messages).
+ *  `description` is run through sanitizeRichText before it's ever written — see that function's
+ *  own doc comment in src/lib/rich-text.ts; this is the ONLY place a DateTask.description value
+ *  is ever written, so nothing downstream needs to sanitize it again. `dueAt` is optional (CB,
+ *  Oct 2026, asked directly whether it should be required: "Optional") — an ISO datetime string,
+ *  or omitted/empty for no due date. */
 export async function createDateTask(
   actor: CurrentEmployee,
   employeeId: string,
@@ -297,15 +305,21 @@ export async function createDateTask(
   title: string,
   description: string,
   attachment?: { key: string; name: string },
-  priority: "NORMAL" | "URGENT" = "NORMAL"
+  priority: "NORMAL" | "URGENT" = "NORMAL",
+  dueAt?: string
 ): Promise<DateTaskDTO> {
   await assertCanAssignTasks(actor, employeeId);
 
   const trimmedTitle = title.trim();
-  const trimmedDescription = description.trim();
+  const trimmedDescription = sanitizeRichText(description);
   if (!trimmedTitle) throw new InvalidDateTaskError("Give the task a title before assigning it.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(taskDate)) {
     throw new InvalidDateTaskError("A task needs a specific date.");
+  }
+  let dueAtDate: Date | null = null;
+  if (dueAt) {
+    dueAtDate = new Date(dueAt);
+    if (Number.isNaN(dueAtDate.getTime())) throw new InvalidDateTaskError("That due date doesn't look right.");
   }
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
@@ -319,6 +333,7 @@ export async function createDateTask(
         attachmentKey: attachment?.key ?? null,
         attachmentName: attachment?.name ?? null,
         priority,
+        dueAt: dueAtDate,
       },
       include: TASK_INCLUDE,
     });
