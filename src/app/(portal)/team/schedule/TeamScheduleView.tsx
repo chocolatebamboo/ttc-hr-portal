@@ -1021,8 +1021,16 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
   // renders exactly as it always has, at its usual max-w-4xl.
   if (!expandedTask) return mainContent;
 
+  // Round eighteen, correction (CB: "it's supposed to show up fully on the right-hand side, not
+  // just squished in there" — see TeamAvailabilityCards' own identical fix for the full
+  // reasoning): the detail column used to be pinned to a fixed 26rem while the list column
+  // absorbed any extra width, backwards from the approved mockup's own "list capped, detail
+  // fills whatever's left" split, and a fixed column never grows no matter how much room the
+  // page has. The list column is capped at 64rem — matching mainContent's own max-w-4xl above,
+  // so it never renders any narrower than it already does today — and the detail column now
+  // takes every bit of space beyond that.
   return (
-    <div className="lg:grid lg:grid-cols-[minmax(0,56rem)_26rem] lg:gap-5 lg:items-start">
+    <div className="lg:grid lg:grid-cols-[minmax(0,64rem)_1fr] lg:gap-5 lg:items-start">
       <div className="min-w-0">{mainContent}</div>
       <div className="mt-5 lg:mt-0 lg:sticky lg:top-4">
         <div className="rounded-2xl border border-border bg-surface shadow-sm p-3 sm:p-4">
