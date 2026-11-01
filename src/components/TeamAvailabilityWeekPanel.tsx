@@ -43,13 +43,26 @@ import { ChartIcon } from "@/components/icons";
  * splits into separate blocks. The "2-week report" link is simpler now too: period.end IS the
  * selected range's own end, no more round-tripping through payrollPeriodOffsetForDate(week.start)
  * to recover it from a calendar week.
+ *
+ * Round eighteen, correction (CB, Nov 2026, on a live screenshot of the expanded detail panel
+ * squeezed into a sliver of the page: "it's supposed to show up fully on the right-hand side,
+ * not just squished in there"): this component's own root used to be a plain, always-present
+ * `max-w-3xl` — fine for the normal card list (same reading width this page's siblings use), but
+ * it also capped the master-detail grid TeamAvailabilityCards renders once a task is open, so
+ * that grid never had more than ~768px total to split between the list and the detail panel no
+ * matter how much real width the page actually had to give it. `hasExpandedTask` (set via
+ * TeamAvailabilityCards' own onExpandedChange, which fires the instant its detail panel opens or
+ * closes) drops that cap for exactly as long as something's actually open, so the grid gets the
+ * page's real available width to work with; the moment nothing's open, this snaps back to its
+ * normal narrow reading width, unchanged from before this round.
  */
 export default function TeamAvailabilityWeekPanel({ viewerId }: { viewerId: string }) {
   const [offset, setOffset] = useState(getCurrentPayrollPeriodOffset);
   const period = getPayrollPeriod(offset);
+  const [hasExpandedTask, setHasExpandedTask] = useState(false);
 
   return (
-    <div>
+    <div className={hasExpandedTask ? "" : "max-w-3xl"}>
       <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
         <h2 className="text-sm font-medium text-muted">Team availability requests</h2>
         <div className="flex items-center gap-2 flex-wrap">
@@ -68,7 +81,13 @@ export default function TeamAvailabilityWeekPanel({ viewerId }: { viewerId: stri
           the full Team Availability page, opts in. TeamAvailabilityRequestsSection (the
           dashboard's compact preview widget) drives the same TeamAvailabilityCards/Card off the
           same hook and deliberately leaves this prop unset, so it's unaffected. */}
-      <TeamAvailabilityCards viewerId={viewerId} weekStart={period.start} weekEnd={period.end} expandable />
+      <TeamAvailabilityCards
+        viewerId={viewerId}
+        weekStart={period.start}
+        weekEnd={period.end}
+        expandable
+        onExpandedChange={setHasExpandedTask}
+      />
     </div>
   );
 }
