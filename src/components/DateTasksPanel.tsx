@@ -29,6 +29,9 @@ export default function DateTasksPanel({
   taskDate,
   viewerId,
   onColor = false,
+  tasksOverride,
+  onTasksChanged,
+  onExpandTask,
 }: {
   employeeId: string;
   taskDate: string;
@@ -42,6 +45,23 @@ export default function DateTasksPanel({
    *  card instead, so it leaves this false — same onColor pattern AvailabilityStatusPill already
    *  uses for this exact "same component, two different background contexts" problem. */
   onColor?: boolean;
+  /** Round eighteen (desktop click-to-expand on Team Availability/Team Schedule — CB, Nov 2026):
+   *  when given, this panel skips its own fetch and renders these tasks instead (already
+   *  filtered to this date by the caller). The caller only ever provides this from the one
+   *  globally-open date, so there's one shared array behind both this in-place list and that
+   *  caller's own side panel — never a second, separately-fetched snapshot of "the same" tasks
+   *  that could drift out of sync with it. Omitted by every other caller (DirectMessageThread,
+   *  and TeamScheduleView/TeamAvailabilityCards before this round), which keeps fetching and
+   *  rendering exactly as they always have. */
+  tasksOverride?: DateTaskDTO[];
+  /** Pairs with tasksOverride — fires in place of this panel's own load() after an action
+   *  changes a task (push, approve, comment…), so the caller can refetch the one shared array
+   *  instead of this panel refetching its own separate copy. Required whenever tasksOverride is
+   *  given; unused otherwise. */
+  onTasksChanged?: () => void;
+  /** Threaded straight through to each DateTaskRow as onExpandRequested — see that prop's own
+   *  doc comment. Omitted by every caller that hasn't opted into the side-panel expand. */
+  onExpandTask?: (task: DateTaskDTO) => void;
 }) {
   const [tasks, setTasks] = useState<DateTaskDTO[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
@@ -85,10 +105,14 @@ export default function DateTasksPanel({
   }
 
   useEffect(() => {
+    // Round eighteen: tasksOverride means the caller already owns this date's fetch (see that
+    // prop's own doc comment) — skip this panel's own, so there's never a second, separately
+    // loading copy of the same list sitting behind the override.
+    if (tasksOverride) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [employeeId, taskDate]);
+  }, [employeeId, taskDate, tasksOverride]);
 
   async function addTask(e: React.FormEvent) {
     e.preventDefault();
@@ -117,7 +141,11 @@ export default function DateTasksPanel({
       setDueTime("");
       if (fileInputRef.current) fileInputRef.current.value = "";
       setShowAddForm(false);
-      await load();
+      // Round eighteen: tasksOverride means the caller owns the fetch — let it refetch the one
+      // shared array instead of this panel loading its own separate copy (see tasksOverride's
+      // own doc comment above).
+      if (tasksOverride) onTasksChanged?.();
+      else await load();
     } catch {
       setAddError("Couldn't reach the server. Check your connection and try again.");
     } finally {
@@ -131,17 +159,23 @@ export default function DateTasksPanel({
           now its own colored card (DateTaskRow), so this list is a stack of independent cards
           rather than rows sharing one white box divided by hairlines. */}
       <div className="space-y-2.5 max-h-[28rem] overflow-y-auto p-0.5">
-        {loadState === "loading" && <div className="h-16 rounded-2xl bg-black/[0.04] animate-pulse" />}
-        {loadState === "error" && <p className="text-sm text-accent">Unable to load tasks. Please try again.</p>}
+        {!tasksOverride && loadState === "loading" && <div className="h-16 rounded-2xl bg-black/[0.04] animate-pulse" />}
+        {!tasksOverride && loadState === "error" && <p className="text-sm text-accent">Unable to load tasks. Please try again.</p>}
         {/* CB, Sept 2026: "I shouldn't see that prompted message like there's no task cause...
             it's optional... they should be able to do it whenever" — tasks are a fully optional
             add-on now (see this panel's own doc comment above), so an empty list needs no
             message at all; the "+ Create task" affordance below already reads as available on
             its own. */}
-        {loadState === "ready" &&
-          tasks.map((t) => (
-            <DateTaskRow key={t.id} task={t} viewerId={viewerId} canReview onChanged={load} />
-          ))}
+        {(tasksOverride ?? (loadState === "ready" ? tasks : [])).map((t) => (
+          <DateTaskRow
+            key={t.id}
+            task={t}
+            viewerId={viewerId}
+            canReview
+            onChanged={tasksOverride ? onTasksChanged ?? load : load}
+            onExpandRequested={onExpandTask ? () => onExpandTask(t) : undefined}
+          />
+        ))}
       </div>
 
       {showAddForm ? (
