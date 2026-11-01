@@ -123,6 +123,7 @@ export default function DateTaskRow({
   onChanged,
   onExpandRequested,
   forceDescExpanded = false,
+  variant = "card",
 }: {
   task: DateTaskDTO;
   /** The signed-in viewer's own employee id — decides which side a comment bubble renders on,
@@ -153,6 +154,17 @@ export default function DateTaskRow({
    *  panel sets this true so that copy shows the full description unclamped from the start,
    *  without needing its own "Show more" toggle. Never set by any existing caller. */
   forceDescExpanded?: boolean;
+  /** Round nineteen (CB, Nov 2026, approved via mockup — "it shouldn't necessarily look like
+   *  exactly the yellow... it should have its own kind of look, low-key... there's a
+   *  differentiation"): "card" (the default, and the only thing every existing caller renders)
+   *  is this component's long-established full-bleed gradient card, completely unchanged below.
+   *  "detail" is the new, low-key treatment for the master-detail side panel specifically —
+   *  same status color, now just a left-edge accent and a tinted pill instead of painting the
+   *  whole surface, sitting directly on the plain bg-surface shell the caller (TeamAvailabilityCards,
+   *  TeamScheduleView, MyTasksView) already wraps the expanded task in. Every prop above still
+   *  means exactly what it always has — this only changes which markup renders at the bottom of
+   *  the component, not any of the state or handlers above it. */
+  variant?: "card" | "detail";
 }) {
   const isOwnTask = task.employeeId === viewerId;
   const [busy, setBusy] = useState(false);
@@ -372,6 +384,353 @@ export default function DateTaskRow({
   // the inline note (below), replacing the old instant-submit click.
   const canTapComplete = isOwnTask && (task.status === "ASSIGNED" || task.status === "IN_PROGRESS" || task.status === "RETURNED");
   const hasSubmission = Boolean(task.submissionNote) || task.hasSubmissionAttachment;
+
+  // Round nineteen — the low-key detail-panel treatment (see this component's own doc comment
+  // on the `variant` prop above). Deliberately a separate, self-contained render rather than
+  // threading a "detail ? ... : ..." ternary through every className below the normal card
+  // return — every existing caller (DateTasksPanel, MyDateTasksPanel, DateTasksSection, every
+  // DateTaskRow call that never set variant) renders through that untouched branch, below,
+  // exactly as it always has. This branch only runs for the one new call site each of
+  // TeamAvailabilityCards/TeamScheduleView/MyTasksView makes for whichever task is currently
+  // open in their own side panel.
+  if (variant === "detail") {
+    return (
+      <div style={{ borderLeft: `4px solid ${ink}`, paddingLeft: "14px" }}>
+        {celebrating ? (
+          <div className="flex items-center gap-3 py-1.5">
+            <div
+              className="h-10 w-10 rounded-full flex items-center justify-center shrink-0"
+              style={{ background: `color-mix(in srgb, ${ink} 14%, transparent)` }}
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke={ink} strokeWidth="3">
+                <path d="m6 12.5 4 4 8-9" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-foreground">Submitted</p>
+              <p className="text-xs text-muted">Under review</p>
+            </div>
+          </div>
+        ) : (
+          <>
+            {showEmployee && (
+              <div className="flex items-center gap-1.5 mb-2">
+                <span className="h-5 w-5 rounded-md bg-black/[0.05] flex items-center justify-center text-[9px] font-extrabold text-muted shrink-0">
+                  {initialsOf(task.employeeName) || "?"}
+                </span>
+                <span className="text-xs font-semibold text-foreground">{task.employeeName}</span>
+              </div>
+            )}
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <span
+                className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-bold"
+                style={{ background: `color-mix(in srgb, ${ink} 12%, transparent)`, color: ink }}
+              >
+                {STATUS_LABEL[task.status]}
+              </span>
+              {task.priority === "URGENT" && (
+                <span className="inline-flex items-center rounded-full bg-rose-50 px-2.5 py-0.5 text-[11px] font-bold text-rose-700">
+                  Urgent
+                </span>
+              )}
+              {showDate && <span className="text-xs text-muted">{formatTaskDate(task.taskDate)}</span>}
+            </div>
+
+            <p
+              className={`text-base font-semibold mt-2.5 ${task.status === "APPROVED" ? "line-through text-muted" : "text-foreground"}`}
+            >
+              {task.title}
+            </p>
+            {task.description && (
+              <div
+                className="text-sm text-muted mt-1.5 leading-relaxed break-words rich-text-content"
+                dangerouslySetInnerHTML={{ __html: descriptionHtml(task.description) }}
+              />
+            )}
+
+            <div className="flex flex-col gap-1 mt-3.5 text-sm text-muted">
+              <span>Assigned {formatCommentTime(task.createdAt)}</span>
+              {task.dueAt && <span className="font-semibold text-foreground">Due {formatCommentTime(task.dueAt)}</span>}
+              {task.status !== "APPROVED" && (
+                <span>
+                  {task.status === "ASSIGNED" && `From ${task.createdByName}`}
+                  {task.status === "IN_PROGRESS" && `In progress — from ${task.createdByName}`}
+                  {task.status === "AWAITING_REVIEW" && "Submitted — awaiting review"}
+                  {task.status === "RETURNED" && `Sent back by ${task.returnedByName ?? "a reviewer"}`}
+                </span>
+              )}
+              {task.status === "APPROVED" && (
+                <span className="font-semibold text-foreground">
+                  Approved by {task.approvedByName ?? "a reviewer"}
+                  {task.approvedAt && <span className="font-normal text-muted"> · {formatCommentTime(task.approvedAt)}</span>}
+                </span>
+              )}
+            </div>
+
+            {task.status === "RETURNED" && task.returnNote && (
+              <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-800 mt-2.5">{task.returnNote}</div>
+            )}
+
+            {hasSubmission && (
+              <div className="rounded-lg bg-black/[0.025] border border-border px-3 py-2 mt-2.5">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-700 mb-0.5">
+                  What {isOwnTask ? "you" : task.employeeName} submitted
+                </p>
+                {task.submissionNote && (
+                  <p className="text-sm text-foreground whitespace-pre-wrap break-words">{task.submissionNote}</p>
+                )}
+                {task.hasSubmissionAttachment && (
+                  <button
+                    onClick={handleSubmissionDownload}
+                    disabled={downloadingSubmission}
+                    className="mt-1.5 flex items-center gap-1.5 text-xs font-semibold text-accent-ink underline underline-offset-2"
+                  >
+                    <DownloadIcon className="h-3.5 w-3.5" />
+                    {task.submissionAttachmentName ?? "Attachment"}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {task.hasAttachment && (
+              <button
+                onClick={handleDownload}
+                disabled={downloading}
+                className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-accent-ink underline underline-offset-2"
+              >
+                <DownloadIcon className="h-3.5 w-3.5" />
+                {task.attachmentName ?? "Attachment"}
+              </button>
+            )}
+
+            {actionError && (
+              <p className="text-xs font-medium text-rose-700 mt-2 bg-rose-50 rounded px-2 py-1 inline-block">{actionError}</p>
+            )}
+
+            <div className="flex flex-wrap gap-2 mt-3.5">
+              {isOwnTask && task.status === "ASSIGNED" && (
+                <button
+                  type="button"
+                  onClick={() => runAction("start")}
+                  disabled={busy}
+                  className="inline-flex items-center justify-center rounded-full px-3.5 py-1.5 text-xs font-semibold"
+                  style={{ border: `1.5px solid ${ink}`, color: ink }}
+                >
+                  Start this task
+                </button>
+              )}
+              {canTapComplete && !completing && (
+                <button
+                  type="button"
+                  onClick={() => setCompleting(true)}
+                  disabled={busy}
+                  className="inline-flex items-center justify-center rounded-full px-3.5 py-1.5 text-xs font-semibold text-white"
+                  style={{ background: ink }}
+                >
+                  Mark complete
+                </button>
+              )}
+              {canReview && task.status === "AWAITING_REVIEW" && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => runAction("approve")}
+                    disabled={busy}
+                    className="inline-flex items-center justify-center rounded-full px-3.5 py-1.5 text-xs font-semibold text-white"
+                    style={{ background: ink }}
+                  >
+                    Approve
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReturning((v) => !v)}
+                    disabled={busy}
+                    className="inline-flex items-center justify-center rounded-full px-3.5 py-1.5 text-xs font-semibold"
+                    style={{ border: `1.5px solid ${ink}`, color: ink }}
+                  >
+                    Send back
+                  </button>
+                </>
+              )}
+            </div>
+
+            {returning && (
+              <div className="mt-2.5 flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  value={returnNote}
+                  onChange={(e) => setReturnNote(e.target.value)}
+                  placeholder="What needs to change?"
+                  className="flex-1 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-accent"
+                />
+                <button
+                  onClick={submitReturn}
+                  disabled={busy || !returnNote.trim()}
+                  className="text-xs font-semibold text-white rounded-lg px-3 py-1.5 whitespace-nowrap disabled:opacity-50"
+                  style={{ background: ink }}
+                >
+                  Send back
+                </button>
+              </div>
+            )}
+
+            {completing && (
+              <div className="mt-2.5 rounded-xl border border-border bg-black/[0.02] p-2.5 space-y-2">
+                <textarea
+                  value={completeNote}
+                  onChange={(e) => setCompleteNote(e.target.value)}
+                  placeholder="What did you do? (optional)"
+                  rows={2}
+                  className="w-full rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-accent resize-none"
+                />
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <input
+                      ref={completeFileInputRef}
+                      type="file"
+                      onChange={(e) => setCompleteFile(e.target.files?.[0] ?? null)}
+                      className="text-xs text-muted file:mr-2 file:rounded-md file:border-0 file:bg-black/[0.05] file:px-2 file:py-1 file:text-xs file:font-medium file:text-foreground max-w-[9rem]"
+                    />
+                    {completeFile && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCompleteFile(null);
+                          if (completeFileInputRef.current) completeFileInputRef.current.value = "";
+                        }}
+                        className="text-xs text-muted hover:text-foreground shrink-0"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCompleting(false);
+                        setCompleteNote("");
+                        setCompleteFile(null);
+                        if (completeFileInputRef.current) completeFileInputRef.current.value = "";
+                      }}
+                      disabled={busy}
+                      className="text-xs font-semibold text-muted hover:text-foreground disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={submitComplete}
+                      disabled={busy}
+                      className="text-xs font-semibold rounded-full px-3.5 py-1.5 text-white disabled:opacity-50"
+                      style={{ background: ink }}
+                    >
+                      {busy ? "Submitting…" : "Mark complete"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={() => setCommentsOpen((v) => !v)}
+              className="mt-4 pt-3 border-t border-border w-full flex items-center gap-1.5 text-xs font-semibold text-muted hover:text-foreground"
+            >
+              <ChatIcon className="h-3.5 w-3.5" />
+              {task.commentCount > 0
+                ? `${task.commentCount} comment${task.commentCount === 1 ? "" : "s"} on this task`
+                : "Comment on this task"}
+              <ChevronDownIcon className={`h-3 w-3 transition-transform ${commentsOpen ? "rotate-180" : ""}`} />
+            </button>
+
+            {commentsOpen && (
+              <div className="mt-2 rounded-xl border border-border bg-black/[0.015] overflow-hidden">
+                <div className="p-3 space-y-2.5 max-h-64 overflow-y-auto">
+                  {commentLoadState === "loading" && <div className="h-8 rounded-lg bg-black/[0.04] animate-pulse" />}
+                  {commentLoadState === "error" && (
+                    <p className="text-xs text-accent">Unable to load comments. Please try again.</p>
+                  )}
+                  {commentLoadState === "ready" && comments.length === 0 && (
+                    <p className="text-xs text-muted">No comments yet — this is where the conversation about this task will show up.</p>
+                  )}
+                  {commentLoadState === "ready" &&
+                    comments.map((c) => {
+                      const mine = c.authorId === viewerId;
+                      return (
+                        <div key={c.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+                          <div
+                            className={`max-w-[85%] rounded-xl px-3 py-2 ${mine ? "text-white" : "bg-black/[0.03] text-foreground"}`}
+                            style={mine ? { background: "var(--ttc-blue)" } : undefined}
+                          >
+                            {!mine && <p className="text-[11px] font-semibold mb-0.5">{c.authorName}</p>}
+                            {c.body && <p className="text-sm whitespace-pre-wrap break-words">{c.body}</p>}
+                            {c.hasAttachment && (
+                              <button
+                                onClick={() => handleCommentDownload(c.id)}
+                                disabled={downloadingCommentId === c.id}
+                                className={`mt-1 flex items-center gap-1.5 text-xs font-medium underline ${mine ? "text-white/90" : "text-accent-ink"}`}
+                              >
+                                <DownloadIcon className="h-3.5 w-3.5" />
+                                {c.attachmentName ?? "Attachment"}
+                              </button>
+                            )}
+                            <p className={`text-[10px] mt-1 ${mine ? "text-white/70" : "text-muted"}`}>
+                              {formatCommentTime(c.createdAt)}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+
+                <form onSubmit={sendComment} className="border-t border-border p-2.5 space-y-1.5">
+                  <textarea
+                    value={commentBody}
+                    onChange={(e) => setCommentBody(e.target.value)}
+                    placeholder="Reply about this task…"
+                    rows={2}
+                    className="w-full rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-accent resize-none"
+                  />
+                  {commentError && <p className="text-xs text-accent">{commentError}</p>}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <input
+                        ref={commentFileInputRef}
+                        type="file"
+                        onChange={(e) => setCommentFile(e.target.files?.[0] ?? null)}
+                        className="text-xs text-muted max-w-[8rem]"
+                      />
+                      {commentFile && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCommentFile(null);
+                            if (commentFileInputRef.current) commentFileInputRef.current.value = "";
+                          }}
+                          className="text-xs text-muted hover:text-foreground shrink-0"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={sendingComment || (!commentBody.trim() && !commentFile)}
+                      className="text-xs font-semibold shrink-0 rounded-full px-3 py-1.5 text-white disabled:opacity-50"
+                      style={{ background: ink }}
+                    >
+                      {sendingComment ? "Sending…" : "Send"}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div
