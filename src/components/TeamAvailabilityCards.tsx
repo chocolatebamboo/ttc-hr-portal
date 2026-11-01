@@ -1027,6 +1027,7 @@ export default function TeamAvailabilityCards({
             canReview
             showDate
             forceDescExpanded
+            variant="detail"
             onChanged={loadOpenDateTasks}
           />
         </div>
