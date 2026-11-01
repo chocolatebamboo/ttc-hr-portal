@@ -22,11 +22,18 @@ export async function GET(_request: Request, ctx: RouteContext<"/api/date-tasks/
 
 /** POST /api/date-tasks/[id] — push a new task onto that employee's date. Admin or their
  *  supervisor only (createDateTask itself enforces this). Multipart: `taskDate`, `title`,
- *  `description`, and an optional `file` — same "body text + optional file" shape as
- *  team-notes' POST, CB, Sept 2026: "I should be able to choose file or add files into that as
- *  well." `title` is new with correction brief #2's per-task rework (DateTask now needs a short
- *  name distinct from its longer instructions/description) — see prisma/schema.prisma's own
- *  DateTask doc comment. */
+ *  `description`, `priority`, an optional `dueAt` (ISO datetime string, round seventeen — see
+ *  DateTask.dueAt's own doc comment in prisma/schema.prisma), and an optional `file` — same
+ *  "body text + optional file" shape as team-notes' POST, CB, Sept 2026: "I should be able to
+ *  choose file or add files into that as well." `title` is new with correction brief #2's
+ *  per-task rework (DateTask now needs a short name distinct from its longer instructions/
+ *  description) — see prisma/schema.prisma's own DateTask doc comment.
+ *
+ *  `priority` is read here now too — DateTasksPanel.tsx's own Normal/Urgent segmented control has
+ *  been posting this field since the QA pass that added it, but this route never read it off the
+ *  form, so every task silently landed as createDateTask's own NORMAL default no matter which
+ *  segment was selected. Caught in passing while wiring dueAt through this same form; fixed
+ *  alongside rather than left broken right next to it. */
 export async function POST(request: Request, ctx: RouteContext<"/api/date-tasks/[id]">) {
   try {
     const employee = await requireEmployee();
@@ -36,6 +43,8 @@ export async function POST(request: Request, ctx: RouteContext<"/api/date-tasks/
     const taskDate = String(form.get("taskDate") ?? "");
     const title = String(form.get("title") ?? "");
     const description = String(form.get("description") ?? "");
+    const priority = form.get("priority") === "URGENT" ? "URGENT" : "NORMAL";
+    const dueAt = String(form.get("dueAt") ?? "") || undefined;
     const file = form.get("file");
 
     if (file !== null && !(file instanceof File)) {
@@ -47,7 +56,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/date-tasks/
         ? { key: await uploadDateTaskFile(file, employeeId), name: file.name }
         : undefined;
 
-    const task = await createDateTask(employee, employeeId, taskDate, title, description, attachment);
+    const task = await createDateTask(employee, employeeId, taskDate, title, description, attachment, priority, dueAt);
     return NextResponse.json({ task }, { status: 201 });
   } catch (err) {
     return toErrorResponse(err);
