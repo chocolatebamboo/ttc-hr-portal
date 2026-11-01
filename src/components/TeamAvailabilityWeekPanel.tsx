@@ -55,6 +55,18 @@ import { ChartIcon } from "@/components/icons";
  * closes) drops that cap for exactly as long as something's actually open, so the grid gets the
  * page's real available width to work with; the moment nothing's open, this snaps back to its
  * normal narrow reading width, unchanged from before this round.
+ *
+ * Round eighteen, second correction (CB, Nov 2026, on the live result of the fix above: "I didn't
+ * need you to [move] the date part... it was supposed to take up that right-hand side... right
+ * now it's only showing like a portion of the right side"): dropping the outer `max-w-3xl` above
+ * also freed this header row (the "Team availability requests" title plus the pay-period switcher
+ * and "2-week report" link, laid out with `justify-between`) to stretch across the same newly-full
+ * width — so the switcher/report link drifted out to the far right edge of the page, floating
+ * above the detail panel with empty space around it, instead of staying put where they've always
+ * sat. That drifting control, not the detail panel itself, was what read as "not filled" here. The
+ * header now carries its own `max-w-3xl` unconditionally, so it stays pinned at its normal narrow
+ * width no matter what the outer wrapper is doing — only the grid TeamAvailabilityCards renders
+ * below it (list column capped, detail column `1fr`) grows to use the freed-up width.
  */
 export default function TeamAvailabilityWeekPanel({ viewerId }: { viewerId: string }) {
   const [offset, setOffset] = useState(getCurrentPayrollPeriodOffset);
@@ -63,7 +75,7 @@ export default function TeamAvailabilityWeekPanel({ viewerId }: { viewerId: stri
 
   return (
     <div className={hasExpandedTask ? "" : "max-w-3xl"}>
-      <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+      <div className="max-w-3xl flex items-center justify-between gap-3 mb-3 flex-wrap">
         <h2 className="text-sm font-medium text-muted">Team availability requests</h2>
         <div className="flex items-center gap-2 flex-wrap">
           <PayrollPeriodSwitcher offset={offset} onOffsetChange={setOffset} />
