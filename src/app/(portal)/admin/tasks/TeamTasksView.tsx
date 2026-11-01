@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { DateTaskDTO, TeamDateTasksRowDTO } from "@/types";
-import DateTaskRow from "@/components/DateTaskRow";
+import TeamTaskList from "@/components/TeamTaskList";
 import PayrollPeriodSwitcher from "@/components/PayrollPeriodSwitcher";
 import { ChecklistIcon, ChevronDownIcon } from "@/components/icons";
 import { getPayrollPeriod, getCurrentPayrollPeriodOffset } from "@/lib/week";
@@ -102,7 +102,11 @@ export default function TeamTasksView({ scope, viewerId }: { scope: "all" | "tea
   const approvedCount = allTasks.filter((t) => matchesFilter(t, "approved")).length;
 
   return (
-    <div className="max-w-3xl">
+    // Round seventeen (CB, Oct 2026): widened at desktop widths (lg:) — the companion piece to
+    // TeamTaskList's own detail panel below, which otherwise has nowhere to actually be wider
+    // into. Unchanged below `lg`, same reasoning as TeamTaskList itself: this is a desktop-only
+    // ask, not a general page-width change.
+    <div className="max-w-3xl lg:max-w-6xl">
       <div className="mb-5">
         <h1 className="page-title text-2xl">Team Tasks</h1>
         <p className="text-sm text-muted mt-0.5">
@@ -233,10 +237,8 @@ export default function TeamTasksView({ scope, viewerId }: { scope: "all" | "tea
                 </button>
 
                 {isExpanded && filteredTasks.length > 0 && (
-                  <div className="border-t border-border bg-black/[0.012] p-3.5 space-y-2.5">
-                    {filteredTasks.map((t) => (
-                      <DateTaskRow key={t.id} task={t} viewerId={viewerId} canReview showDate onChanged={load} />
-                    ))}
+                  <div className="border-t border-border bg-black/[0.012] p-3.5">
+                    <TeamTaskList tasks={filteredTasks} viewerId={viewerId} onChanged={load} />
                   </div>
                 )}
               </div>
