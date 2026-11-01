@@ -29,6 +29,31 @@ function initialsOf(name: string): string {
   return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
 }
 
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Matches any tag RichTextEditor's toolbar (src/components/RichTextEditor.tsx) could actually
+// produce — see descriptionHtml's own doc comment below for what this decides.
+const RICH_TEXT_TAG_PATTERN = /<\/?(b|strong|i|em|u|ul|ol|li|span|div|p|br)[ >/]/i;
+
+/**
+ * Round seventeen (CB, Oct 2026: "if we're creating like text for tasks and whatnot... bold,
+ * italicized, bullet points... alignment... font size"): task descriptions are now authored
+ * through RichTextEditor and stored as sanitized HTML (see sanitizeRichText in
+ * src/lib/rich-text.ts — the ONLY place this HTML is ever written, so anything already in the
+ * database is already safe to render as-is here). Every description written before this feature
+ * shipped is still plain text, though — rendering that raw as HTML would mis-render any stray
+ * `<`/`>`/`&` and drop the line breaks `whitespace-pre-wrap` used to preserve. This tells the two
+ * apart by whether the string contains any tag RichTextEditor could actually produce; a legacy
+ * plain-text description essentially never does, so it falls through to the escape-and-<br> path
+ * and displays exactly like it always did.
+ */
+function descriptionHtml(description: string): string {
+  if (RICH_TEXT_TAG_PATTERN.test(description)) return description;
+  return escapeHtml(description).replace(/\n/g, "<br />");
+}
+
 // QA pass (Sept 2026), CB: task status should follow the same brand color language the
 // availability cards already use (see src/lib/status-tone.ts) — amber for anything still
 // outstanding, the brand pink for a confirmed/approved outcome, rose for sent-back — rather than
@@ -143,7 +168,7 @@ export default function DateTaskRow({
   // already applied on first render) rather than assumed from character count, so a short
   // description with unusually long words never grows a pointless "Show more" link and a long
   // one that happens to fit in 2 lines doesn't either.
-  const descRef = useRef<HTMLParagraphElement | null>(null);
+  const descRef = useRef<HTMLDivElement | null>(null);
   const [descExpanded, setDescExpanded] = useState(false);
   const [descOverflows, setDescOverflows] = useState(false);
 
@@ -493,14 +518,13 @@ export default function DateTaskRow({
         </p>
         {task.description && (
           <>
-            <p
+            <div
               ref={descRef}
-              className={`text-sm text-muted mt-1 whitespace-pre-wrap break-words ${
+              className={`text-sm text-muted mt-1 break-words rich-text-content ${
                 descExpanded ? "" : "line-clamp-2"
               }`}
-            >
-              {task.description}
-            </p>
+              dangerouslySetInnerHTML={{ __html: descriptionHtml(task.description) }}
+            />
             {descOverflows && (
               <button
                 type="button"
@@ -514,8 +538,17 @@ export default function DateTaskRow({
         )}
       </div>
 
+      {/* Round seventeen (CB, Oct 2026: "let's make sure that when a task is created, we see
+          the date and time as well. And then when it needs to be due as well") — always visible
+          regardless of status (createdAt never changes once set), separate from the per-status
+          line right below so neither has to juggle the other's wording. */}
+      <p className="text-xs text-white/75 mt-1.5">Assigned {formatCommentTime(task.createdAt)}</p>
+      {task.dueAt && (
+        <p className="text-xs font-semibold text-white mt-0.5">Due {formatCommentTime(task.dueAt)}</p>
+      )}
+
       {task.status !== "APPROVED" && (
-        <p className="text-xs text-white/75 mt-1.5">
+        <p className="text-xs text-white/75 mt-0.5">
           {task.status === "ASSIGNED" && `From ${task.createdByName}`}
           {task.status === "IN_PROGRESS" && `In progress — from ${task.createdByName}`}
           {task.status === "AWAITING_REVIEW" && "Submitted — awaiting review"}
