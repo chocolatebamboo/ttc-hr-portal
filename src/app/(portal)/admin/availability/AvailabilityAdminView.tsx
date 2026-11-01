@@ -23,17 +23,29 @@ import TeamAvailabilityWeekPanel from "@/components/TeamAvailabilityWeekPanel";
  * screenshot instead of drifting into its own, older layout. `viewerId` is the signed-in
  * admin/supervisor, passed down from page.tsx (getCurrentEmployee runs server-side there) so the
  * inline chat thread knows which side of the conversation is "you."
+ *
+ * Round eighteen, correction (CB, Nov 2026, on a live screenshot: "it's supposed to show up fully
+ * on the right-hand side, not just squished in there"): this used to wrap the heading AND
+ * TeamAvailabilityWeekPanel together in one `max-w-3xl`, which meant TeamAvailabilityCards' own
+ * master-detail grid never had more than that same ~768px to split a task's detail panel out of,
+ * no matter the real page width. The heading/description keep their own `max-w-3xl` (same reading
+ * width as always); TeamAvailabilityWeekPanel now sits outside it, free to use the page's full
+ * available width — it still renders at its own identical narrow width day to day, since it
+ * manages that itself and only drops it while a task is actually open (see that component's own
+ * doc comment).
  */
 export default function AvailabilityAdminView({ viewerId, scope }: { viewerId: string; scope: "all" | "team" }) {
   return (
-    <div className="max-w-3xl">
-      <h1 className="page-title text-2xl mb-1">Team Availability</h1>
-      <p className="text-sm text-muted mb-4">
-        {scope === "team"
-          ? "Your own team's submitted availability. Purely informational: nothing here is enforced against scheduling."
-          : "Every team member's submitted availability, org-wide — not just one supervisor's team. Purely informational: nothing here is enforced against scheduling."}
-      </p>
+    <>
+      <div className="max-w-3xl">
+        <h1 className="page-title text-2xl mb-1">Team Availability</h1>
+        <p className="text-sm text-muted mb-4">
+          {scope === "team"
+            ? "Your own team's submitted availability. Purely informational: nothing here is enforced against scheduling."
+            : "Every team member's submitted availability, org-wide — not just one supervisor's team. Purely informational: nothing here is enforced against scheduling."}
+        </p>
+      </div>
       <TeamAvailabilityWeekPanel viewerId={viewerId} />
-    </div>
+    </>
   );
 }
