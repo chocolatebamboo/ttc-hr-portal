@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { DateTaskDTO } from "@/types";
 import DateTaskRow from "@/components/DateTaskRow";
+import RichTextEditor from "@/components/RichTextEditor";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -53,6 +54,13 @@ export default function DateTasksPanel({
   // of "which of these two is it," and a bug in an earlier mockup pass had both options able to
   // look selected at once. Only one of the two is ever the active segment.
   const [priority, setPriority] = useState<"NORMAL" | "URGENT">("NORMAL");
+  // Round seventeen (CB, Oct 2026: "let's make sure... when it needs to be due as well" — asked
+  // directly whether a due date should be required: "Optional"). Two plain date/time inputs
+  // rather than one <input type="datetime-local">, matching the mockup CB approved and this
+  // form's own existing taskDate (set by whichever date chip this panel is already open on, not
+  // asked here) — kept as separate strings and combined into one ISO instant only at submit time.
+  const [dueDate, setDueDate] = useState("");
+  const [dueTime, setDueTime] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [addError, setAddError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -93,6 +101,7 @@ export default function DateTasksPanel({
       form.set("title", title);
       form.set("description", description);
       form.set("priority", priority);
+      if (dueDate) form.set("dueAt", `${dueDate}T${dueTime || "00:00"}:00`);
       if (file) form.set("file", file);
       const res = await fetch(`/api/date-tasks/${employeeId}`, { method: "POST", body: form });
       const data = await res.json().catch(() => ({}));
@@ -104,6 +113,8 @@ export default function DateTasksPanel({
       setDescription("");
       setFile(null);
       setPriority("NORMAL");
+      setDueDate("");
+      setDueTime("");
       if (fileInputRef.current) fileInputRef.current.value = "";
       setShowAddForm(false);
       await load();
@@ -142,13 +153,31 @@ export default function DateTasksPanel({
             autoFocus
             className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
           />
-          <textarea
+          <RichTextEditor
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            onChange={setDescription}
             placeholder="Instructions or details (optional)…"
-            rows={2}
-            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent resize-none"
           />
+          {/* Round seventeen (CB, Oct 2026): optional, right under priority — see this file's
+              own doc comment on dueDate/dueTime above for why these stay two plain inputs. */}
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1">Due date (optional)</label>
+            <div className="flex gap-2">
+              <input
+                type="date"
+                value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
+                className="flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent"
+              />
+              <input
+                type="time"
+                value={dueTime}
+                onChange={(e) => setDueTime(e.target.value)}
+                disabled={!dueDate}
+                className="flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent disabled:opacity-50"
+              />
+            </div>
+          </div>
           <div className="flex w-full rounded-lg border border-border overflow-hidden text-xs font-semibold" role="radiogroup" aria-label="Priority">
             <button
               type="button"
