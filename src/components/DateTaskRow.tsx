@@ -121,6 +121,8 @@ export default function DateTaskRow({
   showDate = false,
   showEmployee = false,
   onChanged,
+  onExpandRequested,
+  forceDescExpanded = false,
 }: {
   task: DateTaskDTO;
   /** The signed-in viewer's own employee id — decides which side a comment bubble renders on,
@@ -139,6 +141,18 @@ export default function DateTaskRow({
   /** Fires after any action changes this task (status, comment count) — lets the parent list
    *  refetch so every row stays in sync, not just this one. */
   onChanged: () => void;
+  /** Round eighteen (CB, Nov 2026, on Team Availability's blank space next to a task card: "that's
+   *  kind of where I would have the full preview... and have the option to... expand"): when
+   *  given, a click on "Show more" at desktop width (checked at click time — see this prop's own
+   *  use below) calls this instead of expanding the description in place, so the caller can open
+   *  the full task into a side panel instead. Omitted everywhere else (DateTasksSection,
+   *  MyDateTasksPanel, MyTasksView, every existing DateTasksPanel caller), so this row's own
+   *  in-place expand is completely unchanged for them, on every viewport. */
+  onExpandRequested?: () => void;
+  /** Companion to onExpandRequested — the caller rendering this exact task again in its own side
+   *  panel sets this true so that copy shows the full description unclamped from the start,
+   *  without needing its own "Show more" toggle. Never set by any existing caller. */
+  forceDescExpanded?: boolean;
 }) {
   const isOwnTask = task.employeeId === viewerId;
   const [busy, setBusy] = useState(false);
@@ -510,7 +524,19 @@ export default function DateTaskRow({
           returnNote below. A full-width sibling of the badges/actions row above (not nested
           inside it), so it runs edge to edge no matter how short or long the description is —
           see that row's own doc comment. */}
-      <div className="rounded-xl bg-white/95 px-3 py-2.5 mt-1.5 shadow-sm">
+      <div
+        className={`rounded-xl bg-white/95 px-3 py-2.5 mt-1.5 shadow-sm ${onExpandRequested ? "lg:cursor-pointer" : ""}`}
+        // Round eighteen: this panel only ever holds plain text (the title and description) plus
+        // the "Show more" button below, so giving IT the click-to-expand behavior — rather than
+        // the whole card, which also carries status badges, action buttons, downloads, and the
+        // comment thread — reaches the mockup's "click the task card" affordance without risking
+        // an accidental expand from a click meant for one of those. "Show more" itself already
+        // calls onExpandRequested on its own click (above); hitting this too on the same click is
+        // harmless, since both do exactly the same thing.
+        onClick={() => {
+          if (onExpandRequested && window.innerWidth >= 1024) onExpandRequested();
+        }}
+      >
         <p
           className={`text-sm font-semibold text-foreground ${task.status === "APPROVED" ? "line-through text-muted" : ""}`}
         >
@@ -521,14 +547,25 @@ export default function DateTaskRow({
             <div
               ref={descRef}
               className={`text-sm text-muted mt-1 break-words rich-text-content ${
-                descExpanded ? "" : "line-clamp-2"
+                descExpanded || forceDescExpanded ? "" : "line-clamp-2"
               }`}
               dangerouslySetInnerHTML={{ __html: descriptionHtml(task.description) }}
             />
             {descOverflows && (
               <button
                 type="button"
-                onClick={() => setDescExpanded((v) => !v)}
+                onClick={() => {
+                  // Round eighteen: redirect to the caller's side-panel expand only at desktop
+                  // width — checked here, at click time, rather than with a reactive media-query
+                  // hook, so this stays a one-line gate instead of a new effect/listener. Below
+                  // lg, this button keeps doing exactly what it always did (toggle in place),
+                  // which is what every existing caller still gets regardless of viewport.
+                  if (onExpandRequested && window.innerWidth >= 1024) {
+                    onExpandRequested();
+                    return;
+                  }
+                  setDescExpanded((v) => !v);
+                }}
                 className="text-xs font-semibold text-accent-ink underline underline-offset-2 mt-0.5"
               >
                 {descExpanded ? "Show less" : "Show more"}
