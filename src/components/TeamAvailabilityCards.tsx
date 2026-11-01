@@ -401,7 +401,7 @@ function useTeamAvailabilityQueue(opts?: { initialPending?: AdminAvailabilityDTO
   // same POST /api/admin/shifts endpoint and createShiftManually (src/lib/shifts.ts) that form
   // uses, so the two stay in lockstep rather than growing a second implementation. Returns the
   // error string on failure (or null on success) rather than tracking its own busy/error state
-  // here — Card manages the form's open/busy/error state locally, the same "self-contained
+  // here — Card manages the form's own open/busy/error state locally, the same "self-contained
   // inline form" shape DateTasksPanel's own add-task form already uses, since this action isn't
   // tied to any one submission the way the rest of this hook's state is keyed.
   async function createShift(input: {
@@ -658,6 +658,7 @@ export default function TeamAvailabilityCards({
   weekStart,
   weekEnd,
   expandable = false,
+  onExpandedChange,
 }: {
   viewerId: string;
   /** Oct 2026 (CB, on the Availability mockup: "I should see an option to kind of look at the
@@ -678,6 +679,15 @@ export default function TeamAvailabilityCards({
    *  through the shared useTeamAvailabilityQueue hook/Card) is completely unaffected — only
    *  TeamAvailabilityWeekPanel passes this true. */
   expandable?: boolean;
+  /** Round eighteen, correction (CB, Nov 2026, on a live screenshot: "it's supposed to show up
+   *  fully on the right-hand side, not just squished in there" — the detail panel was rendering
+   *  inside TeamAvailabilityWeekPanel's own narrow reading-width wrapper, same as the rest of
+   *  this page): fires whenever this component's own detail panel opens or closes, so that
+   *  wrapper (the only thing standing between this grid and the page's real available width) can
+   *  drop its own max-width exactly while a task is open, and restore it the moment it closes —
+   *  see TeamAvailabilityWeekPanel's own doc comment on this prop for the other half. Omitted
+   *  (`expandable` false) wherever that toggle makes no sense. */
+  onExpandedChange?: (expanded: boolean) => void;
 }) {
   const q = useTeamAvailabilityQueue();
   // Round eighteen: which task (by id) is open in the right-hand detail panel, and the full task
@@ -719,6 +729,14 @@ export default function TeamAvailabilityCards({
   }, [expandable, q.openDate?.submissionId, q.openDate?.date, openDateEmployeeId]);
 
   const expandedTask = expandedTaskId ? openDateTasks.find((t) => t.id === expandedTaskId) ?? null : null;
+
+  // Round eighteen, correction — see onExpandedChange's own doc comment above for why this
+  // exists at all: the caller needs to know the instant this flips so it can drop its own
+  // max-width wrapper in time for the very render that needs the room.
+  useEffect(() => {
+    onExpandedChange?.(!!expandedTask);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedTask]);
   // Oct 2026 (CB, screenshotted Decided cards with dates going back over a week, today being
   // Oct 1): "it should archive the dates that are already complete or already done... show only
   // what's for this week." Collapsed behind this toggle rather than lost — confirmed via
@@ -979,7 +997,15 @@ export default function TeamAvailabilityCards({
   if (!expandable || !expandedTask) return mainContent;
 
   return (
-    <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_26rem] lg:gap-5 lg:items-start">
+    // Round eighteen, correction (CB: "it's supposed to show up fully on the right-hand side,
+    // not just squished in there"): this used to be the other way around — the list column
+    // flexible (1fr) and the detail column pinned to a fixed 26rem — which is backwards from the
+    // approved mockup's own `minmax(0,620px) 1fr` split (list capped, detail fills whatever's
+    // left). A fixed-width detail column never grows past that fixed width no matter how much
+    // room the page actually has, which is exactly what read as "squished." The list keeps
+    // roughly its normal reading width (48rem, same as this page's usual max-w-3xl); the detail
+    // column now takes every bit of space beyond that, all the way to the page's own right edge.
+    <div className="lg:grid lg:grid-cols-[minmax(0,48rem)_1fr] lg:gap-5 lg:items-start">
       <div className="min-w-0">{mainContent}</div>
       <div className="mt-5 lg:mt-0 lg:sticky lg:top-4">
         <div className="rounded-2xl border border-border bg-surface shadow-sm p-3 sm:p-4">
