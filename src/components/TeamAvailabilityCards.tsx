@@ -5,13 +5,14 @@ import { useRouter } from "next/navigation";
 import AvailabilityStatusPill from "@/components/AvailabilityStatusPill";
 import ShiftStatusPill from "@/components/ShiftStatusPill";
 import DateTasksPanel from "@/components/DateTasksPanel";
+import DateTaskRow from "@/components/DateTaskRow";
 import SwipeReveal from "@/components/SwipeReveal";
 import NewMessagePicker from "@/components/NewMessagePicker";
 import { ChecklistIcon, CheckCircleIcon, CalendarIcon, TrashIcon, ChatIcon, ChevronDownIcon } from "@/components/icons";
-import { slotChips, formatReviewedAt, type SlotChip } from "@/lib/availability-format";
+import { slotChips, formatReviewedAt, formatSlotDate, type SlotChip } from "@/lib/availability-format";
 import { toneForStatus, YOU_TONE } from "@/lib/status-tone";
 import { dateKeyDaysFromNow } from "@/lib/time";
-import type { AdminAvailabilityDTO, AdminShiftDTO, AvailabilityDateDecision, DirectoryEntryDTO } from "@/types";
+import type { AdminAvailabilityDTO, AdminShiftDTO, AvailabilityDateDecision, DateTaskDTO, DirectoryEntryDTO } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -656,6 +657,7 @@ export default function TeamAvailabilityCards({
   viewerId,
   weekStart,
   weekEnd,
+  expandable = false,
 }: {
   viewerId: string;
   /** Oct 2026 (CB, on the Availability mockup: "I should see an option to kind of look at the
@@ -669,8 +671,54 @@ export default function TeamAvailabilityCards({
    *  calls it this way. */
   weekStart?: string;
   weekEnd?: string;
+  /** Round eighteen (CB, Nov 2026, confirmed via her own interactive mockup: "yes" to clicking a
+   *  task card opening its full detail into the blank space beside it, on both this page and
+   *  Team Schedule): opts into the desktop master-detail layout below. Defaults false so
+   *  TeamAvailabilityRequestsSection (the dashboard widget, which drives this same component
+   *  through the shared useTeamAvailabilityQueue hook/Card) is completely unaffected — only
+   *  TeamAvailabilityWeekPanel passes this true. */
+  expandable?: boolean;
 }) {
   const q = useTeamAvailabilityQueue();
+  // Round eighteen: which task (by id) is open in the right-hand detail panel, and the full task
+  // list for the currently globally-open date it belongs to. Only one date can ever be open at a
+  // time across this whole queue (q.openDate, above) — so lifting this one fetch to the top,
+  // keyed off that same openDate, gives both the in-place DateTasksPanel on the open card AND
+  // this detail panel one shared array to read from, instead of two separately-fetched copies of
+  // "the same" tasks that could drift (same reasoning TeamTaskList's own ID-derived `selected`
+  // already established). No-ops entirely when `expandable` is false.
+  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
+  const [openDateTasks, setOpenDateTasks] = useState<DateTaskDTO[]>([]);
+  const openDateEmployeeId = expandable
+    ? [...q.pending, ...q.decided].find((s) => s.id === q.openDate?.submissionId)?.employeeId
+    : undefined;
+
+  async function loadOpenDateTasks() {
+    if (!openDateEmployeeId || !q.openDate) return;
+    try {
+      const res = await fetch(`/api/date-tasks/${openDateEmployeeId}`);
+      if (!res.ok) throw new Error();
+      const data: { tasks: DateTaskDTO[] } = await res.json();
+      setOpenDateTasks(data.tasks.filter((t) => t.taskDate === q.openDate!.date));
+    } catch {
+      // Non-fatal — the in-place DateTasksPanel still renders its own loading/error state off
+      // this same array; a failed fetch here just means an empty list until the next change.
+    }
+  }
+
+  useEffect(() => {
+    if (!expandable) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setExpandedTaskId(null);
+    if (!q.openDate || !openDateEmployeeId) {
+      setOpenDateTasks([]);
+      return;
+    }
+    loadOpenDateTasks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandable, q.openDate?.submissionId, q.openDate?.date, openDateEmployeeId]);
+
+  const expandedTask = expandedTaskId ? openDateTasks.find((t) => t.id === expandedTaskId) ?? null : null;
   // Oct 2026 (CB, screenshotted Decided cards with dates going back over a week, today being
   // Oct 1): "it should archive the dates that are already complete or already done... show only
   // what's for this week." Collapsed behind this toggle rather than lost — confirmed via
@@ -767,6 +815,9 @@ export default function TeamAvailabilityCards({
         onMessageAboutDate={q.openChatForDate}
         onRemoveDate={q.removeDate}
         onCreateShift={q.createShift}
+        tasksOverride={expandable ? openDateTasks : undefined}
+        onTasksChanged={expandable ? loadOpenDateTasks : undefined}
+        onExpandTask={expandable ? (t) => setExpandedTaskId(t.id) : undefined}
       />
     );
     return soleId !== null ? (
@@ -791,7 +842,7 @@ export default function TeamAvailabilityCards({
     );
   };
 
-  return (
+  const mainContent = (
     <>
       {/* Redesign follow-up (Sept 2026), CB: "I don't like how there's pending zero, decided
           zero... like, we shouldn't see those things if there's nothing in there." Each section
@@ -839,6 +890,9 @@ export default function TeamAvailabilityCards({
                   onMessageAboutDate={q.openChatForDate}
                   onRemoveDate={q.removeDate}
                   onCreateShift={q.createShift}
+                  tasksOverride={expandable ? openDateTasks : undefined}
+                  onTasksChanged={expandable ? loadOpenDateTasks : undefined}
+                  onExpandTask={expandable ? (t) => setExpandedTaskId(t.id) : undefined}
                 />
               );
               // Swipe-to-remove targets ONE submission (removeAvailabilitySubmission takes a
@@ -917,6 +971,42 @@ export default function TeamAvailabilityCards({
       )}
     </>
   );
+
+  // Round eighteen: the master-detail split only ever kicks in once there's actually something
+  // to show on the right (expandedTask) — a bare `expandable` with nothing open yet renders
+  // exactly like today, full width, so a page that enables this never looks different until an
+  // admin actually opens a task.
+  if (!expandable || !expandedTask) return mainContent;
+
+  return (
+    <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_26rem] lg:gap-5 lg:items-start">
+      <div className="min-w-0">{mainContent}</div>
+      <div className="mt-5 lg:mt-0 lg:sticky lg:top-4">
+        <div className="rounded-2xl border border-border bg-surface shadow-sm p-3 sm:p-4">
+          <div className="flex items-center justify-between gap-2 mb-2 px-0.5">
+            <p className="text-xs font-semibold text-muted">
+              {q.openDate ? `Opened from ${formatSlotDate(q.openDate.date)}` : "Task"}
+            </p>
+            <button
+              type="button"
+              onClick={() => setExpandedTaskId(null)}
+              className="text-xs font-semibold text-accent-ink hover:underline underline-offset-2"
+            >
+              Close
+            </button>
+          </div>
+          <DateTaskRow
+            task={expandedTask}
+            viewerId={viewerId}
+            canReview
+            showDate
+            forceDescExpanded
+            onChanged={loadOpenDateTasks}
+          />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /** Small tone dot rendered on a date chip showing that date's own individual decision — the
@@ -988,6 +1078,9 @@ export function Card({
   onMessageAboutDate,
   onRemoveDate,
   onCreateShift,
+  tasksOverride,
+  onTasksChanged,
+  onExpandTask,
 }: {
   submissions: AdminAvailabilityDTO[];
   viewerId: string;
@@ -1014,7 +1107,6 @@ export function Card({
   collapsible?: boolean;
   onToggleDate: (submissionId: string, date: string) => void;
   onAddNoteToggle: () => void;
-  onNoteTextChange: (v: string) => void;
   /** Saves the note typed into the box above onto an already-decided submission — see
    *  addAvailabilityReviewComment's own doc comment in src/lib/availability.ts. */
   onAddNote: (submissionId: string, comment: string) => void;
@@ -1054,6 +1146,14 @@ export function Card({
     endTime: string;
     note?: string;
   }) => Promise<string | null>;
+  /** Round eighteen — see TeamAvailabilityCards' own doc comment on its `expandable` prop above
+   *  for the full picture. All three are forwarded straight through to this card's own
+   *  DateTasksPanel, unchanged from that component's own props of the same names; omitted
+   *  (undefined) whenever the caller itself isn't `expandable`, which leaves this card's
+   *  DateTasksPanel fetching and rendering exactly as it always has. */
+  tasksOverride?: DateTaskDTO[];
+  onTasksChanged?: () => void;
+  onExpandTask?: (task: DateTaskDTO) => void;
 }) {
   const { employeeId, employeeName } = submissions[0];
   const isSelf = employeeId === viewerId;
@@ -2000,7 +2100,14 @@ export function Card({
               <ChecklistIcon className="h-3.5 w-3.5 text-muted" />
               {openChip.dateLabel} — tasks
             </p>
-            <DateTasksPanel employeeId={employeeId} taskDate={openChip.date} viewerId={viewerId} />
+            <DateTasksPanel
+              employeeId={employeeId}
+              taskDate={openChip.date}
+              viewerId={viewerId}
+              tasksOverride={tasksOverride}
+              onTasksChanged={onTasksChanged}
+              onExpandTask={onExpandTask}
+            />
           </div>
         </div>
       )}
