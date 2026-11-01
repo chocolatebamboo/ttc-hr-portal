@@ -35,7 +35,7 @@ import AvailabilityView from "./AvailabilityView";
  * Bugfix (Oct 2026, CB: "where I'm able to... schedule someone else on the availability page" —
  * not showing for Daijour): this branch used to gate on a bare `isAdmin(employee)`, same bug
  * canAccessTeamAvailability's own doc comment (src/lib/authorization.ts) describes already
- * having been fixed on the sibling /admin/availability page — Daijour (SUPERVISOR) has real
+ * having been fixed on the sibling /admin/availability page. Daijour (SUPERVISOR) has real
  * team-management authority everywhere else in this app (Team Schedule, Attendance, PTO
  * Management, the dashboard's own team widgets) but was silently dropped to the plain employee
  * view here. Now gated on canAccessTeamAvailability (isAdmin() OR SUPERVISOR) instead, so he
@@ -46,22 +46,34 @@ import AvailabilityView from "./AvailabilityView";
  * canSeeAdminHomeDashboard's own doc comment for that same principle). AvailabilityView's new
  * `canManageTeam` prop is the one that actually shows ScheduleSomeoneButton — see its own doc
  * comment there.
+ *
+ * Round eighteen, correction (CB, Nov 2026, on a live screenshot: "it's supposed to show up fully
+ * on the right-hand side, not just squished in there"): the whole admin branch used to share one
+ * `max-w-3xl` wrapper, which meant TeamAvailabilityWeekPanel's own master-detail grid (once a task
+ * is open) never had more than that same ~768px to work with, regardless of how much real width
+ * the page actually had. AvailabilityView and the Time off requests section keep that same
+ * `max-w-3xl` reading width, each in its own wrapper now; TeamAvailabilityWeekPanel sits outside
+ * both, free to use the page's full available width — it still renders at its usual narrow width
+ * day to day, since it manages that itself and only drops it while a task is actually open (see
+ * that component's own doc comment).
  */
 export default async function AvailabilityPage() {
   const employee = await requireEmployeeOrRedirect();
 
   if (canAccessTeamAvailability(employee)) {
     return (
-      <div className="max-w-3xl">
-        <AvailabilityView employeeId={employee.id} isAdminViewer={isAdmin(employee)} canManageTeam />
+      <>
+        <div className="max-w-3xl">
+          <AvailabilityView employeeId={employee.id} isAdminViewer={isAdmin(employee)} canManageTeam />
+        </div>
         <div className="mt-6">
           <TeamAvailabilityWeekPanel viewerId={employee.id} />
         </div>
-        <div className="mt-6">
+        <div className="max-w-3xl mt-6">
           <h2 className="text-sm font-medium text-muted mb-2">Time off requests</h2>
           <TeamPtoCards viewerId={employee.id} />
         </div>
-      </div>
+      </>
     );
   }
 
