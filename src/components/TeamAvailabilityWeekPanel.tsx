@@ -1,51 +1,93 @@
-import TeamAvailabilityWeekPanel from "@/components/TeamAvailabilityWeekPanel";
+"use client";
+
+import { useState } from "react";
+import Link from "next/link";
+import { getPayrollPeriod, getCurrentPayrollPeriodOffset, formatWeekRange } from "@/lib/week";
+import TeamAvailabilityCards from "@/components/TeamAvailabilityCards";
+import PayrollPeriodSwitcher from "@/components/PayrollPeriodSwitcher";
+import { ChartIcon } from "@/components/icons";
 
 /**
- * The standalone Team Availability admin page — same card list (Approve/Deny/Undo,
- * Pending/Decided, inline chat) the dashboard's own Availability widget page shows admins
- * directly, just with this page's own heading/description on top.
+ * Oct 2026 (CB, on the Availability mockup's "Team availability requests" section: "I should see
+ * an option to kind of look at the past archive ones... or being able to see what's in the
+ * future as well"): the same week nav + "This week" badge Team Schedule and Attendance already
+ * have — added here so this section reads the same way they do, instead of the old fixed
+ * "pending + last 7 days decided, archive the rest" view. A Server Component page (AvailabilityPage)
+ * can't own the offset state itself, so this small client wrapper does: it resolves the selected
+ * range and hands the bounds down to TeamAvailabilityCards, which does the actual filtering (see
+ * that component's own doc comment on its weekStart/weekEnd props) — the Approve/Deny/per-date
+ * review machinery underneath is completely unchanged.
  *
- * `scope` (Oct 2026, opened to Supervisor — see canAccessTeamAvailability's own doc comment in
- * src/lib/authorization.ts): TeamAvailabilityWeekPanel/TeamAvailabilityCards already render
- * correctly scoped data either way (they fetch /api/admin/availability, and listAdminAvailability
- * narrows that for a non-admin caller — see that function's own doc comment); this prop only
- * drives the description copy below, same "all" vs "team" split AttendanceAdminView/PtoAdminView/
- * ReportsView already take from page.tsx.
+ * Oct 2026, round two (CB: "I want to make sure that... the admin will be able to access on the
+ * availability page, the two-week report for that specific... pay period"): a small "2-week
+ * report" link next to the nav, deep-linking into Reports with `?periodEnd=`, same convention the
+ * dashboard's report-ready banner (DashboardNotifications.tsx) already uses. No extra access
+ * check needed here: every viewer who can reach this page at all (isAdmin or SUPERVISOR — see
+ * AvailabilityAdminView's own `scope` doc comment) already satisfies canAccessReports
+ * (src/lib/authorization.ts), which is the exact same isAdmin-or-SUPERVISOR check.
  *
- * Oct 2026 (CB, pointing at the Availability page's own "Team availability requests" section:
- * "I'm still not seeing this view that I gave you the screenshot for the same way on Daijour...
- * the admin accounts need to have that functionality"): this page used to call
- * TeamAvailabilityCards directly with no bounds, which is also what made the earlier "archive
- * needs more structure" complaint true — everything decided ever just piled up underneath with
- * no way to navigate it. Swapped to TeamAvailabilityWeekPanel, the same `‹ Week of ___ › · This
- * week` nav Team Schedule and Attendance already use, and the exact component the Availability
- * page's own "Team availability requests" section is built on — so this page now matches that
- * screenshot instead of drifting into its own, older layout. `viewerId` is the signed-in
- * admin/supervisor, passed down from page.tsx (getCurrentEmployee runs server-side there) so the
- * inline chat thread knows which side of the conversation is "you."
+ * Oct 2026, round three (CB, screenshotting Jennay Johnson's decided dates split across two
+ * separate "Week of..." screens inside the same pay period: "I want everything to kind of be
+ * reflected... in that two week intervals... we should see everyone's schedule holistic over
+ * like the two weeks... it shouldn't be broken up until like... two different pink blocks"): this
+ * used to page by a plain 7-day calendar week (getWeek), completely separate from the true 12-day
+ * payroll period that "2-week report" linked out to — so a person's own requests could straddle
+ * the boundary between two of this nav's own screens even while staying inside ONE pay period.
+ * Swapped the whole offset/range model for the same PayrollPeriodSwitcher every other pay-period
+ * view in this app already pages with (Reports, My Tasks, Logged Hours) — same "Current pay
+ * period" badge, same 12-day span — so Decided/Pending here always shows a full pay period's
+ * worth of requests in one list. TeamAvailabilityCards' own weekStart/weekEnd props are already
+ * just generic inclusive date bounds (see that component's own doc comment), so passing a 12-day
+ * payroll-period range instead of a 7-day calendar-week range needed no change there at all — the
+ * list simply renders every chip in range, same flat flex-wrap it always has, so nothing visually
+ * splits into separate blocks. The "2-week report" link is simpler now too: period.end IS the
+ * selected range's own end, no more round-tripping through payrollPeriodOffsetForDate(week.start)
+ * to recover it from a calendar week.
  *
- * Round eighteen, correction (CB, Nov 2026, on a live screenshot: "it's supposed to show up fully
- * on the right-hand side, not just squished in there"): this used to wrap the heading AND
- * TeamAvailabilityWeekPanel together in one `max-w-3xl`, which meant TeamAvailabilityCards' own
- * master-detail grid never had more than that same ~768px to split a task's detail panel out of,
- * no matter the real page width. The heading/description keep their own `max-w-3xl` (same reading
- * width as always); TeamAvailabilityWeekPanel now sits outside it, free to use the page's full
- * available width — it still renders at its own identical narrow width day to day, since it
- * manages that itself and only drops it while a task is actually open (see that component's own
- * doc comment).
+ * Round eighteen, correction (CB, Nov 2026, on a live screenshot of the expanded detail panel
+ * squeezed into a sliver of the page: "it's supposed to show up fully on the right-hand side,
+ * not just squished in there"): this component's own root used to be a plain, always-present
+ * `max-w-3xl` — fine for the normal card list (same reading width this page's siblings use), but
+ * it also capped the master-detail grid TeamAvailabilityCards renders once a task is open, so
+ * that grid never had more than ~768px total to split between the list and the detail panel no
+ * matter how much real width the page actually had to give it. `hasExpandedTask` (set via
+ * TeamAvailabilityCards' own onExpandedChange, which fires the instant its detail panel opens or
+ * closes) drops that cap for exactly as long as something's actually open, so the grid gets the
+ * page's real available width to work with; the moment nothing's open, this snaps back to its
+ * normal narrow reading width, unchanged from before this round.
  */
-export default function AvailabilityAdminView({ viewerId, scope }: { viewerId: string; scope: "all" | "team" }) {
+export default function TeamAvailabilityWeekPanel({ viewerId }: { viewerId: string }) {
+  const [offset, setOffset] = useState(getCurrentPayrollPeriodOffset);
+  const period = getPayrollPeriod(offset);
+  const [hasExpandedTask, setHasExpandedTask] = useState(false);
+
   return (
-    <>
-      <div className="max-w-3xl">
-        <h1 className="page-title text-2xl mb-1">Team Availability</h1>
-        <p className="text-sm text-muted mb-4">
-          {scope === "team"
-            ? "Your own team's submitted availability. Purely informational: nothing here is enforced against scheduling."
-            : "Every team member's submitted availability, org-wide — not just one supervisor's team. Purely informational: nothing here is enforced against scheduling."}
-        </p>
+    <div className={hasExpandedTask ? "" : "max-w-3xl"}>
+      <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+        <h2 className="text-sm font-medium text-muted">Team availability requests</h2>
+        <div className="flex items-center gap-2 flex-wrap">
+          <PayrollPeriodSwitcher offset={offset} onOffsetChange={setOffset} />
+          <Link
+            href={`/admin/reports?periodEnd=${period.end}`}
+            className="flex items-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-medium text-accent-ink hover:bg-black/[0.03]"
+            title={`2-week report: ${formatWeekRange(period.start, period.end)}`}
+          >
+            <ChartIcon className="h-4 w-4" />
+            2-week report
+          </Link>
+        </div>
       </div>
-      <TeamAvailabilityWeekPanel viewerId={viewerId} />
-    </>
+      {/* Round eighteen (CB, Nov 2026): desktop click-to-expand, approved via mockup — only this,
+          the full Team Availability page, opts in. TeamAvailabilityRequestsSection (the
+          dashboard's compact preview widget) drives the same TeamAvailabilityCards/Card off the
+          same hook and deliberately leaves this prop unset, so it's unaffected. */}
+      <TeamAvailabilityCards
+        viewerId={viewerId}
+        weekStart={period.start}
+        weekEnd={period.end}
+        expandable
+        onExpandedChange={setHasExpandedTask}
+      />
+    </div>
   );
 }
