@@ -113,6 +113,16 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
   const [completedReviewLoadState, setCompletedReviewLoadState] = useState<LoadState>("loading");
   const [completedOpen, setCompletedOpen] = useState(false);
 
+  // Round nineteen (CB, Nov 2026: "make sure that... it's reflective on the other team member
+  // side as well, so it could read well if they go on desktop" — the master-detail click-to-
+  // expand pattern Team Availability/Team Schedule already had, extended here): which task (by
+  // id) is open in the right-hand detail panel at desktop width. Looked up fresh on every
+  // render against whichever of this page's three task arrays actually holds it (below), same
+  // "keep an id, derive the object" shape TeamAvailabilityCards/TeamScheduleView already use for
+  // their own expandedTaskId, rather than snapshotting the task object itself — so the panel
+  // always reflects this task's latest state after an action changes it.
+  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
+
   async function load() {
     setLoadState("loading");
     try {
@@ -208,6 +218,23 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
     loadCompletedReview();
   }
 
+  // Round nineteen — the detail panel's own task can come from any of this page's three lists
+  // (mine, awaiting review, recently approved) depending on which tab it was opened from, so its
+  // onChanged refetches all of them rather than guessing which one; a touch more network traffic
+  // than any single list's own onChanged, but simple and never stale.
+  function refreshAll() {
+    load();
+    if (canReview) loadReviewAll();
+  }
+
+  // Switching tabs closes whatever's open in the side panel — a task opened from "Awaiting
+  // review" has no reason to keep sitting next to "My tasks"' own list once that tab isn't even
+  // the one on screen.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setExpandedTaskId(null);
+  }, [tab]);
+
   const period = getPayrollPeriod(offset);
   const weekTasks = [...tasks.filter((t) => t.taskDate >= period.start && t.taskDate <= period.end)].sort((a, b) =>
     a.taskDate === b.taskDate ? priorityRank(a) - priorityRank(b) : a.taskDate < b.taskDate ? -1 : 1
@@ -230,9 +257,17 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
   const reviewPeriod = getPayrollPeriod(reviewOffset);
   const periodReviewTasks = reviewTasks.filter((t) => t.taskDate >= reviewPeriod.start && t.taskDate <= reviewPeriod.end);
 
+  // Round nineteen — see this hook's own doc comment above. Searched across all three arrays
+  // rather than just whichever tab is active, since switching tabs away and back shouldn't need
+  // to re-look-up anything; the tab-change effect above is what actually keeps this from ever
+  // showing a task from a tab that isn't on screen.
+  const expandedTask = expandedTaskId
+    ? ([...tasks, ...reviewTasks, ...completedReview].find((t) => t.id === expandedTaskId) ?? null)
+    : null;
+
   return (
-    <div className="max-w-3xl">
-      <div className="mb-5">
+    <div className={expandedTask ? "" : "max-w-3xl"}>
+      <div className="max-w-3xl mb-5">
         <h1 className="page-title text-2xl">My Tasks</h1>
         <p className="text-sm text-muted mt-0.5">
           {tab === "mine"
@@ -247,8 +282,12 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
           it says awaiting review or my tasks"): this row used to be admin/supervisor only — a
           regular team member saw no tabs at all, just the one flat list below. Now everyone gets
           the same two tabs; only the second tab's meaning and count differ by canReview (see
-          this component's own doc comment). */}
-      <div className="flex gap-1.5 bg-black/[0.04] rounded-full p-1 mb-4 w-fit">
+          this component's own doc comment).
+          Round nineteen: carries its own unconditional max-w-3xl, same fix TeamAvailabilityWeekPanel's
+          header row already needed — the outer wrapper above drops max-w-3xl while a task is open
+          so the master-detail grid below can use the page's full width, and without this the tab
+          row would stretch out along with it instead of staying put at its normal narrow width. */}
+      <div className="max-w-3xl flex gap-1.5 bg-black/[0.04] rounded-full p-1 mb-4 w-fit">
         <button
           type="button"
           onClick={() => setTab("mine")}
@@ -275,6 +314,13 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
               : ""}
         </button>
       </div>
+
+      {/* Round nineteen — same master-detail split TeamAvailabilityCards/TeamScheduleView
+          already use: only kicks in once a task is actually open (expandedTask), so this page
+          renders exactly as it always has, full width, until a team member or reviewer actually
+          clicks into one. */}
+      <div className={expandedTask ? "lg:grid lg:grid-cols-[minmax(0,48rem)_1fr] lg:gap-5 lg:items-start" : ""}>
+      <div className="min-w-0">
 
       {tab === "mine" && (
       <>
@@ -336,7 +382,14 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
                     highlightDate === t.taskDate ? "outline outline-2 outline-accent bg-accent/[0.04] -m-1 p-1" : ""
                   }`}
                 >
-                  <DateTaskRow task={t} viewerId={employeeId} canReview={false} showDate onChanged={load} />
+                  <DateTaskRow
+                    task={t}
+                    viewerId={employeeId}
+                    canReview={false}
+                    showDate
+                    onChanged={load}
+                    onExpandRequested={() => setExpandedTaskId(t.id)}
+                  />
                 </div>
               ))}
             </div>
@@ -390,7 +443,16 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
           {reviewLoadState === "ready" && periodReviewTasks.length > 0 && (
             <div className="space-y-2.5">
               {periodReviewTasks.map((t) => (
-                <DateTaskRow key={t.id} task={t} viewerId={employeeId} canReview showDate showEmployee onChanged={loadReviewAll} />
+                <DateTaskRow
+                  key={t.id}
+                  task={t}
+                  viewerId={employeeId}
+                  canReview
+                  showDate
+                  showEmployee
+                  onChanged={loadReviewAll}
+                  onExpandRequested={() => setExpandedTaskId(t.id)}
+                />
               ))}
             </div>
           )}
@@ -416,7 +478,16 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
               {completedOpen && (
                 <div className="space-y-2.5 mt-2.5">
                   {completedReview.map((t) => (
-                    <DateTaskRow key={t.id} task={t} viewerId={employeeId} canReview={false} showDate showEmployee onChanged={loadReviewAll} />
+                    <DateTaskRow
+                      key={t.id}
+                      task={t}
+                      viewerId={employeeId}
+                      canReview={false}
+                      showDate
+                      showEmployee
+                      onChanged={loadReviewAll}
+                      onExpandRequested={() => setExpandedTaskId(t.id)}
+                    />
                   ))}
                 </div>
               )}
@@ -459,7 +530,15 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
               ) : (
                 <div className="space-y-2.5">
                   {myAwaitingTasks.map((t) => (
-                    <DateTaskRow key={t.id} task={t} viewerId={employeeId} canReview={false} showDate onChanged={load} />
+                    <DateTaskRow
+                      key={t.id}
+                      task={t}
+                      viewerId={employeeId}
+                      canReview={false}
+                      showDate
+                      onChanged={load}
+                      onExpandRequested={() => setExpandedTaskId(t.id)}
+                    />
                   ))}
                 </div>
               )}
@@ -467,6 +546,37 @@ export default function MyTasksView({ employeeId, canReview }: { employeeId: str
           )}
         </>
       )}
+
+      </div>
+
+      {expandedTask && (
+        <div className="mt-5 lg:mt-0 lg:sticky lg:top-4">
+          <div className="rounded-2xl border border-border bg-surface shadow-sm p-3 sm:p-4">
+            <div className="flex items-center justify-between gap-2 mb-2 px-0.5">
+              <p className="text-xs font-semibold text-muted">Task preview</p>
+              <button
+                type="button"
+                onClick={() => setExpandedTaskId(null)}
+                className="text-xs font-semibold text-accent-ink hover:underline underline-offset-2"
+              >
+                Close
+              </button>
+            </div>
+            <DateTaskRow
+              task={expandedTask}
+              viewerId={employeeId}
+              canReview={canReview && expandedTask.employeeId !== employeeId}
+              showDate
+              showEmployee={expandedTask.employeeId !== employeeId}
+              forceDescExpanded
+              variant="detail"
+              onChanged={refreshAll}
+            />
+          </div>
+        </div>
+      )}
+
+      </div>
     </div>
   );
 }
