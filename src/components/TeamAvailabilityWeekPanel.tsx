@@ -64,7 +64,11 @@ export default function TeamAvailabilityWeekPanel({ viewerId }: { viewerId: stri
           </Link>
         </div>
       </div>
-      <TeamAvailabilityCards viewerId={viewerId} weekStart={period.start} weekEnd={period.end} />
+      {/* Round eighteen (CB, Nov 2026): desktop click-to-expand, approved via mockup — only this,
+          the full Team Availability page, opts in. TeamAvailabilityRequestsSection (the
+          dashboard's compact preview widget) drives the same TeamAvailabilityCards/Card off the
+          same hook and deliberately leaves this prop unset, so it's unaffected. */}
+      <TeamAvailabilityCards viewerId={viewerId} weekStart={period.start} weekEnd={period.end} expandable />
     </div>
   );
 }
