@@ -745,6 +745,9 @@ export interface DateTaskDTO {
    *  once a task is actually expanded. */
   commentCount: number;
   createdAt: string; // ISO
+  /** Round seventeen (CB, Oct 2026): optional, set at assignment time — see DateTask.dueAt's own
+   *  doc comment in prisma/schema.prisma. Null until someone sets one. */
+  dueAt: string | null; // ISO
 }
 
 /**
@@ -1129,6 +1132,22 @@ export interface DirectoryEntryDTO {
    *  guarding against are (personalPhone, personalEmail, emergencyContact*, employeeCode,
    *  hireDate never appear here); it's already shown company-wide everywhere else in this app.
    *  Resolved server-side from avatarStorageKey via getAvatarPublicUrl. */
+  avatarUrl: string | null;
+}
+
+/**
+ * Round seventeen (CB, Oct 2026, on Donique Perry's Timesheet page, circling the pink banner:
+ * "I want to make sure that like we could change between the different team members from this
+ * view as well, similar to how... reports... if we click on the name, we should be able to kind
+ * of change between the team members from here as well"). Deliberately narrower than
+ * DirectoryEntryDTO above — this is exactly the set of ids the viewer may actually land on via
+ * /team/[employeeId] (see listAccessibleTeamMembers in src/lib/directory.ts), not every active
+ * employee company-wide.
+ */
+export interface SwitchableEmployeeDTO {
+  id: string;
+  name: string;
+  jobTitle: string;
   avatarUrl: string | null;
 }
 
