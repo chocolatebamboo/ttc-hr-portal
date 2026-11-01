@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import TeamNotesThread from "@/components/TeamNotesThread";
 import ReviewTimesheetView from "./ReviewTimesheetView";
 import TeamPtoSection from "./TeamPtoSection";
 import TeamAvailabilitySection from "./TeamAvailabilitySection";
+import type { SwitchableEmployeeDTO } from "@/types";
 
 type TabKey = "timesheet" | "timeoff" | "availability" | "notes";
 
@@ -64,7 +66,47 @@ export default function ReviewEmployeeView({
    *  other prop on this view. */
   canEditFlaggedTimeEntries?: boolean;
 }) {
+  const router = useRouter();
   const [tab, setTab] = useState<TabKey>("timesheet");
+
+  // Round seventeen (CB, Oct 2026, circling this banner on Donique Perry's page: "I want to make
+  // sure that like we could change between the different team members from this view as well,
+  // similar to how... reports... if we click on the name, we should be able to kind of change
+  // between the team members from here as well"). Same switcherOpen dropdown pattern
+  // ReportsView.tsx's own single-employee card already uses — fetched once on mount (every id
+  // this viewer could ever land on via /team/[employeeId]; see listAccessibleTeamMembers's own
+  // doc comment in src/lib/directory.ts). Unlike Reports' own client-state swap against one
+  // already-fetched dataset, picking a different person here is a real navigation: this whole
+  // view, and everything below it, is scoped to one employeeId per server-rendered page load
+  // (see page.tsx), so letting Next.js re-run that page for the new id is what makes the banner
+  // AND all four tabs follow the pick, exactly as if the admin had clicked through from Team
+  // fresh.
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [switchable, setSwitchable] = useState<SwitchableEmployeeDTO[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/team/switchable")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { employees: SwitchableEmployeeDTO[] } | null) => {
+        if (!cancelled && data) setSwitchable(data.employees);
+      })
+      .catch(() => {
+        // Non-fatal — the name just stays a plain, non-interactive label if this fails.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function handleSwitch(id: string) {
+    setSwitcherOpen(false);
+    if (id !== employeeId) router.push(`/team/${id}`);
+  }
+
+  // Nothing to switch to (a plain Team Member only ever has themselves) — the name stays a plain
+  // label rather than a dead-end button with an empty dropdown.
+  const canSwitch = switchable.length > 1;
 
   return (
     <div>
@@ -82,10 +124,61 @@ export default function ReviewEmployeeView({
               )}
             </span>
             <div className="min-w-0 pt-0.5">
-              <p className="font-serif text-xl sm:text-2xl font-bold text-white truncate">{employeeName}</p>
+              {canSwitch ? (
+                <button
+                  type="button"
+                  onClick={() => setSwitcherOpen((v) => !v)}
+                  aria-expanded={switcherOpen}
+                  className="flex items-center gap-1.5 max-w-full"
+                >
+                  <span className="font-serif text-xl sm:text-2xl font-bold text-white truncate">
+                    {employeeName}
+                  </span>
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="white"
+                    strokeWidth="3"
+                    aria-hidden="true"
+                    className={`shrink-0 opacity-85 transition-transform ${switcherOpen ? "rotate-180" : ""}`}
+                  >
+                    <path d="M6 9l6 6 6-6" />
+                  </svg>
+                </button>
+              ) : (
+                <p className="font-serif text-xl sm:text-2xl font-bold text-white truncate">{employeeName}</p>
+              )}
               <p className="text-sm text-white/85">{jobTitle}</p>
             </div>
           </div>
+
+          {canSwitch && switcherOpen && (
+            <div className="mt-3 bg-white rounded-xl shadow-lg overflow-hidden max-h-56 overflow-y-auto">
+              {switchable.map((emp) => (
+                <button
+                  key={emp.id}
+                  type="button"
+                  onClick={() => handleSwitch(emp.id)}
+                  className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-left border-t border-border first:border-t-0 ${
+                    emp.id === employeeId
+                      ? "bg-accent/10 text-accent-ink font-semibold"
+                      : "text-foreground hover:bg-black/[0.02]"
+                  }`}
+                >
+                  <span
+                    className={`h-[22px] w-[22px] rounded-md shrink-0 flex items-center justify-center text-[9px] font-bold ${
+                      emp.id === employeeId ? "bg-accent-ink text-white" : "bg-border text-muted"
+                    }`}
+                  >
+                    {initialsOf(emp.name) || "?"}
+                  </span>
+                  {emp.name}
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="flex gap-1 mt-6 overflow-x-auto">
             {TABS.map((t) => (
