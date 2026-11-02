@@ -5,7 +5,11 @@ import { decideAvailability, findAvailabilitySubmissionEmployeeId, InvalidAvaila
 import { toErrorResponse } from "@/lib/api-errors";
 
 /**
- * POST /api/availability/[submissionId]/decide — body { decision: "APPROVED" | "DENIED", comment? }
+ * POST /api/availability/[submissionId]/decide — body { decision: "APPROVED" | "DENIED", comment?,
+ * confirmOverCap? }. confirmOverCap (Nov 2026) is the reviewer's own deliberate "Approve anyway"
+ * past a weekly-hour-cap warning — see src/lib/hour-cap.ts's enforceWeeklyHourCap and
+ * toErrorResponse's WEEKLY_CAP_EXCEEDED handling for the full shape; omitted/false means "check,
+ * and stop to ask if it's over."
  * Reuses the same supervisor-of relationship as timesheet/PTO review
  * (assertCanReviewAvailability) — a supervisor's authority over their team is one
  * relationship, not a separate one per feature. Looks the submission up first (under the
@@ -32,7 +36,8 @@ export async function POST(request: Request, ctx: RouteContext<"/api/availabilit
       reviewer,
       submissionId,
       body.decision,
-      typeof body.comment === "string" ? body.comment : undefined
+      typeof body.comment === "string" ? body.comment : undefined,
+      body.confirmOverCap === true
     );
     return NextResponse.json(decided);
   } catch (err) {
