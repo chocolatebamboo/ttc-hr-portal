@@ -390,7 +390,14 @@ export async function createDateTask(
       if (!slot) continue;
       const decision = readDateDecisions(slots, candidate.dateDecisions).find((d) => d.date === taskDate);
       if (decision?.status === "APPROVED") {
-        await autoConfirmShiftForApprovedDate(tx, actor.id, employeeId, candidate.id, slot, candidate.note);
+        // Nov 2026 (CB, weekly-hour-cap feature): confirmOverCap is true here, not threaded from
+        // anywhere interactive — this backfill only ever runs for a date that was APPROVED in the
+        // past, before this legacy fallback's own shift-auto-create existed (see this block's own
+        // doc comment above). The cap didn't exist yet when that approval decision was made, there's
+        // no admin in the loop right now to show a warning to or get an "Approve anyway" from, and
+        // pushing a task shouldn't suddenly start failing over a check that has nothing to do with
+        // the approval this is just now catching up on.
+        await autoConfirmShiftForApprovedDate(tx, actor.id, employeeId, candidate.id, slot, candidate.note, true);
         break;
       }
     }
