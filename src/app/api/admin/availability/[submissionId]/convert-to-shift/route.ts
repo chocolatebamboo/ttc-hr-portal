@@ -23,7 +23,7 @@ export async function POST(
       throw new InvalidShiftError("Choose which date to schedule.");
     }
 
-    const dto = await convertAvailabilityDateToShift(employee, submissionId, body.date);
+    const dto = await convertAvailabilityDateToShift(employee, submissionId, body.date, body.confirmOverCap === true);
     return NextResponse.json(dto, { status: 201 });
   } catch (err) {
     return toErrorResponse(err);
