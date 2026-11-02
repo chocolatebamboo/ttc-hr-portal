@@ -44,7 +44,8 @@ export async function POST(request: Request, ctx: RouteContext<"/api/availabilit
       submissionId,
       body.date,
       { date: body.newDate, startTime: body.newStartTime, endTime: body.newEndTime },
-      typeof body.comment === "string" ? body.comment : undefined
+      typeof body.comment === "string" ? body.comment : undefined,
+      body.confirmOverCap === true
     );
     return NextResponse.json(changed);
   } catch (err) {
