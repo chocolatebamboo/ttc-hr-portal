@@ -4,6 +4,8 @@ import { assertCanReviewAvailability } from "@/lib/authorization";
 import { decideAvailabilityDate, findAvailabilitySubmissionEmployeeId, InvalidAvailabilityError } from "@/lib/availability";
 import { toErrorResponse } from "@/lib/api-errors";
 
+/** body { date, decision: "APPROVED" | "DENIED", comment?, confirmOverCap? } — see
+ *  /decide/route.ts's own doc comment for what confirmOverCap does. */
 export async function POST(request: Request, ctx: RouteContext<"/api/availability/[submissionId]/decide-date">) {
   try {
     const reviewer = await requireEmployee();
@@ -28,7 +30,8 @@ export async function POST(request: Request, ctx: RouteContext<"/api/availabilit
       submissionId,
       body.date,
       body.decision,
-      typeof body.comment === "string" ? body.comment : undefined
+      typeof body.comment === "string" ? body.comment : undefined,
+      body.confirmOverCap === true
     );
     return NextResponse.json(decided);
   } catch (err) {
