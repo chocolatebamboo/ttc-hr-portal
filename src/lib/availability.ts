@@ -6,6 +6,7 @@ import { writeAuditLog } from "@/lib/audit-log";
 import { writeNotification } from "@/lib/notifications";
 import { dismiss as dismissKey, listDismissedKeys } from "@/lib/dashboard-dismissals";
 import { getAvatarPublicUrl } from "@/lib/storage";
+import { enforceWeeklyHourCap } from "@/lib/hour-cap";
 import { Prisma } from "@prisma/client";
 import type {
   AdminAvailabilityDTO,
@@ -499,6 +500,12 @@ type Decision = "APPROVED" | "DENIED";
  * fully separate, optional add-on from here on — see createDateTask's own doc comment in
  * src/lib/date-tasks.ts, which still calls this too, purely as a legacy fallback for any date
  * that was approved before this existed.
+ *
+ * `confirmOverCap` (Nov 2026) is the reviewer's own deliberate "Approve anyway," threaded all the
+ * way from the API route — see Employee.weeklyHourCap's own doc comment in prisma/schema.prisma
+ * and src/lib/hour-cap.ts's enforceWeeklyHourCap for the full enforcement shape. Checked here,
+ * inside the same transaction as the decision itself, right before the Shift row is actually
+ * created: a throw rolls back the decision too, so a blocked approval never half-lands.
  */
 export async function autoConfirmShiftForApprovedDate(
   tx: PrismaClient,
@@ -506,13 +513,16 @@ export async function autoConfirmShiftForApprovedDate(
   employeeId: string,
   submissionId: string,
   slot: AvailabilitySlot,
-  note: string | null
+  note: string | null,
+  confirmOverCap: boolean
 ): Promise<void> {
   const alreadyShifted = await tx.shift.findFirst({
     where: { employeeId, date: slot.date, status: { not: "CANCELLED" } },
     select: { id: true },
   });
   if (alreadyShifted) return;
+
+  await enforceWeeklyHourCap(tx, employeeId, [slot], confirmOverCap);
 
   const shift = await tx.shift.create({
     data: {
@@ -555,7 +565,8 @@ export async function decideAvailability(
   reviewer: CurrentEmployee,
   submissionId: string,
   decision: Decision,
-  comment?: string
+  comment?: string,
+  confirmOverCap = false
 ): Promise<AvailabilityDTO> {
   return withRlsContext({ employeeId: reviewer.id, role: reviewer.role }, async (tx) => {
     const existing = await tx.availabilitySubmission.findUnique({ where: { id: submissionId } });
@@ -607,7 +618,7 @@ export async function decideAvailability(
     });
     if (decision === "APPROVED") {
       for (const slot of slots) {
-        await autoConfirmShiftForApprovedDate(tx, reviewer.id, existing.employeeId, submissionId, slot, existing.note);
+        await autoConfirmShiftForApprovedDate(tx, reviewer.id, existing.employeeId, submissionId, slot, existing.note, confirmOverCap);
       }
     }
     return toDTO(row, new Map([[reviewer.id, nameOf(reviewer)]]));
@@ -630,7 +641,8 @@ export async function decideAvailabilityDate(
   submissionId: string,
   date: string,
   decision: Decision,
-  comment?: string
+  comment?: string,
+  confirmOverCap = false
 ): Promise<AvailabilityDTO> {
   return withRlsContext({ employeeId: reviewer.id, role: reviewer.role }, async (tx) => {
     const existing = await tx.availabilitySubmission.findUnique({ where: { id: submissionId } });
@@ -690,7 +702,7 @@ export async function decideAvailabilityDate(
       targetId: row.id,
     });
     if (decision === "APPROVED") {
-      await autoConfirmShiftForApprovedDate(tx, reviewer.id, existing.employeeId, submissionId, slots[index], existing.note);
+      await autoConfirmShiftForApprovedDate(tx, reviewer.id, existing.employeeId, submissionId, slots[index], existing.note, confirmOverCap);
     }
     return toDTO(row, new Map([[reviewer.id, nameOf(reviewer)]]));
   });
@@ -812,7 +824,8 @@ export async function changeAvailabilityDate(
   submissionId: string,
   date: string,
   newSlot: AvailabilitySlot,
-  comment?: string
+  comment?: string,
+  confirmOverCap = false
 ): Promise<AvailabilityDTO> {
   assertValidSlots([newSlot]);
 
@@ -883,7 +896,7 @@ export async function changeAvailabilityDate(
       targetType: "AvailabilitySubmission",
       targetId: row.id,
     });
-    await autoConfirmShiftForApprovedDate(tx, reviewer.id, existing.employeeId, submissionId, newSlot, existing.note);
+    await autoConfirmShiftForApprovedDate(tx, reviewer.id, existing.employeeId, submissionId, newSlot, existing.note, confirmOverCap);
     return toDTO(row, new Map([[reviewer.id, nameOf(reviewer)]]));
   });
 }
@@ -1174,7 +1187,7 @@ export async function getAvailabilitySubmissionForReview(
     const row = await tx.availabilitySubmission.findUnique({
       where: { id: submissionId },
       include: {
-        employee: { select: { firstName: true, lastName: true, preferredName: true, avatarStorageKey: true } },
+        employee: { select: { firstName: true, lastName: true, preferredName: true, avatarStorageKey: true, weeklyHourCap: true } },
       },
     });
     if (!row) return null;
@@ -1184,6 +1197,7 @@ export async function getAvailabilitySubmissionForReview(
       employeeId: row.employeeId,
       employeeName: `${row.employee.preferredName || row.employee.firstName} ${row.employee.lastName}`,
       employeeAvatarUrl: row.employee.avatarStorageKey ? getAvatarPublicUrl(row.employee.avatarStorageKey) : null,
+      employeeWeeklyHourCap: row.employee.weeklyHourCap,
     };
   });
 }
@@ -1230,7 +1244,7 @@ export async function listAdminAvailability(
       tx.availabilitySubmission.findMany({
         where: { status: "PENDING", ...employeeFilter },
         include: {
-          employee: { select: { firstName: true, lastName: true, preferredName: true, avatarStorageKey: true } },
+          employee: { select: { firstName: true, lastName: true, preferredName: true, avatarStorageKey: true, weeklyHourCap: true } },
         },
         orderBy: { submittedAt: "asc" },
       }),
@@ -1240,7 +1254,7 @@ export async function listAdminAvailability(
         // removed request doesn't reappear in Decided right after an admin clears it out.
         where: { status: { notIn: ["PENDING", "REMOVED"] }, ...employeeFilter },
         include: {
-          employee: { select: { firstName: true, lastName: true, preferredName: true, avatarStorageKey: true } },
+          employee: { select: { firstName: true, lastName: true, preferredName: true, avatarStorageKey: true, weeklyHourCap: true } },
         },
         orderBy: { reviewedAt: "desc" },
         take: 200,
@@ -1257,6 +1271,7 @@ export async function listAdminAvailability(
       employeeId: r.employeeId,
       employeeName: `${r.employee.preferredName || r.employee.firstName} ${r.employee.lastName}`,
       employeeAvatarUrl: r.employee.avatarStorageKey ? getAvatarPublicUrl(r.employee.avatarStorageKey) : null,
+      employeeWeeklyHourCap: r.employee.weeklyHourCap,
     });
 
     return { pending: pending.map(toAdminDTO), decided: decided.map(toAdminDTO) };
