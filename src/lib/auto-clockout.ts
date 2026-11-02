@@ -24,6 +24,10 @@ const SYSTEM_ACTOR = { employeeId: "system:auto-clockout", role: "SUPER_ADMIN" }
 export interface AutoClockoutResult {
   checked: number;
   closed: { sessionId: string; timeEntryId: string; clockIn: string; clockOut: string }[];
+  /** Nov 2026 — examined this run but deliberately left open: a matched shift's own scheduled
+   *  end hasn't actually arrived yet (see this file's own doc comment below for why), so there's
+   *  genuinely nothing stale about this session yet. Not a failure — just "check again later." */
+  skipped: { sessionId: string; reason: string }[];
   failed: { sessionId: string; error: string }[];
 }
 
@@ -34,12 +38,26 @@ export interface AutoClockoutResult {
  * end time because the team member forgot to clock out: "doesn't it cut off based off of the
  * schedule that was agreed upon?... it just records the time that they were scheduled [to clock
  * out]." So when this session matched a shift at clock-in (TimeSession.shiftId — see
- * resolveClockInShift in src/lib/time-actions.ts) and that shift's own scheduled end time falls
- * before the 4-hour cap, THAT'S what gets recorded as the clockOut — the 4-hour cap only ever
- * kicks in as the fallback: no shift was matched at all, or the shift runs longer than 4 hours
- * anyway. Either way the recorded time is never later than clockIn + AUTO_CLOCKOUT_CAP_MS, so a
- * forgotten clock-out still can't balloon into the wrong 12-hour entry this cap exists to
- * prevent.
+ * resolveClockInShift in src/lib/time-actions.ts), THAT shift's own scheduled end time is what
+ * gets recorded as the clockOut — the 4-hour cap only ever kicks in as the fallback for when no
+ * shift was matched at all, which is the original forgot-to-clock-out-with-nothing-scheduled
+ * scenario this cap was built for.
+ *
+ * Bugfix (Nov 2026, CB: "what happens if somebody's schedule is way more than 4 hours? It
+ * shouldn't clock them out automatically. It should go based off of their actual schedule... I
+ * don't want that glitch"): this used to only trust the matched shift's scheduled end when it
+ * fell WITHIN the 4-hour cap window (`scheduledEnd <= capTime`) — a shift genuinely longer than 4
+ * hours still fell through to the flat 4-hour cap, truncating a real, longer scheduled shift
+ * early the very first time this job ran on it (every 15 minutes, starting the moment the
+ * session turns 4 hours old). Fixed by splitting "is there a real schedule to go by" from "has
+ * that schedule's own end time actually arrived yet": a session whose matched shift hasn't
+ * reached its scheduled end time YET is left alone entirely this run (see `skipped` above) — it
+ * isn't stale, it's just a long shift still in progress — and only once a later run finds that
+ * end time has actually passed does this close it, using that real scheduled end as the
+ * clockOut, no matter how far past the 4-hour mark that is. A session with no matched shift at
+ * all is unaffected by any of this: it still force-closes at the flat 4-hour cap exactly as
+ * before, so a genuinely forgotten, nothing-scheduled clock-in still can't balloon into the
+ * wrong 12-hour entry this cap exists to prevent.
  *
  * Whether the day still needs a supervisor's look follows the same shape as applyClockAction's
  * own auto-approve check (src/lib/time-actions.ts, "every session this day matched an
@@ -64,7 +82,8 @@ export interface AutoClockoutResult {
  * exact run where the cap is crossed.
  */
 export async function autoCloseStaleClockIns(): Promise<AutoClockoutResult> {
-  const cutoff = new Date(Date.now() - AUTO_CLOCKOUT_CAP_MS);
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - AUTO_CLOCKOUT_CAP_MS);
 
   return withRlsContext(SYSTEM_ACTOR, async (tx) => {
     const sessions = await tx.timeSession.findMany({
@@ -73,6 +92,7 @@ export async function autoCloseStaleClockIns(): Promise<AutoClockoutResult> {
     });
 
     const closed: AutoClockoutResult["closed"] = [];
+    const skipped: AutoClockoutResult["skipped"] = [];
     const failed: AutoClockoutResult["failed"] = [];
 
     for (const session of sessions) {
@@ -83,7 +103,17 @@ export async function autoCloseStaleClockIns(): Promise<AutoClockoutResult> {
           ? await tx.shift.findUnique({ where: { id: session.shiftId }, select: { date: true, endTime: true } })
           : null;
         const scheduledEnd = shift ? zonedDateTimeToUtc(shift.date, shift.endTime) : null;
-        const usedSchedule = !!scheduledEnd && scheduledEnd > session.clockIn && scheduledEnd <= capTime;
+        const hasRealSchedule = !!scheduledEnd && scheduledEnd > session.clockIn;
+
+        // The matched shift's own scheduled end hasn't actually arrived yet — a real, longer
+        // shift still legitimately in progress, not a stale forgotten clock-in. Leave it open;
+        // a later run (every 15 minutes) picks it back up once that end time has passed.
+        if (hasRealSchedule && scheduledEnd! > now) {
+          skipped.push({ sessionId: session.id, reason: "Scheduled shift hasn't reached its end time yet." });
+          continue;
+        }
+
+        const usedSchedule = hasRealSchedule;
         const clockOut = usedSchedule ? scheduledEnd! : capTime;
 
         const alreadyFlagged = session.isException;
@@ -92,7 +122,7 @@ export async function autoCloseStaleClockIns(): Promise<AutoClockoutResult> {
         const autoCloseNote = usedSchedule
           ? "Automatically clocked out at the end of their scheduled shift — forgot to clock out."
           : shift
-            ? `Automatically clocked out after being open ${AUTO_CLOCKOUT_CAP_MS / 3_600_000} hours — their scheduled shift runs longer than that.`
+            ? `Automatically clocked out after being open ${AUTO_CLOCKOUT_CAP_MS / 3_600_000} hours — their scheduled shift's end time looks invalid, so the flat safety cap was used instead.`
             : `Automatically clocked out after being open ${AUTO_CLOCKOUT_CAP_MS / 3_600_000} hours — no scheduled shift to go by.`;
         const newExceptionReason = cleanClose
           ? null
@@ -153,6 +183,6 @@ export async function autoCloseStaleClockIns(): Promise<AutoClockoutResult> {
       }
     }
 
-    return { checked: sessions.length, closed, failed };
+    return { checked: sessions.length, closed, skipped, failed };
   });
 }
