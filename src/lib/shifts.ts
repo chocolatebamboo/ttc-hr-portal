@@ -4,6 +4,7 @@ import { assertCanAccessEmployeeRecords, assertCanManageShifts, isAdmin, Forbidd
 import { orgNow, timeToMinutes } from "@/lib/time";
 import { writeNotification } from "@/lib/notifications";
 import { getAvatarPublicUrl } from "@/lib/storage";
+import { enforceWeeklyHourCap } from "@/lib/hour-cap";
 import type { CurrentEmployee, ShiftDTO, ShiftStatus, AdminShiftDTO } from "@/types";
 
 /**
@@ -44,6 +45,7 @@ const SHIFT_INCLUDE = {
       departmentId: true,
       department: { select: { name: true } },
       avatarStorageKey: true,
+      weeklyHourCap: true,
     },
   },
   createdBy: { select: { firstName: true, lastName: true, preferredName: true } },
@@ -79,6 +81,7 @@ type ShiftRow = {
     departmentId: string | null;
     department: { name: string } | null;
     avatarStorageKey: string | null;
+    weeklyHourCap: number | null;
   };
   createdBy: { firstName: string; lastName: string; preferredName: string | null };
   reviewedBy: { firstName: string; lastName: string; preferredName: string | null } | null;
@@ -191,6 +194,7 @@ function toAdminDTO(row: ShiftRow, displayStatus: ShiftStatus): AdminShiftDTO {
     createdByName: nameOf(row.createdBy),
     reviewedByName: row.reviewedBy ? nameOf(row.reviewedBy) : null,
     employeeAvatarUrl: row.employee.avatarStorageKey ? getAvatarPublicUrl(row.employee.avatarStorageKey) : null,
+    employeeWeeklyHourCap: row.employee.weeklyHourCap,
   };
 }
 
@@ -323,7 +327,8 @@ function assertValidDateTime(date: string, startTime: string, endTime: string): 
 export async function convertAvailabilityDateToShift(
   actor: CurrentEmployee,
   submissionId: string,
-  date: string
+  date: string,
+  confirmOverCap = false
 ): Promise<ShiftDTO> {
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const submission = await tx.availabilitySubmission.findUnique({ where: { id: submissionId } });
@@ -341,6 +346,8 @@ export async function convertAvailabilityDateToShift(
       where: { sourceAvailabilitySubmissionId: submissionId, date, status: { not: "CANCELLED" } },
     });
     if (existing) throw new InvalidShiftError("This date already has a confirmed shift.");
+
+    await enforceWeeklyHourCap(tx, submission.employeeId, [slot], confirmOverCap);
 
     const row = await tx.shift.create({
       data: {
@@ -378,6 +385,10 @@ export interface CreateShiftInput {
   startTime: string;
   endTime: string;
   note?: string;
+  /** Nov 2026 — the admin's own deliberate "Approve anyway" past a weekly hour cap warning; see
+   *  Employee.weeklyHourCap's own doc comment in prisma/schema.prisma and this file's
+   *  enforceWeeklyHourCap call just below. Defaults to false (checked) when omitted. */
+  confirmOverCap?: boolean;
 }
 
 /** "Create a shift manually when needed" — no source availability submission required at all; a
@@ -387,6 +398,13 @@ export async function createShiftManually(actor: CurrentEmployee, input: CreateS
   assertValidDateTime(input.date, input.startTime, input.endTime);
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
+    await enforceWeeklyHourCap(
+      tx,
+      input.employeeId,
+      [{ date: input.date, startTime: input.startTime, endTime: input.endTime }],
+      input.confirmOverCap ?? false
+    );
+
     const row = await tx.shift.create({
       data: {
         employeeId: input.employeeId,
@@ -553,7 +571,8 @@ export async function reassignShift(
   actor: CurrentEmployee,
   shiftId: string,
   newEmployeeId: string,
-  reason?: string
+  reason?: string,
+  confirmOverCap = false
 ): Promise<ShiftDTO> {
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const existing = await loadShiftRow(tx, shiftId);
@@ -568,6 +587,16 @@ export async function reassignShift(
     if (!newEmployee || newEmployee.deactivatedAt) {
       throw new InvalidShiftError("That team member isn't available to reassign this shift to.");
     }
+
+    // Checked against the NEW employee — the person this shift's hours are about to belong to
+    // — not the one it's being taken away from (reassigning only ever reduces the original
+    // employee's hours).
+    await enforceWeeklyHourCap(
+      tx,
+      newEmployeeId,
+      [{ date: existing.date, startTime: existing.startTime, endTime: existing.endTime }],
+      confirmOverCap
+    );
 
     const trimmedReason = reason?.trim() || undefined;
 
@@ -839,6 +868,8 @@ export interface ApproveShiftChangeInput {
   startTime?: string;
   endTime?: string;
   comment?: string;
+  /** Nov 2026 — see CreateShiftInput.confirmOverCap's own doc comment just above; same shape. */
+  confirmOverCap?: boolean;
 }
 
 /**
@@ -864,6 +895,17 @@ export async function approveShiftChange(actor: CurrentEmployee, shiftId: string
       throw new InvalidShiftError("Choose a final date, start time, and end time to approve this change.");
     }
     assertValidDateTime(finalDate, finalStart, finalEnd);
+
+    // excludeShiftId: this is the SAME shift row getting a new date/time, not a new one — leave
+    // its own (about-to-be-replaced) hours out of "existing," or they'd be double-counted
+    // alongside the final date/time below.
+    await enforceWeeklyHourCap(
+      tx,
+      existing.employeeId,
+      [{ date: finalDate, startTime: finalStart, endTime: finalEnd }],
+      input.confirmOverCap ?? false,
+      { excludeShiftId: shiftId }
+    );
 
     const trimmedComment = input.comment?.trim() || undefined;
     const row = await tx.shift.update({
