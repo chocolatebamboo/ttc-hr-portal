@@ -260,6 +260,13 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
   const [reassigningId, setReassigningId] = useState<string | null>(null);
   const [reassignTo, setReassignTo] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
+  // Nov 2026 (CB, weekly-hour-cap feature): whether actionError above is specifically a
+  // weekly-hour-cap warning (a 409 WEEKLY_CAP_EXCEEDED from createShiftManually, reassignShift,
+  // or approveShiftChange — src/lib/hour-cap.ts) rather than some other failure, so the three
+  // action panels that can trigger it (New shift, Reassign, Confirm approval below) can offer a
+  // lighter inline "Approve anyway" instead of a dead-end error. Shared across all three, same
+  // as actionError itself — only one of those panels is ever open at a time in practice.
+  const [actionCapExceeded, setActionCapExceeded] = useState(false);
   // Phase 2 (client spec, Sept 2026): responding to a pending CHANGE_REQUESTED/
   // CANCELLATION_REQUESTED — "Approve the request. Decline the request. Change the shift time.
   // Cancel the shift. Reassign the shift." The last two are already covered by
@@ -430,8 +437,16 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
     });
   }
 
-  async function handleCreate(input: { employeeId: string; date: string; startTime: string; endTime: string; note: string }) {
+  async function handleCreate(input: {
+    employeeId: string;
+    date: string;
+    startTime: string;
+    endTime: string;
+    note: string;
+    confirmOverCap?: boolean;
+  }) {
     setActionError(null);
+    if (!input.confirmOverCap) setActionCapExceeded(false);
     try {
       const res = await fetch("/api/admin/shifts", {
         method: "POST",
@@ -439,8 +454,13 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
         body: JSON.stringify(input),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Couldn't create that shift.");
+      if (!res.ok) {
+        setActionError(data.error || "Couldn't create that shift.");
+        setActionCapExceeded(data.code === "WEEKLY_CAP_EXCEEDED");
+        return;
+      }
       setShowCreate(false);
+      setActionCapExceeded(false);
       loadShifts();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Couldn't create that shift.");
@@ -469,20 +489,26 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
     }
   }
 
-  async function handleReassign(shiftId: string) {
+  async function handleReassign(shiftId: string, confirmOverCap = false) {
     if (!reassignTo) return;
     setBusyId(shiftId);
     setActionError(null);
+    if (!confirmOverCap) setActionCapExceeded(false);
     try {
       const res = await fetch(`/api/admin/shifts/${shiftId}/reassign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ employeeId: reassignTo }),
+        body: JSON.stringify({ employeeId: reassignTo, confirmOverCap }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Couldn't reassign that shift.");
+      if (!res.ok) {
+        setActionError(data.error || "Couldn't reassign that shift.");
+        setActionCapExceeded(data.code === "WEEKLY_CAP_EXCEEDED");
+        return;
+      }
       setReassigningId(null);
       setReassignTo("");
+      setActionCapExceeded(false);
       loadShifts();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Couldn't reassign that shift.");
@@ -506,9 +532,10 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
     }
   }
 
-  async function handleApproveChange(shiftId: string) {
+  async function handleApproveChange(shiftId: string, confirmOverCap = false) {
     setBusyId(shiftId);
     setActionError(null);
+    if (!confirmOverCap) setActionCapExceeded(false);
     try {
       const res = await fetch(`/api/admin/shifts/${shiftId}/approve-change`, {
         method: "POST",
@@ -517,14 +544,20 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
           date: approveDate || undefined,
           startTime: approveStartTime || undefined,
           endTime: approveEndTime || undefined,
+          confirmOverCap,
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Couldn't approve that change.");
+      if (!res.ok) {
+        setActionError(data.error || "Couldn't approve that change.");
+        setActionCapExceeded(data.code === "WEEKLY_CAP_EXCEEDED");
+        return;
+      }
       setApprovingChangeId(null);
       setApproveDate("");
       setApproveStartTime("");
       setApproveEndTime("");
+      setActionCapExceeded(false);
       loadShifts();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Couldn't approve that change.");
@@ -682,6 +715,25 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
             >
               Confirm approval
             </button>
+            {/* Nov 2026 (CB, weekly-hour-cap feature): lighter inline treatment than Team
+                Availability's own confirm panel, since approving a shift CHANGE from here is a
+                less common path — same real message, with "Approve anyway" sitting right next
+                to it instead of a separate panel. */}
+            {actionError && approvingChangeId === s.id && (
+              <div>
+                <p className="text-xs font-medium text-rose-600">{actionError}</p>
+                {actionCapExceeded && (
+                  <button
+                    type="button"
+                    onClick={() => handleApproveChange(s.id, true)}
+                    disabled={busyId === s.id}
+                    className="text-xs font-semibold text-rose-600 hover:underline mt-1"
+                  >
+                    Approve anyway
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -753,29 +805,49 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
         )}
 
         {reassigningId === s.id && (
-          <div className="mt-3 flex flex-col sm:flex-row gap-2 bg-black/[0.03] rounded-xl p-3">
-            <select
-              value={reassignTo}
-              onChange={(e) => setReassignTo(e.target.value)}
-              className="flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm"
-            >
-              <option value="">Choose a team member…</option>
-              {employeeOptions
-                .filter((e) => e.id !== s.employeeId)
-                .map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.name}
-                  </option>
-                ))}
-            </select>
-            <button
-              type="button"
-              onClick={() => handleReassign(s.id)}
-              disabled={busyId === s.id || !reassignTo}
-              className="btn-outline text-xs px-3 py-1.5 self-start"
-            >
-              Confirm reassign
-            </button>
+          <div className="mt-3 flex flex-col gap-2 bg-black/[0.03] rounded-xl p-3">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <select
+                value={reassignTo}
+                onChange={(e) => setReassignTo(e.target.value)}
+                className="flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm"
+              >
+                <option value="">Choose a team member…</option>
+                {employeeOptions
+                  .filter((e) => e.id !== s.employeeId)
+                  .map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {e.name}
+                    </option>
+                  ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => handleReassign(s.id)}
+                disabled={busyId === s.id || !reassignTo}
+                className="btn-outline text-xs px-3 py-1.5 self-start"
+              >
+                Confirm reassign
+              </button>
+            </div>
+            {/* Nov 2026 (CB, weekly-hour-cap feature): same lighter inline treatment as Confirm
+                approval above — checked against the NEW employee (reassignShift's own doc
+                comment in src/lib/shifts.ts), not the one the shift is being taken from. */}
+            {actionError && reassigningId === s.id && (
+              <div>
+                <p className="text-xs font-medium text-rose-600">{actionError}</p>
+                {actionCapExceeded && (
+                  <button
+                    type="button"
+                    onClick={() => handleReassign(s.id, true)}
+                    disabled={busyId === s.id}
+                    className="text-xs font-semibold text-rose-600 hover:underline mt-1"
+                  >
+                    Approve anyway
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -857,7 +929,16 @@ export default function TeamScheduleView({ viewerIsAdmin, viewerId }: { viewerIs
       </p>
 
       {showCreate && (
-        <CreateShiftForm employeeOptions={employeeOptions} onCreate={handleCreate} error={actionError} />
+        <CreateShiftForm
+          employeeOptions={employeeOptions}
+          onCreate={handleCreate}
+          error={actionError}
+          capExceeded={actionCapExceeded}
+          onDismissCapWarning={() => {
+            setActionError(null);
+            setActionCapExceeded(false);
+          }}
+        />
       )}
 
       <div className="flex flex-wrap gap-2 mb-4">
@@ -1185,10 +1266,24 @@ function CreateShiftForm({
   employeeOptions,
   onCreate,
   error,
+  capExceeded,
+  onDismissCapWarning,
 }: {
   employeeOptions: EmployeeOption[];
-  onCreate: (input: { employeeId: string; date: string; startTime: string; endTime: string; note: string }) => void;
+  onCreate: (input: {
+    employeeId: string;
+    date: string;
+    startTime: string;
+    endTime: string;
+    note: string;
+    confirmOverCap?: boolean;
+  }) => void;
   error: string | null;
+  /** Nov 2026 (CB, weekly-hour-cap feature): whether `error` above is specifically a
+   *  weekly-hour-cap warning — see actionCapExceeded's own doc comment in the parent view. */
+  capExceeded?: boolean;
+  /** Dismisses the cap warning below without creating anything — "Cancel" in that panel. */
+  onDismissCapWarning?: () => void;
 }) {
   const [employeeId, setEmployeeId] = useState("");
   const [date, setDate] = useState("");
@@ -1238,7 +1333,33 @@ function CreateShiftForm({
         rows={2}
         className="w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm"
       />
-      {error && <p className="text-xs text-accent">{error}</p>}
+      {error && !capExceeded && <p className="text-xs text-accent">{error}</p>}
+      {/* Nov 2026 (CB, weekly-hour-cap feature, her own confirmed mockup): the real numbers,
+          then a deliberate "Add anyway" rather than a dead end — same panel convention as
+          TeamAvailabilityCards' own "+Add a date" form, which calls this same createShiftManually
+          underneath. Cancel just dismisses the warning so the picked date/time stays put. */}
+      {capExceeded && (
+        <div className="bg-black/[0.035] border border-border rounded-xl p-3">
+          <p className="text-sm font-semibold text-rose-600">This would go over the weekly cap</p>
+          <p className="text-xs text-muted mt-1">{error}</p>
+          <div className="flex items-center gap-2 mt-2.5">
+            <button
+              type="button"
+              onClick={onDismissCapWarning}
+              className="rounded-full border border-border px-3.5 py-1.5 text-xs font-semibold text-muted hover:bg-black/[0.03]"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => onCreate({ employeeId, date, startTime, endTime, note, confirmOverCap: true })}
+              className="rounded-full bg-rose-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-rose-700"
+            >
+              Add anyway
+            </button>
+          </div>
+        </div>
+      )}
       <button
         type="button"
         disabled={!employeeId || !date}
