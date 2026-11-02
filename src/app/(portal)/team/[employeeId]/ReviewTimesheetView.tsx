@@ -291,21 +291,40 @@ export default function ReviewTimesheetView({
     }
   }
 
-  async function approveShiftChange(shiftId: string, date: string, startTime: string, endTime: string) {
+  // Nov 2026 (CB, weekly-hour-cap feature): a 409 WEEKLY_CAP_EXCEEDED from approveShiftChange
+  // below sets this to the exact retry (same shiftId/date/startTime/endTime, confirmOverCap
+  // true this time) so the page-level banner's own "Approve anyway" doesn't need to re-derive
+  // which request it was approving. Lighter than Team Availability's full confirm panel — this
+  // page already has a single shared banner for every shift-request action (see
+  // approveShiftCancellation's own doc comment above), so the override rides along on it.
+  const [capWarningRetry, setCapWarningRetry] = useState<(() => void) | null>(null);
+
+  async function approveShiftChange(
+    shiftId: string,
+    date: string,
+    startTime: string,
+    endTime: string,
+    confirmOverCap = false
+  ) {
     setBusyShiftId(shiftId);
     setActionError("");
     setActionNotice("");
+    if (!confirmOverCap) setCapWarningRetry(null);
     try {
       const res = await fetch(`/api/admin/shifts/${shiftId}/approve-change`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date, startTime, endTime }),
+        body: JSON.stringify({ date, startTime, endTime, confirmOverCap }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setActionError(data.error ?? "Unable to approve that change. Please try again.");
+        if (data.code === "WEEKLY_CAP_EXCEEDED") {
+          setCapWarningRetry(() => () => approveShiftChange(shiftId, date, startTime, endTime, true));
+        }
       } else {
         setActionNotice("Shift change approved.");
+        setCapWarningRetry(null);
       }
     } catch {
       setActionError("Unable to reach the server. Check your connection and try again.");
@@ -447,6 +466,15 @@ export default function ReviewTimesheetView({
       {actionError && (
         <p className="mb-3 text-sm text-accent" role="alert">
           {actionError}
+          {capWarningRetry && (
+            <button
+              type="button"
+              onClick={capWarningRetry}
+              className="ml-2 font-semibold text-rose-600 hover:underline"
+            >
+              Approve anyway
+            </button>
+          )}
         </p>
       )}
 
