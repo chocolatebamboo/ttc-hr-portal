@@ -41,6 +41,13 @@ export default function ScheduleSomeoneSheet({
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  // Nov 2026 (CB, weekly-hour-cap feature): whether `error` above is specifically a
+  // weekly-hour-cap warning (POST /api/admin/shifts' own 409 WEEKLY_CAP_EXCEEDED, src/lib/
+  // hour-cap.ts) rather than some other failure — this is a second, separate "create a shift
+  // manually" entry point from TeamAvailabilityCards' own "+Add a date" form (both call the
+  // same createShiftManually), so it needs the same real-numbers-then-deliberate-override
+  // confirm panel, not a dead-end error message.
+  const [capExceeded, setCapExceeded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -59,18 +66,23 @@ export default function ScheduleSomeoneSheet({
     };
   }, []);
 
-  async function handleSubmit() {
+  async function handleSubmit(confirmOverCap = false) {
     if (!employeeId || !date || !startTime || !endTime) return;
     setSubmitting(true);
     setError("");
+    if (!confirmOverCap) setCapExceeded(false);
     try {
       const res = await fetch("/api/admin/shifts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ employeeId, date, startTime, endTime, note: note.trim() || undefined }),
+        body: JSON.stringify({ employeeId, date, startTime, endTime, note: note.trim() || undefined, confirmOverCap }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Couldn't create that shift.");
+      if (!res.ok) {
+        setError(data.error || "Couldn't create that shift.");
+        setCapExceeded(data.code === "WEEKLY_CAP_EXCEEDED");
+        return;
+      }
       onCreated();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't create that shift.");
@@ -213,11 +225,43 @@ export default function ScheduleSomeoneSheet({
           </div>
         </div>
 
-        {error && <p className="text-sm text-accent mt-3">{error}</p>}
+        {error && !capExceeded && <p className="text-sm text-accent mt-3">{error}</p>}
+
+        {/* Nov 2026 (CB, weekly-hour-cap feature, her own confirmed mockup): same confirm-panel
+            treatment as TeamAvailabilityCards' own "+Add a date" form — the real numbers, then a
+            deliberate "Add anyway" rather than a dead end. Cancel just dismisses the warning so
+            the picked date/time stays put in case the admin would rather adjust it instead. */}
+        {capExceeded && (
+          <div className="mt-3 bg-black/[0.035] border border-border rounded-xl p-3">
+            <p className="text-sm font-semibold text-rose-600">This would go over the weekly cap</p>
+            <p className="text-xs text-muted mt-1">{error}</p>
+            <div className="flex items-center gap-2 mt-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setCapExceeded(false);
+                  setError("");
+                }}
+                disabled={submitting}
+                className="rounded-full border border-border px-3.5 py-1.5 text-xs font-semibold text-muted hover:bg-black/[0.03] disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSubmit(true)}
+                disabled={submitting}
+                className="rounded-full bg-rose-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-rose-700 disabled:opacity-60"
+              >
+                {submitting ? "Adding…" : "Add anyway"}
+              </button>
+            </div>
+          </div>
+        )}
 
         <button
           type="button"
-          onClick={handleSubmit}
+          onClick={() => handleSubmit(false)}
           disabled={submitting || !employeeId || !date || !startTime || !endTime}
           className="btn-primary w-full mt-4 min-h-[48px]"
         >
