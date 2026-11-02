@@ -61,6 +61,11 @@ export interface EmployeeFormValues {
   role: Role;
   employmentStatus: EmploymentStatus;
   clocksIn: boolean;
+  /** Text-input-shaped like every other optional field here (hint, see TextField below) — "" on
+   *  blank/no cap, otherwise a plain number string. Parsed server-side (src/app/api/admin/
+   *  employees/route.ts and [id]/route.ts) — see Employee.weeklyHourCap's own doc comment in
+   *  prisma/schema.prisma. */
+  weeklyHourCap: string;
   departmentName: string;
   supervisorId: string;
   hireDate: string;
@@ -82,6 +87,7 @@ function blankValues(): EmployeeFormValues {
     role: "EMPLOYEE",
     employmentStatus: "ACTIVE",
     clocksIn: true,
+    weeklyHourCap: "",
     departmentName: "",
     supervisorId: "",
     hireDate: todayDateKey(),
@@ -104,6 +110,7 @@ function valuesFromRow(row: EmployeeAdminRowDTO): EmployeeFormValues {
     role: row.role,
     employmentStatus: row.employmentStatus,
     clocksIn: row.clocksIn,
+    weeklyHourCap: row.weeklyHourCap == null ? "" : String(row.weeklyHourCap),
     departmentName: row.departmentName ?? "",
     supervisorId: row.supervisorId ?? "",
     hireDate: row.hireDate.slice(0, 10),
@@ -704,6 +711,20 @@ function EmployeeForm({
           </span>
         </span>
       </label>
+
+      {/* CB, Nov 2026: "there's certain people that are capped at a certain amount of hours
+          that they could work for... the week... this applies to every team member in that
+          capacity" — a per-person, optional weekly ceiling, blank/null by default (no cap)
+          until set here for a specific person. See Employee.weeklyHourCap's own doc comment in
+          prisma/schema.prisma; enforced in src/lib/hour-cap.ts wherever a shift gets scheduled
+          for them, with a warning and a deliberate "Approve anyway" rather than a flat block. */}
+      <TextField
+        label="Weekly hour cap"
+        type="number"
+        value={values.weeklyHourCap}
+        onChange={(v) => set("weeklyHourCap", v)}
+        hint="Leave blank for no cap. Checked against the Mon–Sun/Mon–Fri weeks of the pay period, the moment a date is approved or a shift is scheduled for them — not a hard stop, just a warning with the real numbers before it's let through. Change it any time."
+      />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
