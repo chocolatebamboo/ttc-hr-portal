@@ -181,6 +181,9 @@ export interface EmployeeAdminRowDTO {
   /** See CurrentEmployee.clocksIn's own doc comment — same field, same per-person meaning,
    *  editable here in the Employees admin edit form. */
   clocksIn: boolean;
+  /** See Employee.weeklyHourCap's own doc comment in prisma/schema.prisma — hours, null = no
+   *  cap, editable here in the Employees admin edit form. */
+  weeklyHourCap: number | null;
   departmentId: string | null;
   departmentName: string | null;
   supervisorId: string | null;
@@ -400,6 +403,11 @@ export interface AdminAvailabilityDTO extends AvailabilityDTO {
    *  throughout"): resolved server-side from avatarStorageKey via getAvatarPublicUrl — the
    *  convention every admin DTO carrying a person's photo now follows. */
   employeeAvatarUrl: string | null;
+  /** Nov 2026 — this employee's own Employee.weeklyHourCap (hours, null = no cap), resolved
+   *  server-side the same way employeeAvatarUrl is. Drives the quiet "Cap Xh/wk" badge next to
+   *  their name in TeamAvailabilityCards; the exact running-total check happens server-side at
+   *  approval time (src/lib/hour-cap.ts), not from this field. */
+  employeeWeeklyHourCap: number | null;
 }
 
 /** Phase 1 of the scheduling workflow rebuild (client spec, Sept 2026): a CONFIRMED shift,
@@ -480,6 +488,9 @@ export interface AdminShiftDTO extends ShiftDTO {
    *  throughout"): resolved server-side from avatarStorageKey via getAvatarPublicUrl, same
    *  convention as AdminAvailabilityDTO/AdminPtoRequestDTO's own employeeAvatarUrl. */
   employeeAvatarUrl: string | null;
+  /** Nov 2026 — see AdminAvailabilityDTO.employeeWeeklyHourCap's own doc comment; same field,
+   *  same resolution, now also on Team Schedule. */
+  employeeWeeklyHourCap: number | null;
 }
 
 /** One message in a team member's notes/messaging thread (src/lib/team-notes.ts) — see
