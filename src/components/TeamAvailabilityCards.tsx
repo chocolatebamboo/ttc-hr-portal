@@ -25,6 +25,14 @@ export function initialsOf(name: string): string {
   return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
 }
 
+/** Nov 2026 (CB, weekly-hour-cap feature): "10" not "10.0", "7.5" stays "7.5" — same one-decimal-
+ *  if-needed convention src/lib/hour-cap.ts's own fmtHours uses server-side, kept as a tiny local
+ *  copy since this is a client component with no server import boundary to share it across. */
+function fmtCapHours(hours: number): string {
+  const rounded = Math.round(hours * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
 /** True once every date on a submission has moved off PENDING — mirrors
  *  src/lib/availability.ts's own allDatesDecided, kept as a tiny local copy since this file has
  *  no server-side import boundary to share it across (client component). */
@@ -112,6 +120,21 @@ function useTeamAvailabilityQueue(opts?: { initialPending?: AdminAvailabilityDTO
   // for its own DM rows. Best-effort like shiftsByDate below: a missing badge isn't worth failing
   // the card list over.
   const [dmCounts, setDmCounts] = useState<Map<string, { total: number; unread: number }>>(new Map());
+  // Nov 2026 (CB, weekly-hour-cap feature): a decide/decideDate call blocked by the server's own
+  // 409 WEEKLY_CAP_EXCEEDED (src/lib/hour-cap.ts's enforceWeeklyHourCap) lands here instead of
+  // just decideError above, so Card can show the real numbers plus a deliberate "Approve anyway"
+  // rather than a dead-end error message. `date` is only set for a per-date decideDate warning —
+  // undefined means this came from the bulk decide — so Card can tell the two apart and show the
+  // panel in the right spot (the bulk Approve/Deny row, or the one open date's own row) without
+  // showing it in both at once. decideError/decideErrorId are still set alongside this (same
+  // message), so a caller that doesn't wire up the rich panel at all — TeamAvailabilityRequestsSection,
+  // the dashboard widget — still shows SOMETHING, just without the override button.
+  const [capWarning, setCapWarning] = useState<{ submissionId: string; date?: string; message: string } | null>(null);
+  // The exact decide/decideDate call to retry with confirmOverCap once "Approve anyway" is
+  // clicked, captured at the moment the warning is thrown so Card never has to re-derive which
+  // decision/comment it was approving. Kept out of capWarning itself (which Card receives as a
+  // prop) so Card's own prop surface stays plain data, not a function to call blind.
+  const [capWarningRetry, setCapWarningRetry] = useState<(() => void) | null>(null);
 
   async function load() {
     setLoadState("loading");
@@ -256,22 +279,39 @@ function useTeamAvailabilityQueue(opts?: { initialPending?: AdminAvailabilityDTO
   // is itself hidden once isInPerDateMode is true — see Card below), but the server enforces the
   // same rule independently, so this can't silently override a partially-decided request even if
   // the client got out of sync.
-  async function decide(submissionId: string, decision: "APPROVED" | "DENIED", comment?: string) {
+  async function decide(
+    submissionId: string,
+    decision: "APPROVED" | "DENIED",
+    comment?: string,
+    confirmOverCap = false
+  ) {
     setBusyId(submissionId);
     setDecideError(undefined);
     setDecideErrorId(null);
+    if (!confirmOverCap) {
+      setCapWarning(null);
+      setCapWarningRetry(null);
+    }
     try {
       const res = await fetch(`/api/availability/${submissionId}/decide`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decision, comment }),
+        body: JSON.stringify({ decision, comment, confirmOverCap }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         setDecideError(data.error ?? "Unable to save that decision. Please try again.");
         setDecideErrorId(submissionId);
+        // Nov 2026 — weekly-hour-cap warning (see capWarning's own doc comment above): a bulk
+        // decide's own warning is tagged with no `date`, distinguishing it from decideDate's.
+        if (data.code === "WEEKLY_CAP_EXCEEDED") {
+          setCapWarning({ submissionId, message: data.error });
+          setCapWarningRetry(() => () => decide(submissionId, decision, comment, true));
+        }
         return;
       }
+      setCapWarning(null);
+      setCapWarningRetry(null);
       load();
     } catch {
       setDecideError("Couldn't reach the server. Check your connection and try again.");
@@ -283,22 +323,40 @@ function useTeamAvailabilityQueue(opts?: { initialPending?: AdminAvailabilityDTO
 
   // Per-date decide — "you have to approve each thing, like each date one at a time." Same
   // error-surfacing discipline as bulk decide above.
-  async function decideDate(submissionId: string, date: string, decision: "APPROVED" | "DENIED", comment?: string) {
+  async function decideDate(
+    submissionId: string,
+    date: string,
+    decision: "APPROVED" | "DENIED",
+    comment?: string,
+    confirmOverCap = false
+  ) {
     setBusyId(submissionId);
     setDecideError(undefined);
     setDecideErrorId(null);
+    if (!confirmOverCap) {
+      setCapWarning(null);
+      setCapWarningRetry(null);
+    }
     try {
       const res = await fetch(`/api/availability/${submissionId}/decide-date`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date, decision, comment }),
+        body: JSON.stringify({ date, decision, comment, confirmOverCap }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         setDecideError(data.error ?? "Unable to save that decision. Please try again.");
         setDecideErrorId(submissionId);
+        // Nov 2026 — weekly-hour-cap warning: tagged WITH this date, distinguishing it from a
+        // bulk decide's own warning above.
+        if (data.code === "WEEKLY_CAP_EXCEEDED") {
+          setCapWarning({ submissionId, date, message: data.error });
+          setCapWarningRetry(() => () => decideDate(submissionId, date, decision, comment, true));
+        }
         return;
       }
+      setCapWarning(null);
+      setCapWarningRetry(null);
       load();
     } catch {
       setDecideError("Couldn't reach the server. Check your connection and try again.");
@@ -410,7 +468,11 @@ function useTeamAvailabilityQueue(opts?: { initialPending?: AdminAvailabilityDTO
     startTime: string;
     endTime: string;
     note?: string;
-  }): Promise<string | null> {
+    // Nov 2026 — the admin's own deliberate "Add anyway" past a weekly-hour-cap warning (see
+    // hour-cap.ts's enforceWeeklyHourCap); Card's own form resends this exact input with it set
+    // once the admin confirms, same shape decide/decideDate's confirmOverCap above uses.
+    confirmOverCap?: boolean;
+  }): Promise<{ error: string; capExceeded?: boolean } | null> {
     try {
       const res = await fetch("/api/admin/shifts", {
         method: "POST",
@@ -418,11 +480,16 @@ function useTeamAvailabilityQueue(opts?: { initialPending?: AdminAvailabilityDTO
         body: JSON.stringify(input),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) return data.error ?? "Unable to create that shift. Please try again.";
+      if (!res.ok) {
+        return {
+          error: data.error ?? "Unable to create that shift. Please try again.",
+          capExceeded: data.code === "WEEKLY_CAP_EXCEEDED",
+        };
+      }
       loadShifts();
       return null;
     } catch {
-      return "Couldn't reach the server. Check your connection and try again.";
+      return { error: "Couldn't reach the server. Check your connection and try again." };
     }
   }
 
@@ -504,6 +571,21 @@ function useTeamAvailabilityQueue(opts?: { initialPending?: AdminAvailabilityDTO
     }
   }
 
+  // Nov 2026 (CB, weekly-hour-cap feature): the admin's own deliberate "Approve anyway" —
+  // re-runs whichever decide/decideDate call just got blocked, this time with confirmOverCap
+  // true, so the exact same decision/comment goes through without the admin having to redo
+  // anything. A no-op if there's no warning pending (shouldn't happen — Card only ever shows the
+  // button while capWarning is set — but cheap to guard against regardless).
+  function confirmCapOverride() {
+    capWarningRetry?.();
+  }
+
+  // Dismisses a pending cap warning without approving anything — "Cancel" in the confirm panel.
+  function cancelCapWarning() {
+    setCapWarning(null);
+    setCapWarningRetry(null);
+  }
+
   return {
     pending,
     decided,
@@ -537,6 +619,9 @@ function useTeamAvailabilityQueue(opts?: { initialPending?: AdminAvailabilityDTO
     undoDate,
     changeDate,
     createShift,
+    capWarning,
+    confirmCapOverride,
+    cancelCapWarning,
   };
 }
 
@@ -888,6 +973,9 @@ export default function TeamAvailabilityCards({
                   openDate={q.openDate}
                   shiftsByDate={q.shiftsByDate}
                   dmCounts={q.dmCounts}
+                  capWarning={group.submissions.some((s) => s.id === q.capWarning?.submissionId) ? q.capWarning : undefined}
+                  onConfirmCapOverride={q.confirmCapOverride}
+                  onCancelCapWarning={q.cancelCapWarning}
                   onToggleDate={(submissionId, date) =>
                     q.setOpenDate(
                       q.openDate?.submissionId === submissionId && q.openDate.date === date ? null : { submissionId, date }
@@ -1088,6 +1176,9 @@ export function Card({
   openDate,
   shiftsByDate,
   dmCounts,
+  capWarning,
+  onConfirmCapOverride,
+  onCancelCapWarning,
   collapsible = false,
   onToggleDate,
   onAddNoteToggle,
@@ -1123,6 +1214,18 @@ export function Card({
   openDate: { submissionId: string; date: string } | null;
   shiftsByDate: Map<string, AdminShiftDTO>;
   dmCounts: Map<string, { total: number; unread: number }>;
+  /** Nov 2026 (CB, weekly-hour-cap feature): set only while THIS card has a decide/decideDate
+   *  call blocked on a weekly-hour-cap warning — see useTeamAvailabilityQueue's own capWarning
+   *  doc comment above for the full reasoning, including why `date` distinguishes a bulk
+   *  warning from a per-date one. Optional and undefined for any caller that doesn't wire this
+   *  up (TeamAvailabilityRequestsSection's dashboard widget) — decideError above still carries
+   *  the same message there, just without this panel's "Approve anyway" button. */
+  capWarning?: { submissionId: string; date?: string; message: string } | null;
+  /** The admin's own deliberate override — only ever called from this card's own confirm panel,
+   *  never automatically. */
+  onConfirmCapOverride?: () => void;
+  /** Dismisses capWarning without approving anything. */
+  onCancelCapWarning?: () => void;
   /** Oct 2026 (CB: "it should be a drop down so it's cleaner for each... person so we can see
    *  it"): when true, this card starts collapsed to just its header — name, dates count, a
    *  chevron toggle — with the date chips and everything below hidden until expanded. Off by
@@ -1141,8 +1244,14 @@ export function Card({
   /** Per-date counterpart to onAddNote — same optional, after-the-fact note, scoped to one
    *  date's own already-made decision. */
   onAddDateNote: (submissionId: string, date: string, comment: string) => void;
-  onDecide: (submissionId: string, decision: "APPROVED" | "DENIED", comment?: string) => void;
-  onDecideDate: (submissionId: string, date: string, decision: "APPROVED" | "DENIED", comment?: string) => void;
+  onDecide: (submissionId: string, decision: "APPROVED" | "DENIED", comment?: string, confirmOverCap?: boolean) => void;
+  onDecideDate: (
+    submissionId: string,
+    date: string,
+    decision: "APPROVED" | "DENIED",
+    comment?: string,
+    confirmOverCap?: boolean
+  ) => void;
   onUndo: (submissionId: string) => void;
   /** CB, Sept 2026: replaces the old "propose new date/time, wait for confirmation" flow — sets
    *  ONE date's new date/time and approves it immediately, same per-date granularity as
@@ -1173,7 +1282,8 @@ export function Card({
     startTime: string;
     endTime: string;
     note?: string;
-  }) => Promise<string | null>;
+    confirmOverCap?: boolean;
+  }) => Promise<{ error: string; capExceeded?: boolean } | null>;
   /** Round eighteen — see TeamAvailabilityCards' own doc comment on its `expandable` prop above
    *  for the full picture. All three are forwarded straight through to this card's own
    *  DateTasksPanel, unchanged from that component's own props of the same names; omitted
@@ -1247,6 +1357,11 @@ export function Card({
   const [newShiftNote, setNewShiftNote] = useState("");
   const [creatingShift, setCreatingShift] = useState(false);
   const [createShiftError, setCreateShiftError] = useState("");
+  // Nov 2026 (CB, weekly-hour-cap feature): whether createShiftError above is specifically a
+  // weekly-hour-cap warning (onCreateShift's own capExceeded flag), rather than some other
+  // failure — this form is local to the card and never tied to any one submission, so (unlike
+  // decide/decideDate's capWarning) this just lives here instead of in the hook.
+  const [createShiftCapExceeded, setCreateShiftCapExceeded] = useState(false);
 
   // CB, Sept 2026: "I'm still not seeing a thread created when I click on the chat icon... I
   // should have the option to kind of like message internally and choose which admin I would
@@ -1328,20 +1443,23 @@ export function Card({
     setAdjustDateComment("");
   }
 
-  async function submitCreateShift() {
+  async function submitCreateShift(confirmOverCap = false) {
     if (!newShiftDate) return;
     setCreatingShift(true);
     setCreateShiftError("");
-    const error = await onCreateShift({
+    if (!confirmOverCap) setCreateShiftCapExceeded(false);
+    const result = await onCreateShift({
       employeeId,
       date: newShiftDate,
       startTime: newShiftStart,
       endTime: newShiftEnd,
       note: newShiftNote.trim() || undefined,
+      confirmOverCap,
     });
     setCreatingShift(false);
-    if (error) {
-      setCreateShiftError(error);
+    if (result) {
+      setCreateShiftError(result.error);
+      setCreateShiftCapExceeded(!!result.capExceeded);
       return;
     }
     setAddingDate(false);
@@ -1350,6 +1468,7 @@ export function Card({
     setNewShiftEnd("17:00");
     setNewShiftNote("");
     setCreateShiftError("");
+    setCreateShiftCapExceeded(false);
   }
 
   // Oct 2026 (CB, pointing at a live Team Availability screenshot: "I don't necessarily like
@@ -1364,6 +1483,11 @@ export function Card({
   // the "active" chip highlight) rather than removed outright — it's "this person/decision's own
   // accent," just no longer painted across the entire surface.
   const avatarUrl = isSelf ? null : (solo?.employeeAvatarUrl ?? submissions[0]?.employeeAvatarUrl ?? null);
+  // Nov 2026 (CB, weekly-hour-cap feature): same per-employee field regardless of which
+  // submission happens to be `solo` — drives the quiet "Cap Xh/wk" badge below. Null means no
+  // cap is set for this person, same "purely optional, nothing changes until HR sets a number"
+  // convention Employee.weeklyHourCap documents in prisma/schema.prisma.
+  const employeeWeeklyHourCap = solo?.employeeWeeklyHourCap ?? submissions[0]?.employeeWeeklyHourCap ?? null;
   return (
     // Oct 2026 (CB, on the first all-white version of this mockup: "it looks too similar to
     // like the cards and I feel like it gets confusing on like the views so I need it to look a
@@ -1402,7 +1526,7 @@ export function Card({
                 name on a very narrow screen, not the normal case — and the badges wrap onto their
                 own row underneath instead of stealing its width. */}
             <p className="text-base font-semibold truncate">{employeeName}</p>
-            {(isSelf || !solo) && (
+            {(isSelf || !solo || employeeWeeklyHourCap != null) && (
               <div className="flex items-center gap-1.5 flex-wrap mt-1">
                 {isSelf && (
                   <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted bg-black/[0.04] border border-border rounded-full px-1.5 py-0.5">
@@ -1416,6 +1540,24 @@ export function Card({
                 {!solo && (
                   <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted bg-black/[0.04] border border-border rounded-full px-2 py-0.5">
                     {chips.length} dates · {submissions.length} requests
+                  </span>
+                )}
+                {/* Nov 2026 (CB, weekly-hour-cap feature, her own confirmed mockup): quiet and
+                    always there once a cap is set — same pill as the badges above, just tinted
+                    pink so it reads as a limit rather than a status. No running total here on
+                    purpose — the exact running total only gets calculated and shown at the
+                    moment a shift is actually approved or added (the confirm panels below), so
+                    this doesn't need its own always-on tally. */}
+                {employeeWeeklyHourCap != null && (
+                  <span
+                    className="shrink-0 text-[10px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 border"
+                    style={{
+                      color: "var(--ttc-pink-ink)",
+                      borderColor: "color-mix(in srgb, var(--ttc-pink) 35%, var(--border))",
+                      background: "color-mix(in srgb, var(--ttc-pink) 10%, transparent)",
+                    }}
+                  >
+                    Cap {fmtCapHours(employeeWeeklyHourCap)}h/wk
                   </span>
                 )}
               </div>
@@ -1624,7 +1766,42 @@ export function Card({
             rows={2}
             className="w-full rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-accent placeholder:text-muted resize-none"
           />
-          {createShiftError && <p className="text-xs font-medium text-rose-600">{createShiftError}</p>}
+          {createShiftError && !createShiftCapExceeded && (
+            <p className="text-xs font-medium text-rose-600">{createShiftError}</p>
+          )}
+          {/* Nov 2026 (CB, weekly-hour-cap feature): same confirm-panel convention as "Remove
+              this date?" below, shown in place of the plain error line above the moment the
+              server's own 409 WEEKLY_CAP_EXCEEDED comes back — the real numbers, then a
+              deliberate "Add anyway" rather than a dead end. Cancel just dismisses the warning
+              (not the whole form) so the admin can adjust the time/date first if that's what
+              they'd rather do. */}
+          {createShiftCapExceeded && (
+            <div className="bg-black/[0.035] border border-border rounded-xl p-3">
+              <p className="text-sm font-semibold text-rose-600">This would go over the weekly cap</p>
+              <p className="text-xs text-muted mt-1">{createShiftError}</p>
+              <div className="flex items-center gap-2 mt-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCreateShiftCapExceeded(false);
+                    setCreateShiftError("");
+                  }}
+                  disabled={creatingShift}
+                  className="rounded-full border border-border px-3.5 py-1.5 text-xs font-semibold text-muted hover:bg-black/[0.03] disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => submitCreateShift(true)}
+                  disabled={creatingShift}
+                  className="rounded-full bg-rose-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-rose-700 disabled:opacity-60"
+                >
+                  {creatingShift ? "Adding…" : "Add anyway"}
+                </button>
+              </div>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -1635,6 +1812,7 @@ export function Card({
                 setNewShiftEnd("17:00");
                 setNewShiftNote("");
                 setCreateShiftError("");
+                setCreateShiftCapExceeded(false);
               }}
               disabled={creatingShift}
               className="rounded-full border border-border px-3.5 py-1.5 text-xs font-semibold text-muted hover:bg-black/[0.03] disabled:opacity-60"
@@ -1643,7 +1821,7 @@ export function Card({
             </button>
             <button
               type="button"
-              onClick={submitCreateShift}
+              onClick={() => submitCreateShift(false)}
               disabled={creatingShift || !newShiftDate}
               className="rounded-full px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm disabled:opacity-60"
               style={{ background: tone.to }}
@@ -1731,7 +1909,40 @@ export function Card({
         </div>
       )}
 
-      {decideError && <p className="text-xs font-medium text-rose-600 mt-2">{decideError}</p>}
+      {/* Nov 2026 (CB, weekly-hour-cap feature, her own confirmed mockup): clicking Approve
+          above on a date that would go over the cap doesn't go through right away — this same
+          confirm-panel convention opens instead, with the real numbers, and nothing is approved
+          until "Approve anyway" is explicitly chosen. `date` undefined on capWarning is what
+          says this came from the bulk Approve above, not the one open date's own row further
+          down (see onDecide's own doc comment on the prop above). */}
+      {solo && capWarning?.submissionId === solo.id && capWarning.date === undefined && (
+        <div className="mt-2.5 bg-black/[0.035] border border-border rounded-xl p-3">
+          <p className="text-sm font-semibold text-rose-600">This would go over the weekly cap</p>
+          <p className="text-xs text-muted mt-1">{capWarning.message}</p>
+          <div className="flex items-center gap-2 mt-2.5">
+            <button
+              type="button"
+              onClick={onCancelCapWarning}
+              disabled={busy}
+              className="rounded-full border border-border px-3.5 py-1.5 text-xs font-semibold text-muted hover:bg-black/[0.03] disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={onConfirmCapOverride}
+              disabled={busy}
+              className="rounded-full bg-rose-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-rose-700 disabled:opacity-60"
+            >
+              Approve anyway
+            </button>
+          </div>
+        </div>
+      )}
+
+      {decideError && !submissions.some((s) => s.id === capWarning?.submissionId) && (
+        <p className="text-xs font-medium text-rose-600 mt-2">{decideError}</p>
+      )}
 
       {/* CB, Sept 2026: "I shouldn't have to explain myself" — Deny above now fires immediately,
           same as Approve. This is the optional note, offered afterward instead of gating the
@@ -1892,6 +2103,7 @@ export function Card({
                     </div>
                   </div>
                 ) : (
+                  <div className="space-y-2.5">
                   <div className="flex items-center gap-2 flex-wrap">
                     <button
                       type="button"
@@ -1941,6 +2153,35 @@ export function Card({
                       </button>
                     )}
                   </div>
+                  {/* Nov 2026 (CB, weekly-hour-cap feature): same panel as the bulk one above,
+                      opened by "Approve this date" instead of bulk Approve — `date` set on
+                      capWarning is what ties it to THIS date specifically, see onDecideDate's
+                      own doc comment on the prop above. */}
+                  {capWarning?.submissionId === openSubmission.id && capWarning.date === openChip.date && (
+                    <div className="bg-black/[0.035] border border-border rounded-xl p-3">
+                      <p className="text-sm font-semibold text-rose-600">This would go over the weekly cap</p>
+                      <p className="text-xs text-muted mt-1">{capWarning.message}</p>
+                      <div className="flex items-center gap-2 mt-2.5">
+                        <button
+                          type="button"
+                          onClick={onCancelCapWarning}
+                          disabled={busy}
+                          className="rounded-full border border-border px-3.5 py-1.5 text-xs font-semibold text-muted hover:bg-black/[0.03] disabled:opacity-60"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={onConfirmCapOverride}
+                          disabled={busy}
+                          className="rounded-full bg-rose-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-rose-700 disabled:opacity-60"
+                        >
+                          Approve anyway
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
                 )
               ) : (
                 <div className="space-y-2">
