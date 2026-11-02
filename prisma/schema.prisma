@@ -108,6 +108,19 @@ model Employee {
   // and Shawn directly in the database (see migration), not through an admin UI toggle.
   canEditFlaggedTimeEntries Boolean @default(false)
 
+  // CB, Nov 2026: "there's certain people that are capped at a certain amount of hours that
+  // they could work for... the week... this applies to every team member in that capacity" —
+  // a per-person, optional weekly ceiling on scheduled hours, checked against the pay period's
+  // own week1 (Mon-Sun)/week2 (Mon-Fri) split (getPayrollPeriodWeeks, src/lib/week.ts), not a
+  // plain calendar week. Nullable with no default, same "purely additive, opt-in per person"
+  // shape as clocksIn/isAvailabilityReviewer/canEditFlaggedTimeEntries just above — null means
+  // no cap, so nothing changes for anyone until HR sets a number for a specific person in the
+  // Employees admin edit form. Stored in HOURS, not minutes (HR types "10 hours a week," not
+  // 600). Enforced in src/lib/hour-cap.ts, checked wherever a Shift row gets created or its
+  // time changed — a warning with the real numbers, then a deliberate "approve anyway," never
+  // a silent block (CB: "we should still have the flexibility to change it if needed").
+  weeklyHourCap Float?
+
   ttcEmail       String  @unique
   workPhone      String?
   personalPhone  String?
