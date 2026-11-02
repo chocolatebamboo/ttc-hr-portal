@@ -5,10 +5,12 @@ import { toErrorResponse } from "@/lib/api-errors";
 
 /**
  * POST /api/admin/shifts/[shiftId]/approve-change — body { date?, startTime?, endTime?,
- * comment? }. Approves a pending CHANGE_REQUESTED — defaults to the team member's own proposed
- * date/time when given; passing date/startTime/endTime here lets the supervisor set (or
- * override) the final time instead. Authorization is assertCanManageShifts, checked inside
- * approveShiftChange itself.
+ * comment?, confirmOverCap? }. Approves a pending CHANGE_REQUESTED — defaults to the team
+ * member's own proposed date/time when given; passing date/startTime/endTime here lets the
+ * supervisor set (or override) the final time instead. Authorization is assertCanManageShifts,
+ * checked inside approveShiftChange itself. confirmOverCap (Nov 2026) is the admin's own
+ * deliberate "Approve anyway" past a weekly-hour-cap warning — see src/lib/hour-cap.ts's
+ * enforceWeeklyHourCap.
  */
 export async function POST(request: Request, ctx: RouteContext<"/api/admin/shifts/[shiftId]/approve-change">) {
   try {
@@ -21,6 +23,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/admin/shift
       startTime: typeof body.startTime === "string" ? body.startTime : undefined,
       endTime: typeof body.endTime === "string" ? body.endTime : undefined,
       comment: typeof body.comment === "string" ? body.comment : undefined,
+      confirmOverCap: body.confirmOverCap === true,
     });
     return NextResponse.json(dto);
   } catch (err) {
