@@ -24,6 +24,7 @@ import { InvalidTeamNoteError, TeamNoteNotFoundError } from "@/lib/team-notes";
 import { InvalidDateTaskError, DateTaskNotFoundError } from "@/lib/date-tasks";
 import { InvalidDirectMessageError, DirectMessageNotFoundError } from "@/lib/direct-messages";
 import { InvalidShiftError, ShiftNotFoundError } from "@/lib/shifts";
+import { WeeklyHourCapExceededError } from "@/lib/hour-cap";
 
 /** Maps our typed domain errors to the right HTTP status instead of leaking a 500 + stack. */
 export function toErrorResponse(err: unknown) {
@@ -32,6 +33,17 @@ export function toErrorResponse(err: unknown) {
   }
   if (err instanceof ForbiddenError) {
     return NextResponse.json({ error: err.message }, { status: 403 });
+  }
+  // CB, Nov 2026: a weekly-cap violation isn't a hard validation failure like the plain
+  // InvalidXError 400s below — it's a real conflict the admin gets to resolve in the moment
+  // ("Approve anyway" or back off), same 409 "needs a decision" status as a clock-action
+  // conflict. `code` + `violations` ride alongside the plain `error` message so the UI can show
+  // the real numbers and offer that override without re-parsing message text.
+  if (err instanceof WeeklyHourCapExceededError) {
+    return NextResponse.json(
+      { error: err.message, code: "WEEKLY_CAP_EXCEEDED", violations: err.violations },
+      { status: 409 }
+    );
   }
   if (err instanceof InvalidClockActionError || err instanceof InvalidReviewActionError) {
     return NextResponse.json({ error: err.message }, { status: 409 });
