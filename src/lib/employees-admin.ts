@@ -30,6 +30,7 @@ type EmployeeWithRelations = {
   role: string;
   employmentStatus: string;
   clocksIn: boolean;
+  weeklyHourCap: number | null;
   departmentId: string | null;
   department: { name: string } | null;
   supervisorId: string | null;
@@ -85,6 +86,7 @@ function toDTO(e: EmployeeWithRelations, invite: InviteStatus): EmployeeAdminRow
     role: e.role as Role,
     employmentStatus: e.employmentStatus as EmploymentStatus,
     clocksIn: e.clocksIn,
+    weeklyHourCap: e.weeklyHourCap,
     departmentId: e.departmentId,
     departmentName: e.department?.name ?? null,
     supervisorId: e.supervisorId,
@@ -117,6 +119,7 @@ const RELATIONS_SELECT = {
   role: true,
   employmentStatus: true,
   clocksIn: true,
+  weeklyHourCap: true,
   departmentId: true,
   department: { select: { name: true } },
   supervisorId: true,
@@ -293,6 +296,9 @@ export interface CreateEmployeeInput {
   /** Defaults true (see Employee.clocksIn's own doc comment in prisma/schema.prisma) —
    *  everyone clocks in unless HR explicitly turns this off for them. */
   clocksIn?: boolean;
+  /** See Employee.weeklyHourCap's own doc comment in prisma/schema.prisma. undefined/null both
+   *  mean "no cap" on create — there's no existing value to preserve yet. */
+  weeklyHourCap?: number | null;
   departmentName?: string;
   supervisorId?: string;
   hireDate: Date;
@@ -302,6 +308,13 @@ export interface CreateEmployeeInput {
   emergencyContactName?: string;
   emergencyContactPhone?: string;
   emergencyContactRelation?: string;
+}
+
+function assertValidWeeklyHourCap(value: number | null | undefined): void {
+  if (value === null || value === undefined) return;
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new InvalidEmployeeError("Weekly hour cap must be a positive number, or left blank for no cap.");
+  }
 }
 
 /**
@@ -329,6 +342,7 @@ export async function createEmployee(actor: CurrentEmployee, input: CreateEmploy
   if (input.role === "SUPER_ADMIN" && actor.role !== "SUPER_ADMIN") {
     throw new InvalidEmployeeError("Only a Super Admin can grant the Super Admin role.");
   }
+  assertValidWeeklyHourCap(input.weeklyHourCap);
 
   const { user } = await ensureAuthUser(ttcEmail, `${firstName} ${lastName}`);
 
@@ -354,6 +368,7 @@ export async function createEmployee(actor: CurrentEmployee, input: CreateEmploy
           role: input.role,
           employmentStatus: input.employmentStatus ?? "ACTIVE",
           clocksIn: input.clocksIn ?? true,
+          weeklyHourCap: input.weeklyHourCap ?? null,
           departmentId: department?.id ?? null,
           supervisorId: input.supervisorId || null,
           hireDate: input.hireDate,
@@ -387,6 +402,10 @@ export interface UpdateEmployeeInput {
   employmentStatus: EmploymentStatus;
   /** See CreateEmployeeInput.clocksIn's own doc comment. */
   clocksIn: boolean;
+  /** See Employee.weeklyHourCap's own doc comment in prisma/schema.prisma. null clears an
+   *  existing cap back to "no cap" — same explicit-null-means-clear convention departmentName/
+   *  supervisorId already use just below (via `|| null`). */
+  weeklyHourCap?: number | null;
   departmentName?: string;
   supervisorId?: string;
   hireDate: Date;
@@ -429,6 +448,7 @@ export async function updateEmployee(
   if (employeeId === actor.id && !ADMIN_ROLES.includes(input.role)) {
     throw new InvalidEmployeeError("You can't remove your own admin access — ask another admin to do it.");
   }
+  assertValidWeeklyHourCap(input.weeklyHourCap);
 
   return withRlsContext({ employeeId: actor.id, role: actor.role }, async (tx) => {
     const existing = await tx.employee.findUnique({ where: { id: employeeId } });
@@ -458,6 +478,7 @@ export async function updateEmployee(
         role: input.role,
         employmentStatus: input.employmentStatus,
         clocksIn: input.clocksIn,
+        weeklyHourCap: input.weeklyHourCap ?? null,
         departmentId: department?.id ?? null,
         supervisorId: input.supervisorId || null,
         hireDate: input.hireDate,
