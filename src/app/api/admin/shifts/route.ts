@@ -44,8 +44,10 @@ export async function GET(request: NextRequest) {
 }
 
 /** POST /api/admin/shifts — "Create a shift manually when needed." Body: { employeeId, date,
- *  startTime, endTime, note? }. Authorization (is the caller this employee's supervisor, or
- *  admin?) is assertCanManageShifts, checked inside createShiftManually itself. */
+ *  startTime, endTime, note?, confirmOverCap? }. Authorization (is the caller this employee's
+ *  supervisor, or admin?) is assertCanManageShifts, checked inside createShiftManually itself.
+ *  confirmOverCap (Nov 2026) is the admin's own deliberate "Approve anyway" past a weekly-hour-
+ *  cap warning — see src/lib/hour-cap.ts's enforceWeeklyHourCap. */
 export async function POST(request: NextRequest) {
   try {
     const employee = await requireEmployee();
@@ -64,6 +66,7 @@ export async function POST(request: NextRequest) {
       startTime: body.startTime,
       endTime: body.endTime,
       note: typeof body.note === "string" ? body.note : undefined,
+      confirmOverCap: body.confirmOverCap === true,
     });
 
     return NextResponse.json(dto, { status: 201 });
