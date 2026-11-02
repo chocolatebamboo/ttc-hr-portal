@@ -36,6 +36,10 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/admin/empl
       role: body.role,
       employmentStatus: body.employmentStatus,
       clocksIn: typeof body.clocksIn === "boolean" ? body.clocksIn : true,
+      weeklyHourCap:
+        body.weeklyHourCap === null || body.weeklyHourCap === undefined || body.weeklyHourCap === ""
+          ? null
+          : Number(body.weeklyHourCap),
       departmentName: typeof body.departmentName === "string" ? body.departmentName : undefined,
       supervisorId: typeof body.supervisorId === "string" && body.supervisorId ? body.supervisorId : undefined,
       hireDate,
